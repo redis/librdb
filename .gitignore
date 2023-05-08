@@ -1,0 +1,15 @@
+bin/*
+lib/*
+.idea/*
+/**/*.o
+/**/*.d
+
+test/log/*
+test/tmp/*
+test/test_static_lib
+test/test_lib
+
+examples/example1
+examples/dumps/*.json
+
+
