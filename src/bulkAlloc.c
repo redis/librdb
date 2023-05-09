@@ -139,7 +139,7 @@ static void serPoolAllocNew(RdbParser *p, size_t len, BulkType type, char *refBu
  * few cases that it will allocate it on heap is when it needs to preserve data
  * across states.
  */
-BulkInfo *serPoolAlloc(RdbParser *p, size_t len, AllocTypeRq typeRq, RdbBulk refBuf) {
+BulkInfo *serPoolAlloc(RdbParser *p, size_t len, AllocTypeRq typeRq, char *refBuf) {
     BulkInfo *binfo;
     SerializedPool *sp = p->cache;
 
@@ -215,7 +215,7 @@ void serPoolPrintDbg(RdbParser *p) {
     printf("\n*********************************************************\n");
 }
 
-RdbBulkCopy serPoolCloneItem(RdbParser *p, BulkInfo *binfo) {
+RdbBulkCopy bulkClone(RdbParser *p, BulkInfo *binfo) {
     size_t lenIncNewline = binfo->len + 1;
     switch(binfo->bulkType) {
         case BULK_TYPE_HEAP: {
@@ -245,14 +245,14 @@ RdbBulkCopy serPoolCloneItem(RdbParser *p, BulkInfo *binfo) {
 
                 default:
                     RDB_reportError(p, RDB_ERR_INVALID_BULK_ALLOC_TYPE,
-                        "serPoolCloneItem(): Invalid bulk allocation type: %d", p->mem.bulkAllocType);
+                        "bulkClone(): Invalid bulk allocation type: %d", p->mem.bulkAllocType);
                     return NULL;
             }
         }
 
         default:
             RDB_reportError(p, RDB_ERR_INVALID_BULK_ALLOC_TYPE,
-                "serPoolCloneItem() Invalid bulk allocation type: %d", binfo->bulkType);
+                "bulkClone() Invalid bulk allocation type: %d", binfo->bulkType);
             return NULL;
     }
 }
@@ -423,12 +423,12 @@ static inline BulkType resolveAllocTypeUnmanaged(RdbParser *p, AllocUnmngTypeRq 
     return rqAlloc2spAllocType[rq][p->mem.bulkAllocType];
 }
 
-void allocUnmanagedBulk(RdbParser *p, size_t len, AllocUnmngTypeRq rq, char *refBuf, BulkInfo *bi) {
+void unmngAllocBulk(RdbParser *p, size_t len, AllocUnmngTypeRq rq, char *refBuf, BulkInfo *bi) {
     BulkType type = resolveAllocTypeUnmanaged(p, rq);
     serPoolAllocNew(p, len, type, refBuf, bi);
 }
 
-void freeUnmanagedBulk(RdbParser *p, BulkInfo *binfo) {
+void unmngFreeBulk(RdbParser *p, BulkInfo *binfo) {
 
     if (unlikely(binfo->ref == NULL))
         return;

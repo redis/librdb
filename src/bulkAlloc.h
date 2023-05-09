@@ -62,24 +62,20 @@
 
 #include "parser.h"
 
-/* creation and destroy */
+/*** serialized pool ***/
 SerializedPool *serPoolInit(RdbMemAlloc *mem);
 void serPoolRelease(RdbParser *p);
-
-/* allocation, flush & rollback */
-BulkInfo *serPoolAlloc(RdbParser *p, size_t len, AllocTypeRq typeRq, RdbBulk refBuf);
+BulkInfo *serPoolAlloc(RdbParser *p, size_t len, AllocTypeRq typeRq, char *refBuf);
 void serPoolFlush(RdbParser *p);
 void serPoolRollback(RdbParser *p);
-
-/* cloning RdbBulk */
-RdbBulkCopy serPoolCloneItem(RdbParser *p, BulkInfo *binfo);
-
-/* debug */
 void serPoolPrintDbg(RdbParser *p);
 int serPoolIsNewNextAllocDbg(RdbParser *p);
 
-/* Unmanaged */
-void allocUnmanagedBulk(RdbParser *p, size_t len, AllocUnmngTypeRq rq, char *refBuf, BulkInfo *bi);
-void freeUnmanagedBulk(RdbParser *p, BulkInfo *binfo);
+/*** Unmanaged allocation ***/
+void unmngAllocBulk(RdbParser *p, size_t len, AllocUnmngTypeRq rq, char *refBuf, BulkInfo *bi);
+void unmngFreeBulk(RdbParser *p, BulkInfo *binfo);
+
+/* cloning RdbBulk */
+RdbBulkCopy bulkClone(RdbParser *p, BulkInfo *binfo);
 
 #endif /*BULK_ALLOC_H*/
