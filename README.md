@@ -74,8 +74,8 @@ The **Reader** gives interface to the parser to access the RDB source. As first 
 
 Possible extensions might be reading from S3, gz file, or a live redis instance. 
 
-This block is optional. As an alternative, the parser can be feed with chunks of data that 
-holds RDB payload.
+This block is optional. As an alternative, the parser can be fed with chunks of data that 
+hold RDB payload.
 
 ### Parser
 The **Parser** is the core engine. It will parse RDB file and trigger registered handlers.
