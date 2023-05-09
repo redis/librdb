@@ -129,7 +129,7 @@ _LIBRDB_API RdbParser *RDB_createParserRdb(RdbMemAlloc *memAlloc) {
 }
 
 _LIBRDB_API void RDB_deleteParser(RdbParser *p) {
-    BulkPool *sp = p->cache;
+    BulkPool *pool = p->cache;
 
     bulkUnmanagedFree(p, &p->callSubElm.bulkResult);
 
@@ -141,7 +141,7 @@ _LIBRDB_API void RDB_deleteParser(RdbParser *p) {
     /* release all handlers */
     releaseHandlers(p, p->firstHandlers);
 
-    if (sp) bulkPoolRelease(p);
+    if (pool) bulkPoolRelease(p);
     p->mem.free(p);
 }
 
