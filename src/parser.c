@@ -131,7 +131,7 @@ _LIBRDB_API RdbParser *RDB_createParserRdb(RdbMemAlloc *memAlloc) {
 _LIBRDB_API void RDB_deleteParser(RdbParser *p) {
     SerializedPool *sp = p->cache;
 
-    freeUnmanagedBulk(p, &p->callSubElm.bulkResult);
+    unmngFreeBulk(p, &p->callSubElm.bulkResult);
 
     parserRawRelease(p);
 
@@ -241,7 +241,7 @@ _LIBRDB_API RdbBulkCopy RDB_bulkClone(RdbParser *p, RdbBulk b) {
 
     for (int i = 0 ; i < p->appCbCtx.numBulks ; ++i) {
         if (likely(p->appCbCtx.bulks[i]->ref == b))
-            return serPoolCloneItem(p, p->appCbCtx.bulks[i]);
+            return bulkClone(p, p->appCbCtx.bulks[i]);
     }
 
     RDB_reportError(p, RDB_ERR_INVALID_BULK_CLONE_REQUEST,
@@ -669,7 +669,7 @@ RdbStatus subElementCall(RdbParser *p, ParsingElementType next, int returnState)
     assert(p->callSubElm.callerElm == PE_MAX); /* prev sub-element flow ended */
 
     /* release bulk from previous flow of subElement */
-    freeUnmanagedBulk(p, &p->callSubElm.bulkResult);
+    unmngFreeBulk(p, &p->callSubElm.bulkResult);
 
     p->callSubElm.callerElm = p->parsingElement;
     p->callSubElm.stateToReturn = returnState;

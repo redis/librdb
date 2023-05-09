@@ -55,7 +55,7 @@ void parserRawRelease(RdbParser *p) {
 
     if (ctx->bulkArray) {
         for (int i = 0; i <= ctx->curBulkIndex ; ++i)
-            freeUnmanagedBulk(p, ctx->bulkArray + i);
+            unmngFreeBulk(p, ctx->bulkArray + i);
         RDB_free(p, ctx->bulkArray);
     }
 }
@@ -306,13 +306,13 @@ RdbStatus elementRawString(RdbParser *p) {
 
                 int strLen = ll2string(buf, sizeof(buf), val);
 
-                allocUnmanagedBulk(p, strLen, UNMNG_RQ_ALLOC, NULL, &binfoDec);
+                unmngAllocBulk(p, strLen, UNMNG_RQ_ALLOC, NULL, &binfoDec);
                 memcpy(binfoDec.ref, buf, strLen);
                 return subElementReturn(p, &binfoDec);
             }
 
             if (strCtx->encoding == RDB_ENC_LZF) {
-                allocUnmanagedBulk(p, strCtx->uclen, UNMNG_RQ_ALLOC, NULL, &binfoDec);
+                unmngAllocBulk(p, strCtx->uclen, UNMNG_RQ_ALLOC, NULL, &binfoDec);
 
                 if (lzf_decompress(binfoEnc->ref, strCtx->len, binfoDec.ref, strCtx->uclen) != strCtx->uclen) {
                     RDB_reportError(p, RDB_ERR_STRING_INVALID_LZF_COMPRESSED,
@@ -425,7 +425,7 @@ static RdbStatus aggMakeRoom(RdbParser *p, size_t numBytesRq) {
     ++(ctx->curBulkIndex);
     ++currBuff;
 
-    allocUnmanagedBulk(p, nextBufSize, UNMNG_RQ_ALLOC_APP_BULK, NULL, currBuff);
+    unmngAllocBulk(p, nextBufSize, UNMNG_RQ_ALLOC_APP_BULK, NULL, currBuff);
     ctx->at = ctx->bulkArray[ctx->curBulkIndex].ref;
     return RDB_STATUS_OK;
 }
@@ -435,7 +435,7 @@ static inline void aggFlushBulks(RdbParser *p) {
 
     /* skip first static buffer */
     for (int i = 0; i <= ctx->curBulkIndex ; ++i)
-        freeUnmanagedBulk(p, ctx->bulkArray + i);
+        unmngFreeBulk(p, ctx->bulkArray + i);
 }
 
 static inline void aggAllocFirstBulk(RdbParser *p) {
@@ -447,7 +447,7 @@ static inline void aggAllocFirstBulk(RdbParser *p) {
          * function then it will be a waste to use "internal buffer" and then copy
          * it to "external buffer" (in order to pass RdbBulk to callbacks). Better
          * to allocate from start "external buffer". */
-        allocUnmanagedBulk(p,
+        unmngAllocBulk(p,
                            RAW_AGG_FIRST_EXTERN_BUFF_LEN,
                            UNMNG_RQ_ALLOC_APP_BULK,
                            NULL,
@@ -458,7 +458,7 @@ static inline void aggAllocFirstBulk(RdbParser *p) {
          * buffer than the case that RDB_BULK_ALLOC_EXTERN is configured, because
          * the buffer is static and not really allocated each time. '-1' is because
          * the '\0' termination which is not counted.  */
-        allocUnmanagedBulk(p,
+        unmngAllocBulk(p,
                            RAW_AGG_FIRST_STATIC_BUFF_LEN - 1,
                            UNMNG_RQ_ALLOC_APP_BULK_REF,
                            ctx->staticBulk,
