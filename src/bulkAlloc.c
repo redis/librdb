@@ -9,12 +9,12 @@
 #define INIT_QUEUE_SIZE 20
 #define BULK_MAGIC 0xdead
 
-typedef struct SerializedStack {
+typedef struct BulkStack {
     int size;
     char *buf;
     char *writePtr;
     RdbMemAlloc mem;
-} SerializedStack;
+} BulkStack;
 
 /* Heap allocation (with refcount) */
 typedef struct {
@@ -22,30 +22,33 @@ typedef struct {
     unsigned short refcount;
 } BulkHeapHdr;
 
-struct SerializedPool {
+struct BulkPool {
     BulkInfo *queue;
     int writeIdx;
     int readIdx;
     int queueSize;
 
     RdbMemAlloc mem;
-    SerializedStack *stack;
+    BulkStack *stack;
 };
 
-/* Serialized Pool */
-static inline BulkInfo *serPoolEnqueue(SerializedPool *sp);
-static inline BulkType serPoolResolveAllocType(RdbParser *p, AllocTypeRq typeRq);
+/* BulkPool */
+static inline BulkInfo *bulkPoolEnqueue(BulkPool *pool);
+static inline BulkType bulkPoolResolveAllocType(RdbParser *p, AllocTypeRq rq);
 
-/* Heap bulk */
-static inline RdbBulk heapBulkAlloc(RdbParser *p, size_t size);
-static inline RdbBulk heapBulkIncrRef(RdbBulk b);
-static inline void heapBulkDecrRef(RdbParser *p, RdbBulk b);
+/* BulkHeap */
+static inline RdbBulk bulkHeapAlloc(RdbParser *p, size_t size);
+static inline RdbBulk bulkHeapIncrRef(RdbBulk b);
+static inline void bulkHeapDecrRef(RdbParser *p, RdbBulk b);
 
-/* Serialized Stack */
-static RdbBulk serStackAlloc(SerializedStack *stack, unsigned short buf_size);
-static inline void serStackFlush(SerializedStack *stack);
-static SerializedStack * sertackInit(RdbMemAlloc *mem, int size);
-static void serStackRelease(SerializedStack *stack);
+/* BulkStack */
+static RdbBulk bulkStackAlloc(BulkStack *stack, unsigned short buf_size);
+static inline void bulkStackFlush(BulkStack *stack);
+static BulkStack * bulkStackInit(RdbMemAlloc *mem, int size);
+static void bulkStackRelease(BulkStack *stack);
+
+/* BulkUnmanaged */
+static inline BulkType bulkUnmanagedResolveAllocType(RdbParser *p, AllocUnmngTypeRq rq);
 
 /*** LIB API functions ***/
 
@@ -56,7 +59,7 @@ _LIBRDB_API void RDB_bulkFree(RdbParser *p, RdbBulkCopy b) {
              * calling to RDB_bulkClone() will return allocation on heap
              */
         case RDB_BULK_ALLOC_HEAP:
-            heapBulkDecrRef(p, (RdbBulk) b);
+            bulkHeapDecrRef(p, (RdbBulk) b);
             break;
         case RDB_BULK_ALLOC_EXTERN:
         case RDB_BULK_ALLOC_EXTERN_OPT:
@@ -69,31 +72,31 @@ _LIBRDB_API void RDB_bulkFree(RdbParser *p, RdbBulkCopy b) {
     }
 }
 
-/*** Serialized Pool ***/
+/*** BulkPool ***/
 
-SerializedPool *serPoolInit(RdbMemAlloc *mem) {
+BulkPool *bulkPoolInit(RdbMemAlloc *mem) {
 
-    SerializedPool *sp = (SerializedPool *) mem->malloc(sizeof(SerializedPool));
-    sp->queue = (BulkInfo *) mem->malloc(INIT_QUEUE_SIZE * sizeof(BulkInfo));
-    sp->readIdx = sp->writeIdx = 0;
-    sp->queueSize = INIT_QUEUE_SIZE;
-    sp->stack = sertackInit(mem, STACK_SIZE);
-    sp->mem = *mem;
-    return sp;
+    BulkPool *pool = (BulkPool *) mem->malloc(sizeof(BulkPool));
+    pool->queue = (BulkInfo *) mem->malloc(INIT_QUEUE_SIZE * sizeof(BulkInfo));
+    pool->readIdx = pool->writeIdx = 0;
+    pool->queueSize = INIT_QUEUE_SIZE;
+    pool->stack = bulkStackInit(mem, STACK_SIZE);
+    pool->mem = *mem;
+    return pool;
 }
 
-void serPoolRelease(RdbParser *p) {
-    SerializedPool *sp = p->cache;
-    if (!sp) return;
+void bulkPoolRelease(RdbParser *p) {
+    BulkPool *pool = p->cache;
+    if (!pool) return;
 
-    serPoolFlush(p);
-    RDB_free(p, sp->queue);
-    serStackRelease(sp->stack);
-    RDB_free(p, sp);
+    bulkPoolFlush(p);
+    RDB_free(p, pool->queue);
+    bulkStackRelease(pool->stack);
+    RDB_free(p, pool);
     p->cache = NULL;
 }
 
-static void serPoolAllocNew(RdbParser *p, size_t len, BulkType type, char *refBuf, BulkInfo *binfo) {
+static void bulkPoolAllocNew(RdbParser *p, size_t len, BulkType type, char *refBuf, BulkInfo *binfo) {
     size_t lenIncNewline = len + 1;
     binfo->len = len;
     binfo->written = 0;
@@ -101,14 +104,14 @@ static void serPoolAllocNew(RdbParser *p, size_t len, BulkType type, char *refBu
     switch(type) {
         case BULK_TYPE_STACK:
             if ((lenIncNewline < LEN_ALLOC_FROM_STACK_MAX_SIZE) &&
-                (binfo->ref = serStackAlloc(p->cache->stack, lenIncNewline)) != NULL) {
+                (binfo->ref = bulkStackAlloc(p->cache->stack, lenIncNewline)) != NULL) {
                 binfo->bulkType = BULK_TYPE_STACK;
                 break;
             }
 
             /* fall through - `len` too big or stack is full. Alloc from heap instead */
         case BULK_TYPE_HEAP:
-            binfo->ref = heapBulkAlloc(p, lenIncNewline);
+            binfo->ref = bulkHeapAlloc(p, lenIncNewline);
             binfo->bulkType = BULK_TYPE_HEAP;
             break;
 
@@ -124,8 +127,8 @@ static void serPoolAllocNew(RdbParser *p, size_t len, BulkType type, char *refBu
             break;
 
         default:
-            RDB_reportError(p, RDB_ERR_SP_INVALID_ALLOCATION_TYPE,
-                           "serPoolAllocNew() Serialized pool received invalid allocation type request: %d", type);
+            RDB_reportError(p, RDB_ERR_BULK_ALLOC_INVALID_TYPE,
+                            "bulkPoolAllocNew() received invalid allocation type request: %d", type);
             assert(0);
     }
 }
@@ -139,79 +142,79 @@ static void serPoolAllocNew(RdbParser *p, size_t len, BulkType type, char *refBu
  * few cases that it will allocate it on heap is when it needs to preserve data
  * across states.
  */
-BulkInfo *serPoolAlloc(RdbParser *p, size_t len, AllocTypeRq typeRq, char *refBuf) {
+BulkInfo *bulkPoolAlloc(RdbParser *p, size_t len, AllocTypeRq typeRq, char *refBuf) {
     BulkInfo *binfo;
-    SerializedPool *sp = p->cache;
+    BulkPool *pool = p->cache;
 
     /* if no cached buffers in queue (i.e. first time to read this data)
      * then allocate new buffer and fill it from reader */
-    if (sp->readIdx == sp->writeIdx) {
-        binfo = serPoolEnqueue(sp);
-        BulkType type = serPoolResolveAllocType(p, typeRq);
-        serPoolAllocNew(p, len, type, refBuf, binfo);
+    if (pool->readIdx == pool->writeIdx) {
+        binfo = bulkPoolEnqueue(pool);
+        BulkType type = bulkPoolResolveAllocType(p, typeRq);
+        bulkPoolAllocNew(p, len, type, refBuf, binfo);
     } else {
-        binfo = &(sp->queue[sp->readIdx]);
+        binfo = &(pool->queue[pool->readIdx]);
 
         /* assert allocation request (after rollback) has exact same length as before */
-        if (len != sp->queue[sp->readIdx].len)
-            assert (len == sp->queue[sp->readIdx].len);
+        if (len != pool->queue[pool->readIdx].len)
+            assert (len == pool->queue[pool->readIdx].len);
     }
 
 
-    ++sp->readIdx;
+    ++pool->readIdx;
     return binfo;
 }
 
-void serPoolFlush(RdbParser *p) {
-    SerializedPool *sp = p->cache;
-    for (int i = 0 ; i < sp->writeIdx ; ++i) {
+void bulkPoolFlush(RdbParser *p) {
+    BulkPool *pool = p->cache;
+    for (int i = 0 ; i < pool->writeIdx ; ++i) {
         /* release all bulks that are not allocated in stack */
-        switch(sp->queue[i].bulkType) {
+        switch(pool->queue[i].bulkType) {
             case BULK_TYPE_REF:
                 break;
             case BULK_TYPE_STACK:
                 break;
             case BULK_TYPE_HEAP:
-                heapBulkDecrRef(p, sp->queue[i].ref);
+                bulkHeapDecrRef(p, pool->queue[i].ref);
                 break;
             case BULK_TYPE_EXTERN:
-                sp->mem.appBulk.free(sp->queue[i].ref);
+                pool->mem.appBulk.free(pool->queue[i].ref);
                 break;
             default:
                 RDB_reportError(p, RDB_ERR_INVALID_BULK_ALLOC_TYPE,
-                    "serPoolFlush(): Invalid bulk allocation type: %d", sp->queue[i].bulkType);
+                                "bulkPoolFlush(): Invalid bulk allocation type: %d", pool->queue[i].bulkType);
                 break;
         }
     }
-    sp->readIdx = sp->writeIdx = 0;
-    serStackFlush(sp->stack);
+    pool->readIdx = pool->writeIdx = 0;
+    bulkStackFlush(pool->stack);
 }
 
-void serPoolRollback(RdbParser *p) {
-    SerializedPool *sp = p->cache;
-    sp->readIdx = 0;
+void bulkPoolRollback(RdbParser *p) {
+    BulkPool *pool = p->cache;
+    pool->readIdx = 0;
 }
 
-void serPoolPrintDbg(RdbParser *p) {
-    SerializedPool *sp = p->cache;
+void bulkPoolPrintDbg(RdbParser *p) {
+    BulkPool *pool = p->cache;
     printf("*********************************************************\n");
-    printf("Serialized Pool Info:\n");
-    printf("  queue size: %d\n", sp->queueSize);
-    printf("  queue address: %p\n", (void *) sp->queue);
-    printf("  queue read index: %d\n", sp->readIdx);
-    printf("  queue write index: %d\n", sp->writeIdx);
-    printf("  stack start address: %p\n", sp->stack->buf);
-    printf("  stack write address: %p\n", sp->stack->writePtr);
+    printf("BulkPool Info:\n");
+    printf("  queue size: %d\n", pool->queueSize);
+    printf("  queue address: %p\n", (void *) pool->queue);
+    printf("  queue read index: %d\n", pool->readIdx);
+    printf("  queue write index: %d\n", pool->writeIdx);
+    printf("  stack start address: %p\n", pool->stack->buf);
+    printf("  stack write address: %p\n", pool->stack->writePtr);
 
-    printf("Serialized Pool - Queue items: \n");
-    for ( int i = 0; i != sp->writeIdx ; ++i)
+    printf("BulkPool - Queue items: \n");
+    for (int i = 0; i != pool->writeIdx ; ++i)
         printf(" - [allocType=%d] [written=%lu] %p: \"0x%X 0x%X ...\":\"%s\" (len=%lu) \n",
-               sp->queue[i].bulkType,
-               sp->queue[i].written,
-               sp->queue[i].ref,
-               ((unsigned char *)sp->queue[i].ref)[0],
-               ((unsigned char *)sp->queue[i].ref)[1],
-               (unsigned char *)sp->queue[i].ref, sp->queue[i].len);
+               pool->queue[i].bulkType,
+               pool->queue[i].written,
+               pool->queue[i].ref,
+               ((unsigned char *)pool->queue[i].ref)[0],
+               ((unsigned char *)pool->queue[i].ref)[1],
+               (unsigned char *)pool->queue[i].ref, pool->queue[i].len);
     printf("\n*********************************************************\n");
 }
 
@@ -220,7 +223,7 @@ RdbBulkCopy bulkClone(RdbParser *p, BulkInfo *binfo) {
     switch(binfo->bulkType) {
         case BULK_TYPE_HEAP: {
             /* if buffer allocated on heap, just incref counter */
-            return (RdbBulkCopy) heapBulkIncrRef(binfo->ref);
+            return (RdbBulkCopy) bulkHeapIncrRef(binfo->ref);
         }
         case BULK_TYPE_EXTERN:
             /* use external clone() */
@@ -235,7 +238,7 @@ RdbBulkCopy bulkClone(RdbParser *p, BulkInfo *binfo) {
             switch (p->mem.bulkAllocType) {
                 case RDB_BULK_ALLOC_STACK:
                 case RDB_BULK_ALLOC_HEAP:
-                    bulkcopy = heapBulkAlloc(p, lenIncNewline);
+                    bulkcopy = bulkHeapAlloc(p, lenIncNewline);
                     return memcpy(bulkcopy, binfo->ref, lenIncNewline);
 
                 case RDB_BULK_ALLOC_EXTERN:
@@ -257,23 +260,23 @@ RdbBulkCopy bulkClone(RdbParser *p, BulkInfo *binfo) {
     }
 }
 
-int serPoolIsNewNextAllocDbg(RdbParser *p) {
-    SerializedPool *sp = p->cache;
-    return (sp->writeIdx == sp->readIdx) ? 1 : 0;
+int bulkPoolIsNewNextAllocDbg(RdbParser *p) {
+    BulkPool *pool = p->cache;
+    return (pool->writeIdx == pool->readIdx) ? 1 : 0;
 }
 
-static inline BulkInfo *serPoolEnqueue(SerializedPool *sp) {
-    sp->writeIdx += 1;
-    if (unlikely(sp->writeIdx == sp->queueSize)) {
-        sp->queueSize *= 2;
-        sp->queue = realloc(sp->queue, sp->queueSize * sizeof(BulkInfo));
+static inline BulkInfo *bulkPoolEnqueue(BulkPool *pool) {
+    pool->writeIdx += 1;
+    if (unlikely(pool->writeIdx == pool->queueSize)) {
+        pool->queueSize *= 2;
+        pool->queue = realloc(pool->queue, pool->queueSize * sizeof(BulkInfo));
     }
-    return &(sp->queue[sp->writeIdx-1]);
+    return &(pool->queue[pool->writeIdx - 1]);
 }
 
-static inline BulkType serPoolResolveAllocType(RdbParser *p, AllocTypeRq typeRq) {
+static inline BulkType bulkPoolResolveAllocType(RdbParser *p, AllocTypeRq typeRq) {
 
-    static const BulkType rqAlloc2spAllocType[RQ_ALLOC_MAX][RDB_BULK_ALLOC_MAX] = {
+    static const BulkType rqAlloc2bulkType[RQ_ALLOC_MAX][RDB_BULK_ALLOC_MAX] = {
 
         /* parser request alloc for internal use. Better try alloc from stack than heap */
         [RQ_ALLOC] = {
@@ -325,13 +328,13 @@ static inline BulkType serPoolResolveAllocType(RdbParser *p, AllocTypeRq typeRq)
         },
     };
 
-    return rqAlloc2spAllocType[typeRq][p->mem.bulkAllocType];
+    return rqAlloc2bulkType[typeRq][p->mem.bulkAllocType];
 }
 
-/*** Serialized Stack ***/
+/*** BulkStack ***/
 
-static SerializedStack * sertackInit(RdbMemAlloc *mem, int size) {
-    SerializedStack *stack = (SerializedStack *) mem->malloc(sizeof(SerializedStack));
+static BulkStack * bulkStackInit(RdbMemAlloc *mem, int size) {
+    BulkStack *stack = (BulkStack *) mem->malloc(sizeof(BulkStack));
     stack->buf = mem->malloc(size);
     stack->writePtr = stack->buf;
     stack->size = size;
@@ -339,12 +342,12 @@ static SerializedStack * sertackInit(RdbMemAlloc *mem, int size) {
     return stack;
 }
 
-static void serStackRelease(SerializedStack *stack) {
+static void bulkStackRelease(BulkStack *stack) {
     stack->mem.free(stack->buf);
     stack->mem.free(stack);
 }
 
-static RdbBulk serStackAlloc(SerializedStack *stack, unsigned short buf_size) {
+static RdbBulk bulkStackAlloc(BulkStack *stack, unsigned short buf_size) {
     int written = stack->writePtr - stack->buf;
 
     if (unlikely( buf_size > stack->size - written)) {
@@ -356,13 +359,13 @@ static RdbBulk serStackAlloc(SerializedStack *stack, unsigned short buf_size) {
     return ptr;
 }
 
-static inline void serStackFlush(SerializedStack *stack) {
+static inline void bulkStackFlush(BulkStack *stack) {
     stack->writePtr = stack->buf;
 }
 
-/*** Heap Bulk ***/
+/*** BulkHeap ***/
 
-static inline RdbBulk heapBulkAlloc(RdbParser *p, size_t size) {
+static inline RdbBulk bulkHeapAlloc(RdbParser *p, size_t size) {
 
     BulkHeapHdr *header = (BulkHeapHdr *)RDB_alloc(p, sizeof(BulkHeapHdr) + size);
     header->magic = BULK_MAGIC;
@@ -370,7 +373,7 @@ static inline RdbBulk heapBulkAlloc(RdbParser *p, size_t size) {
     return (RdbBulk) (header + 1);
 }
 
-static inline void heapBulkDecrRef(RdbParser *p, RdbBulk b) {
+static inline void bulkHeapDecrRef(RdbParser *p, RdbBulk b) {
     BulkHeapHdr *header = (BulkHeapHdr *)b - 1;
     assert(header->magic == BULK_MAGIC);
     if (--header->refcount == 0) {
@@ -378,17 +381,17 @@ static inline void heapBulkDecrRef(RdbParser *p, RdbBulk b) {
     }
 }
 
-static inline RdbBulk heapBulkIncrRef(RdbBulk b) {
+static inline RdbBulk bulkHeapIncrRef(RdbBulk b) {
     BulkHeapHdr *header = (BulkHeapHdr *)b - 1;
     assert(header->magic == BULK_MAGIC);
     header->refcount++;
     return b;
 }
 
-/*** unmanaged allocations ***/
+/*** BulkUnmanaged ***/
 
-static inline BulkType resolveAllocTypeUnmanaged(RdbParser *p, AllocUnmngTypeRq rq) {
-    static const BulkType rqAlloc2spAllocType[UNMNG_RQ_ALLOC_MAX][RDB_BULK_ALLOC_MAX] = {
+static inline BulkType bulkUnmanagedResolveAllocType(RdbParser *p, AllocUnmngTypeRq rq) {
+    static const BulkType rqAlloc2bulkType[UNMNG_RQ_ALLOC_MAX][RDB_BULK_ALLOC_MAX] = {
 
         /* parser request alloc RdbBulk for internal use. Only alloc from heap
          * (Stack is flushed on each state transition) */
@@ -420,15 +423,15 @@ static inline BulkType resolveAllocTypeUnmanaged(RdbParser *p, AllocUnmngTypeRq 
         },
 
     };
-    return rqAlloc2spAllocType[rq][p->mem.bulkAllocType];
+    return rqAlloc2bulkType[rq][p->mem.bulkAllocType];
 }
 
-void unmngAllocBulk(RdbParser *p, size_t len, AllocUnmngTypeRq rq, char *refBuf, BulkInfo *bi) {
-    BulkType type = resolveAllocTypeUnmanaged(p, rq);
-    serPoolAllocNew(p, len, type, refBuf, bi);
+void bulkUnmanagedAlloc(RdbParser *p, size_t len, AllocUnmngTypeRq rq, char *refBuf, BulkInfo *bi) {
+    BulkType type = bulkUnmanagedResolveAllocType(p, rq);
+    bulkPoolAllocNew(p, len, type, refBuf, bi);
 }
 
-void unmngFreeBulk(RdbParser *p, BulkInfo *binfo) {
+void bulkUnmanagedFree(RdbParser *p, BulkInfo *binfo) {
 
     if (unlikely(binfo->ref == NULL))
         return;
@@ -438,7 +441,7 @@ void unmngFreeBulk(RdbParser *p, BulkInfo *binfo) {
             /* nothing to do */
             break;
         case BULK_TYPE_HEAP:
-            heapBulkDecrRef(p, binfo->ref);
+            bulkHeapDecrRef(p, binfo->ref);
             break;
         case BULK_TYPE_EXTERN:
             p->mem.appBulk.free(binfo->ref);
@@ -447,7 +450,7 @@ void unmngFreeBulk(RdbParser *p, BulkInfo *binfo) {
             /* fall through */
         default:
             RDB_reportError(p, RDB_ERR_INVALID_BULK_ALLOC_TYPE,
-                           "serPoolFlush(): Invalid bulk allocation type: %d", binfo->bulkType);
+                           "bulkUnmanagedFree(): Invalid bulk allocation type: %d", binfo->bulkType);
             break;
     }
     binfo->ref = NULL;

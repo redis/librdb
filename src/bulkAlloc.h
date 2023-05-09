@@ -1,25 +1,25 @@
 /*
  * This API propose two ways to allocate and release bulks of memory:
  *
- *  1) Unmanaged RdbBulk allocation
+ *  1) Unmanaged RdbBulk allocation (aka. BulkUnmanaged)
  *
  *  Unmanaged bulk allocation is a method of allocating memory where the parser
  *  manages the allocation and deallocation of memory rather than relying on a data
- *  structure like SerializedPool (which gets flushed on each state transition).
+ *  structure like the bulk-pool (Gets flushed on each state transition. more below).
  *  This method is useful when the application has RdbBulk allocations that needs
  *  to live behind current state of the parser.
  *
  *
- *  2) Serialized-Pool RdbBulk allocation (managed)
+ *  2) Bulk-pool (aka. BulkPool)
  *
- * This data structure is useful in the context of RDBParser that support asynchronous
- * execution (but not only). In such cases, the parser might receive only partial data and
- * needs to preserve its last valid state and return. SerializedPool helps preserve the
- * partial data already read from the RDB source, which cannot be re-read such as in
- * the case of streaming. The data can then be "replayed" later once more data becomes
- * available to complete the parsing-element state.
+ * This customized data structure is useful in the context of RDBParser that support
+ * asynchronous execution (but not only). In such cases, the parser might receive
+ * only partial data and needs to preserve its last valid state and return. BulkPool
+ * helps preserve the partial data already read from the RDB source, which cannot
+ * be re-read such as in the case of streaming. The data can then be "replayed"
+ * later once more data becomes available to complete the parsing-element state.
  *
- * The SerializedPool support 3 commands:
+ * The Bulk-Pool support 3 commands:
  *
  * a) Allocate   - Allocates memory per caller request and store a reference
  *                 to the allocation in a sequential queue.
@@ -29,31 +29,32 @@
  *                 the next item in the queue.
  * c) Flush      - Clean the entire queue and deletes corresponding referenced buffers.
  *
- * The SerializedPool utilizes three distinct types of allocators:
+ * The bulk-pool utilizes three distinct types of allocators:
  * a) Stack allocator
  * b) Heap allocator
- * c) External allocator.
+ * c) External allocator
  *
- * The Stack Allocator (SerializedStack) is specifically designed to work in tandem with
- * SerializedPool and supports the Allocate, Rollback, and Flush commands. When the
- * SerializedPool receives small allocation requests and the application has not
- * restricted allocation to a specific type, it prefers to allocate from the stack. If
- * the parser fails to reach a new state, SerializedStack will be rolled back in order to
- * replay. If the parser reaches a new state, then the stack will be flushed.
+ * The Stack Allocator  is specifically designed to work in tandem with the BulkPool
+ * and supports the Allocate, Rollback, and Flush commands. When the the pool
+ * receives small allocation requests and the application has not restricted
+ * allocation to a specific type, it prefers to allocate from the stack. If
+ * the parser fails to reach a new state, the stack will be rolled back in order
+ * to replay. If the parser reaches a new state, then the stack will be flushed
+ * along with the pool.
  *
- * The Heap Allocator (HeapBulk) allocates memory from the heap with refcount support.
+ * The Heap Allocator allocates memory from the heap with refcount support.
  *
- * The External Allocator is not mandatory and can be provided by the application client
- * to allocate only the buffers that will be passed to the application's callbacks. These
- * buffers are referred to as RQ_ALLOC_APP_BULK within the SerializedPool API.
+ * The External Allocator is not mandatory and can be provided by the application
+ * client to allocate only the buffers that will be passed to the application's
+ * callbacks. These buffers are referred to as RQ_ALLOC_APP_BULK within this API.
  *
- * In addition, serialized pool supports Reference allocator of a Bulk. It expects to
- * receive pre-allocated memory and record it as a referenced bulk. The first use case for
- * it is when there is allocated memory that is already initialized with data and the
- * parser just want to optimize and pass it as RdbBulk to callbacks. Another use case is
- * when memory was allocated, but it is not loaded with data yet by rdbLoad functions, then
- * by registration to SerializedPool it will be able to load it safely with rdbLoad functions
- * without worry from rollback flows.
+ * In addition, the pool supports Reference allocator of a Bulk. It expects to
+ * receive pre-allocated memory and record it as a referenced bulk. The first use
+ * case for it is when there is allocated memory that is already initialized with
+ * data and the parser just want to optimize and pass it as RdbBulk to callbacks.
+ * Another use case is when memory was allocated, but it is not loaded with data
+ * yet by rdbLoad functions, then by registration to the pool it will be able to
+ * load it safely with rdbLoad functions without worry from rollback flows.
  *
  */
 
@@ -62,18 +63,18 @@
 
 #include "parser.h"
 
-/*** serialized pool ***/
-SerializedPool *serPoolInit(RdbMemAlloc *mem);
-void serPoolRelease(RdbParser *p);
-BulkInfo *serPoolAlloc(RdbParser *p, size_t len, AllocTypeRq typeRq, char *refBuf);
-void serPoolFlush(RdbParser *p);
-void serPoolRollback(RdbParser *p);
-void serPoolPrintDbg(RdbParser *p);
-int serPoolIsNewNextAllocDbg(RdbParser *p);
+/*** BulkPool ***/
+BulkPool *bulkPoolInit(RdbMemAlloc *mem);
+void bulkPoolRelease(RdbParser *p);
+BulkInfo *bulkPoolAlloc(RdbParser *p, size_t len, AllocTypeRq typeRq, char *refBuf);
+void bulkPoolFlush(RdbParser *p);
+void bulkPoolRollback(RdbParser *p);
+void bulkPoolPrintDbg(RdbParser *p);
+int bulkPoolIsNewNextAllocDbg(RdbParser *p);
 
-/*** Unmanaged allocation ***/
-void unmngAllocBulk(RdbParser *p, size_t len, AllocUnmngTypeRq rq, char *refBuf, BulkInfo *bi);
-void unmngFreeBulk(RdbParser *p, BulkInfo *binfo);
+/*** BulkUnmanaged ***/
+void bulkUnmanagedAlloc(RdbParser *p, size_t len, AllocUnmngTypeRq rq, char *refBuf, BulkInfo *bi);
+void bulkUnmanagedFree(RdbParser *p, BulkInfo *binfo);
 
 /* cloning RdbBulk */
 RdbBulkCopy bulkClone(RdbParser *p, BulkInfo *binfo);

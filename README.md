@@ -298,7 +298,7 @@ be called again to continue parsing once more data become available.
 
 In such scenario, any incomplete parsing-element will preserve its current state. As for 
 any data that has already been read from the RDB reader - it cannot be read again from the 
-reader. To address this issue, a **serialized-pool** data structure is used to route all
+reader. To address this issue, a unique **bulk-pool** data structure is used to route all
 data being read from the RDB reader. It stores a reference to the allocations in a queue,
 and enable to **rollback** and replay later once more data becomes available, in an
 attempt to complete the parsing-element state. The **rollback** command basically rewinds 
@@ -307,11 +307,11 @@ provided to the caller, however, instead of creating new allocations, the alloca
 returns the next item in the queue. Otherwise, if the parser managed to reach a new 
 parsing-element state, then all cached data in the pool will be **flushed**. 
 
-Serialized-pool is also known as parsing-element's **cache**. To learn more about it, 
+The bulk-pool is also known as parsing-element's **cache**. To learn more about it, 
 refer to the comment at the start of the file [bulkAlloc.h](src/bulkAlloc.h).
 
 ### Parsing-Element states
-Having gained understanding of the importance of serialized-pool rollback and replay for
+Having gained understanding of the importance of bulk-pool rollback and replay for
 async parsing, it is necessary to address two crucial questions:
 
  1. If we are parsing, say a large list, is it necessary for the parser to rollback all 

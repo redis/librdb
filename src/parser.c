@@ -129,9 +129,9 @@ _LIBRDB_API RdbParser *RDB_createParserRdb(RdbMemAlloc *memAlloc) {
 }
 
 _LIBRDB_API void RDB_deleteParser(RdbParser *p) {
-    SerializedPool *sp = p->cache;
+    BulkPool *sp = p->cache;
 
-    unmngFreeBulk(p, &p->callSubElm.bulkResult);
+    bulkUnmanagedFree(p, &p->callSubElm.bulkResult);
 
     parserRawRelease(p);
 
@@ -141,7 +141,7 @@ _LIBRDB_API void RDB_deleteParser(RdbParser *p) {
     /* release all handlers */
     releaseHandlers(p, p->firstHandlers);
 
-    if (sp) serPoolRelease(p);
+    if (sp) bulkPoolRelease(p);
     p->mem.free(p);
 }
 
@@ -438,7 +438,7 @@ static RdbStatus parserMainLoop(RdbParser *p) {
     } else {
         /* If this loop become too much performance intensive, then we can optimize
          * certain transitions by avoiding passing through the main loop. It can be
-         * done by flushing the cache with function serPoolFlush(), and then make
+         * done by flushing the cache with function bulkPoolFlush(), and then make
          * direct call to next state */
         while ((status = p->pei[p->parsingElement].func(p)) == RDB_STATUS_OK);
     }
@@ -446,7 +446,7 @@ static RdbStatus parserMainLoop(RdbParser *p) {
 }
 
 static inline void rollbackCache(RdbParser *p) {
-    serPoolRollback(p);
+    bulkPoolRollback(p);
 }
 
 static inline RdbStatus nextParsingElementKeyValue(RdbParser *p,
@@ -521,7 +521,7 @@ static RdbStatus finalizeConfig(RdbParser *p, int isParseFromBuff) {
             p->readRdbFunc = readRdbFromReader;
     }
 
-    p->cache = serPoolInit(&p->mem);
+    p->cache = bulkPoolInit(&p->mem);
 
     chainHandlersAcrossLevels(p);
 
@@ -542,7 +542,7 @@ static void printParserState(RdbParser *p) {
     printf ("Parser element func name: %s\n", p->pei[p->parsingElement].funcname);
     printf ("Parser element func description: %s\n", p->pei[p->parsingElement].funcname);
     printf ("Parser element state:%d\n", p->elmCtx.state);
-    serPoolPrintDbg(p);
+    bulkPoolPrintDbg(p);
 }
 
 static void loggerCbDefault(RdbLogLevel l, const char *msg) {
@@ -579,7 +579,7 @@ RdbStatus allocFromCache(RdbParser *p,
 {
 
     /* pool adds termination of '\0' */
-    *binfo = serPoolAlloc(p, len, type, refBuf);
+    *binfo = bulkPoolAlloc(p, len, type, refBuf);
 
     if (unlikely( (*binfo)->ref == NULL)) {
         RDB_reportError(p, RDB_ERR_NO_MEMORY,
@@ -669,7 +669,7 @@ RdbStatus subElementCall(RdbParser *p, ParsingElementType next, int returnState)
     assert(p->callSubElm.callerElm == PE_MAX); /* prev sub-element flow ended */
 
     /* release bulk from previous flow of subElement */
-    unmngFreeBulk(p, &p->callSubElm.bulkResult);
+    bulkUnmanagedFree(p, &p->callSubElm.bulkResult);
 
     p->callSubElm.callerElm = p->parsingElement;
     p->callSubElm.stateToReturn = returnState;
@@ -1141,7 +1141,7 @@ RdbStatus rdbLoadString(RdbParser *p, AllocTypeRq type, char *refBuf, BulkInfo *
 
 /* simulate WAIT_MORE_DATA for each new read from RDB reader */
 static RdbStatus readRdbWaitMoreDataDbg(RdbParser *p, size_t len, AllocTypeRq type, char *refBuf, BulkInfo **binfo) {
-    if (serPoolIsNewNextAllocDbg(p)) {
+    if (bulkPoolIsNewNextAllocDbg(p)) {
         static uint64_t waitMoreDataCounterDbg = 0;
         if (++waitMoreDataCounterDbg % 2) {
             return RDB_STATUS_WAIT_MORE_DATA;
