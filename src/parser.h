@@ -61,7 +61,7 @@ inline void unused(void *dummy, ...) { (void)(dummy);}
   } while (0)
 
 typedef enum BulkType {
-    BULK_TYPE_STACK,    /* from SerializedStack */
+    BULK_TYPE_STACK,    /* from stack bulk */
     BULK_TYPE_HEAP,     /* from heap bulk */
     BULK_TYPE_EXTERN,   /* from external allocator */
     BULK_TYPE_REF,      /* Reference another memory bulk */
@@ -75,7 +75,7 @@ typedef struct BulkInfo {
     size_t written;
 } BulkInfo;
 
-/* Allocation requests from the parser to SerializedPools */
+/* Allocation requests from the parser to BulkPool */
 typedef enum {
     /* Allocate for internal use of the parser */
     RQ_ALLOC,
@@ -112,7 +112,7 @@ typedef enum ParsingElementType {
     PE_MAX
 } ParsingElementType;
 
-typedef struct SerializedPool SerializedPool; /* fwd decl */
+typedef struct BulkPool BulkPool; /* fwd decl */
 
 typedef RdbStatus (*ParsingElementFunc) (RdbParser *p);
 typedef RdbStatus (*ReadRdbFunc)(RdbParser *p, size_t len, AllocTypeRq type, char *refBuf, BulkInfo **out);
@@ -238,7 +238,7 @@ struct RdbParser {
     RawContext rawCtx;
 
     /*** caching ***/
-    SerializedPool *cache;   /* Cleared after each parsing-element state change */
+    BulkPool *cache;   /* Cleared after each parsing-element state change */
 
     /*** error reporting ***/
     RdbRes errorCode;
@@ -309,23 +309,23 @@ inline void registerAppBulkForNextCb(RdbParser *p, BulkInfo *binfo) {
     p->appCbCtx.bulks[p->appCbCtx.numBulks++] = binfo;
 }
 
-extern void serPoolFlush(RdbParser *p); /* avoid cyclic headers inclusion */
+extern void bulkPoolFlush(RdbParser *p); /* avoid cyclic headers inclusion */
 
 inline RdbStatus updateElementState(RdbParser *p, int newState) {
-    serPoolFlush(p);
+    bulkPoolFlush(p);
     p->elmCtx.state = newState;
     return RDB_STATUS_OK;
 }
 
 inline RdbStatus nextParsingElementState(RdbParser *p, ParsingElementType next, int st) {
-    serPoolFlush(p);
+    bulkPoolFlush(p);
     p->elmCtx.state = st;
     p->parsingElement = next;
     return RDB_STATUS_OK;
 }
 
 inline RdbStatus nextParsingElement(RdbParser *p, ParsingElementType next) {
-    serPoolFlush(p);
+    bulkPoolFlush(p);
     p->elmCtx.state = 0;
     p->parsingElement = next;
     return RDB_STATUS_OK;

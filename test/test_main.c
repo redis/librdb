@@ -115,6 +115,7 @@ int main(int argc, char *argv[]) {
     RUN_TEST_GROUP(group_rdb_to_json);
     RUN_TEST_GROUP(group_mem_management);
     RUN_TEST_GROUP(group_bulk_ops);
+
     RUN_TEST_GROUP(group_pause);
 
     printf ("\n*************** SIMULATING WAIT_MORE_DATA *******************\n");

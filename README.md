@@ -13,18 +13,6 @@ feedback on the design, API, and implementation to refine the project before pro
 with further development. Community contributions are welcome, yet please note that 
 the codebase is still undergoing significant changes and may evolve in the future.
 
-## Motivation behind this project
-There is a genuine need by the Redis community for a versatile RDB file parser that can 
-export data, perform data analysis, or merely extract raw data from RDB and RESTORE it 
-against a live Redis server. However, available parsers have shortcomings in some aspects 
-such as lack of long-term support, lagging far behind the latest Redis release, and 
-usually not being optimized for memory, performance, or high-traffic streaming for 
-production environments. Additionally, most of them are not written in C, which limits the 
-reuse of Redis components and potential to contribute back to Redis repo. To address these 
-issues, it is worthwhile to develop a new parser with a modern architecture, that maybe 
-can also challenge the current integrated RDB parser of Redis and even replace it in the 
-future.
-
 ## Getting Started
 To build and run tests, you need to have cmocka unit testing framework installed and then:
 
@@ -37,6 +25,18 @@ running tests:
     make example
 
 To see parser internal state printouts, execute the command `export LIBRDB_DEBUG_DATA=1` beforehand.
+
+## Motivation behind this project
+There is a genuine need by the Redis community for a versatile RDB file parser that can 
+export data, perform data analysis, or merely extract raw data from RDB and RESTORE it 
+against a live Redis server. However, available parsers have shortcomings in some aspects 
+such as lack of long-term support, lagging far behind the latest Redis release, and 
+usually not being optimized for memory, performance, or high-traffic streaming for 
+production environments. Additionally, most of them are not written in C, which limits the 
+reuse of Redis components and potential to contribute back to Redis repo. To address these 
+issues, it is worthwhile to develop a new parser with a modern architecture, that maybe 
+can also challenge the current integrated RDB parser of Redis and even replace it in the 
+future.
 
 ### Replacing the integrated RDB parser of Redis?
 It is necessary to address first the reasons and missing features in the available parser, 
@@ -72,8 +72,10 @@ The **Reader** gives interface to the parser to access the RDB source. As first 
    * Reading from a socket (Status: Todo)
    * User defined reader (Status: Done)
 
-   (Possible extensions might be reading from S3, gz file, or a live redis
-   instance)
+Possible extensions might be reading from S3, gz file, or a live redis instance. 
+
+This block is optional. As an alternative, the parser can be fed with chunks of data that 
+hold RDB payload.
 
 ### Parser
 The **Parser** is the core engine. It will parse RDB file and trigger registered handlers.
@@ -264,6 +266,20 @@ with the same offset it reached. This also implies that the buffer must remain p
 in such a scenario. Whereas it might seem redundant API to pass again the same values on
 resume, yet it highlights the required persistence of the reused buffer.
 
+### Memory optimization
+The optimization of memory usage is a major focus for the parser, which is also evident in 
+its API. The application can optionally choose not only to customize the malloc function 
+used internally by the parser, but also the method for allocating data passed to the 
+callbacks. This includes the options:
+1. Using parser internal stack
+2. Using parser internal heap allocation (with refcount support for zero-copy).
+3. Using external allocation
+4. Using external allocation unless data is already prefetched in memory.
+
+The external allocation options give the opportunity to allocate the data by the parser in
+specific layout, as the application expects. For more information, lookup for 
+structure `RdbBulkAllocType` at [librdb-api.h](api/librdb-api.h).
+
 ## Implementation notes
 The Redis RDB file format consists of a series of opcodes followed by the actual data that
 is being persisted. Each opcode represents a specific operation that needs to be performed
@@ -282,7 +298,7 @@ be called again to continue parsing once more data become available.
 
 In such scenario, any incomplete parsing-element will preserve its current state. As for 
 any data that has already been read from the RDB reader - it cannot be read again from the 
-reader. To address this issue, a **serialized-pool** data structure is used to route all
+reader. To address this issue, a unique **bulk-pool** data structure is used to route all
 data being read from the RDB reader. It stores a reference to the allocations in a queue,
 and enable to **rollback** and replay later once more data becomes available, in an
 attempt to complete the parsing-element state. The **rollback** command basically rewinds 
@@ -291,11 +307,11 @@ provided to the caller, however, instead of creating new allocations, the alloca
 returns the next item in the queue. Otherwise, if the parser managed to reach a new 
 parsing-element state, then all cached data in the pool will be **flushed**. 
 
-Serialized-pool is also known as parsing-element's **cache**. To learn more about it, 
+The bulk-pool is also known as parsing-element's **cache**. To learn more about it, 
 refer to the comment at the start of the file [bulkAlloc.h](src/bulkAlloc.h).
 
 ### Parsing-Element states
-Having gained understanding of the importance of serialized-pool rollback and replay for
+Having gained understanding of the importance of bulk-pool rollback and replay for
 async parsing, it is necessary to address two crucial questions:
 
  1. If we are parsing, say a large list, is it necessary for the parser to rollback all 
