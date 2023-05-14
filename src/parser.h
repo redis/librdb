@@ -138,7 +138,7 @@ typedef struct {
 typedef struct {
     RdbKeyInfo info;
     ParsingElementType valueType;
-    RdbHandlersLevel handleTypeObjByLevel;
+    RdbHandlersLevel handleByLevel;
 } ElementKeyCtx;
 
 typedef struct {
@@ -302,6 +302,7 @@ struct RdbHandlers {
 
     union {
         HandlersCommonCallbacks common;
+
         RdbHandlersRawCallbacks rdbRaw;
         RdbHandlersStructCallbacks rdbStruct;
         RdbHandlersDataCallbacks rdbData;

@@ -479,7 +479,7 @@ static inline void rollbackCache(RdbParser *p) {
 static inline RdbStatus nextParsingElementKeyValue(RdbParser *p,
                                                    ParsingElementType peRawValue,
                                                    ParsingElementType peValue) {
-    p->elmCtx.key.handleTypeObjByLevel = p->handleTypeObjByLevel[p->currOpcode];
+    p->elmCtx.key.handleByLevel = p->handleTypeObjByLevel[p->currOpcode];
 
     if (p->handleTypeObjByLevel[p->currOpcode] == RDB_LEVEL_RAW) {
         p->elmCtx.key.valueType = peRawValue;
@@ -811,7 +811,7 @@ RdbStatus elementNewKey(RdbParser *p) {
     p->elmCtx.key.info.opcode = p->currOpcode; /* tell cb what is current opcode */
 
     registerAppBulkForNextCb(p, binfoKey);
-    CALL_HANDLERS_CB(p, NOP, p->elmCtx.key.handleTypeObjByLevel, common.handleNewKey, binfoKey->ref, &p->elmCtx.key.info);
+    CALL_HANDLERS_CB(p, NOP, p->elmCtx.key.handleByLevel, common.handleNewKey, binfoKey->ref, &p->elmCtx.key.info);
 
     /* reset values for next key */
     p->elmCtx.key.info.expiretime = -1;
@@ -916,22 +916,23 @@ RdbStatus elementNextRdbType(RdbParser *p) {
 
 RdbStatus elementEndKey(RdbParser *p) {
     /*** ENTER SAFE STATE ***/
-    CALL_HANDLERS_CB(p, NOP, p->elmCtx.key.handleTypeObjByLevel, common.handleEndKey);
+    CALL_HANDLERS_CB(p, NOP, p->elmCtx.key.handleByLevel, common.handleEndKey);
     return nextParsingElement(p, PE_NEXT_RDB_TYPE);
 }
 
 RdbStatus elementString(RdbParser *p) {
     BulkInfo *binfoStr;
+    RdbHandlersLevel lvl = p->elmCtx.key.handleByLevel;
 
     IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC_APP_BULK, NULL, &binfoStr));
 
     /*** ENTER SAFE STATE ***/
 
     registerAppBulkForNextCb(p, binfoStr);
-    if (p->elmCtx.key.handleTypeObjByLevel == RDB_LEVEL_STRUCT)
-        CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_STRUCT, rdbData.handleStringValue, binfoStr->ref);
+    if (lvl == RDB_LEVEL_STRUCT)
+        CALL_HANDLERS_CB(p, NOP, lvl, rdbStruct.handleStringValue, binfoStr->ref);
     else
-        CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_DATA, rdbData.handleStringValue, binfoStr->ref);
+        CALL_HANDLERS_CB(p, NOP, lvl, rdbData.handleStringValue, binfoStr->ref);
 
     return nextParsingElement(p, PE_END_KEY);
 }
@@ -976,12 +977,13 @@ RdbStatus elementList(RdbParser *p) {
              ***********************************************************************************/
 
             if (container == QUICKLIST_NODE_CONTAINER_PLAIN) {
+                RdbHandlersLevel lvl = p->elmCtx.key.handleByLevel;
 
                 registerAppBulkForNextCb(p, binfoNode);
-                if (p->elmCtx.key.handleTypeObjByLevel == RDB_LEVEL_STRUCT)
-                    CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_STRUCT, rdbStruct.handlerPlainNode, binfoNode->ref);
+                if (lvl == RDB_LEVEL_STRUCT)
+                    CALL_HANDLERS_CB(p, NOP, lvl, rdbStruct.handlerPlainNode, binfoNode->ref);
                 else
-                    CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_DATA, rdbData.handleListElement, binfoNode->ref);
+                    CALL_HANDLERS_CB(p, NOP, lvl, rdbData.handleListElement, binfoNode->ref);
 
                 return RDB_STATUS_OK;
             }
@@ -1002,7 +1004,7 @@ RdbStatus elementList(RdbParser *p) {
             /* Silently skip empty listpack */
             if (lpLength(lp) == 0) return RDB_STATUS_OK;
 
-            if (p->elmCtx.key.handleTypeObjByLevel == RDB_LEVEL_STRUCT) {
+            if (p->elmCtx.key.handleByLevel == RDB_LEVEL_STRUCT) {
                 registerAppBulkForNextCb(p, binfoNode);
                 CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_STRUCT, rdbStruct.handlerQListNode, binfoNode->ref);
             } else {
