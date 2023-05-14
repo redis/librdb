@@ -97,26 +97,26 @@ void bulkPoolRelease(RdbParser *p) {
 }
 
 static void bulkPoolAllocNew(RdbParser *p, size_t len, BulkType type, char *refBuf, BulkInfo *binfo) {
-    size_t lenIncNewline = len + 1;
+    size_t lenIncStringTerm = len + 1;
     binfo->len = len;
     binfo->written = 0;
 
     switch(type) {
         case BULK_TYPE_STACK:
-            if ((lenIncNewline < LEN_ALLOC_FROM_STACK_MAX_SIZE) &&
-                (binfo->ref = bulkStackAlloc(p->cache->stack, lenIncNewline)) != NULL) {
+            if ((lenIncStringTerm < LEN_ALLOC_FROM_STACK_MAX_SIZE) &&
+                (binfo->ref = bulkStackAlloc(p->cache->stack, lenIncStringTerm)) != NULL) {
                 binfo->bulkType = BULK_TYPE_STACK;
                 break;
             }
 
             /* fall through - `len` too big or stack is full. Alloc from heap instead */
         case BULK_TYPE_HEAP:
-            binfo->ref = bulkHeapAlloc(p, lenIncNewline);
+            binfo->ref = bulkHeapAlloc(p, lenIncStringTerm);
             binfo->bulkType = BULK_TYPE_HEAP;
             break;
 
         case BULK_TYPE_EXTERN:
-            binfo->ref = p->cache->mem.appBulk.alloc(lenIncNewline);
+            binfo->ref = p->cache->mem.appBulk.alloc(lenIncStringTerm);
             binfo->bulkType = BULK_TYPE_EXTERN;
             break;
 
@@ -131,16 +131,14 @@ static void bulkPoolAllocNew(RdbParser *p, size_t len, BulkType type, char *refB
                             "bulkPoolAllocNew() received invalid allocation type request: %d", type);
             assert(0);
     }
+    /* add string termination */
+    ((unsigned char *) binfo->ref)[len] = '\0';
 }
 
 /* Allocate memory, either new buffer or retrieve from queue. If requested to allocate
  * application bulk (RQ_ALLOC_APP_BULK) then lookup what bulk allocation type is
  * configured by the application (can be either stack, heap or external). Otherwise it
  * is just an internal allocation of the parser, either from stack or heap.
- *
- * Note that for most cases internal allocations of the parser will be on stack. The
- * few cases that it will allocate it on heap is when it needs to preserve data
- * across states.
  */
 BulkInfo *bulkPoolAlloc(RdbParser *p, size_t len, AllocTypeRq typeRq, char *refBuf) {
     BulkInfo *binfo;

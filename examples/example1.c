@@ -39,8 +39,8 @@ int main() {
 
     parser = RDB_createParserRdb(NULL);
     if (!parser) {
-        logger(RDB_LOG_ERROR, "Failed to create parser");
-        return RDB_ERR_GENERAL;
+        logger(RDB_ERR_FAILED_CREATE_PARSER, "Failed to create parser");
+        return RDB_ERR_FAILED_CREATE_PARSER;
     }
 
     RDB_setLogger(parser, logger);

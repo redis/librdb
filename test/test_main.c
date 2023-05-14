@@ -61,6 +61,66 @@ static void test_createHandlersRdb2Json_and_2_FilterKey(void **state) {
     assert_json_file(jsonfile, expJson);
 }
 
+static void test_mixed_levels_registration(void **state) {
+    UNUSED(state);
+
+    char expJsonRaw[] = QUOTE(
+            "redis-ver":"255.255.255",
+            "redis-bits":"64",
+            "ctime":"1677580558",
+            "used-mem":"937464",
+            "aof-base":"0",
+            [{
+                "string2":"\x00\tHithere!",
+                "lzf_compressed":"\x00\xc3\t@v\x01cc\xe0i\x00\x01cc",
+                "string1":"\x00\x04blaa"
+            }]
+    );
+
+    char expJsonData[] = QUOTE(
+            "redis-ver":"255.255.255",
+            "redis-bits":"64",
+            "ctime":"1677580558",
+            "used-mem":"937464",
+            "aof-base":"0",
+            [{
+                "mylist1":["v1"],
+                "mylist3":["v3","v2","v1"],
+                "mylist2":["v2","v1"]
+            }]
+    );
+
+    RdbStatus  status;
+    RdbParser *parser = RDB_createParserRdb(NULL);
+    RDB_setLogLevel(parser, RDB_LOG_ERROR);
+    const char *rdbfile = PATH_DUMP_FOLDER("multiple_lists_strings.rdb");
+    const char *jsonfileRaw = PATH_TMP_FOLDER("multiple_lists_strings_raw.json");
+    const char *jsonfileData = PATH_TMP_FOLDER("multiple_lists_strings_data.json");
+
+    assert_non_null(RDBX_createReaderFile(parser, rdbfile));
+    assert_non_null(RDBX_createHandlersRdb2Json(parser,
+                                                RDBX_CONV_JSON_ENC_PLAIN,
+                                                jsonfileData,
+                                                RDB_LEVEL_DATA));
+
+    assert_non_null(RDBX_createHandlersRdb2Json(parser,
+                                                RDBX_CONV_JSON_ENC_PLAIN,
+                                                jsonfileRaw,
+                                                RDB_LEVEL_RAW));
+
+    /* at what level of the parser each obj type should be handled and callback */
+    RDB_handleByLevel(parser, RDB_OBJ_TYPE_STRING, RDB_LEVEL_RAW);
+    RDB_handleByLevel(parser, RDB_OBJ_TYPE_QUICKLIST, RDB_LEVEL_DATA);
+    RDB_handleByLevel(parser, RDB_OBJ_TYPE_QUICKLIST2, RDB_LEVEL_DATA);
+
+    while ((status = RDB_parse(parser)) == RDB_STATUS_WAIT_MORE_DATA);
+    assert_int_equal( status, RDB_STATUS_OK);
+
+    RDB_deleteParser(parser);
+    assert_json_file(jsonfileRaw, expJsonRaw);
+    assert_json_file(jsonfileData, expJsonData);
+}
+
 static void printResPicture(int result) {
     if (result)
         printf("    x_x\n"
@@ -87,6 +147,7 @@ int group_main(void) {
     const struct CMUnitTest tests[] = {
         cmocka_unit_test(test_createReader_missingFile),
         cmocka_unit_test(test_createHandlersRdb2Json_and_2_FilterKey),
+        cmocka_unit_test(test_mixed_levels_registration),
     };
     return cmocka_run_group_tests(tests, NULL, NULL);
 }

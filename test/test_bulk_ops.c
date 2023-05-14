@@ -15,7 +15,7 @@ void reportErrorCb(RdbRes errorID, const char *errorMsg) {
     UNUSED(errorID, errorMsg);
 }
 
-void testBulkOps(RdbParser *p, RdbBulk b) {
+void testBulkOps(RdbParser *p, RdbBulk b, int strlenCheck) {
 
     /*** test clone, and free ***/
 
@@ -40,20 +40,22 @@ void testBulkOps(RdbParser *p, RdbBulk b) {
 
     /*** test bulk len ***/
 
+    /* enabled this check only if for sure bulk cannot have the char `\0' */
+    if (strlenCheck)
+        assert_int_equal(strlen(b), RDB_bulkLen(p, b));
     assert_true(0 != RDB_bulkLen(p, b));
-    assert_memory_equal(b, b, RDB_bulkLen(p, b));
 }
 
 RdbRes handle_aux_field(RdbParser *p, void *userData, RdbBulk auxkey, RdbBulk auxval) {
     UNUSED(userData);
-    testBulkOps(p, auxkey);
-    testBulkOps(p, auxval);
+    testBulkOps(p, auxkey, 1);
+    testBulkOps(p, auxval, 1);
     return RDB_OK;
 }
 
 RdbRes handle_new_key(RdbParser *p, void *userData, RdbBulk key, RdbKeyInfo *info) {
     UNUSED(userData, info);
-    testBulkOps(p, key);
+    testBulkOps(p, key, 1);
     return RDB_OK;
 }
 
@@ -69,7 +71,7 @@ RdbRes handle_raw_frag(RdbParser *p, void *userData, RdbBulk frag) {
     size_t *rawObjSizeLeft = (size_t *)userData;
 
     *rawObjSizeLeft -= RDB_bulkLen(p, frag);
-    testBulkOps(p, frag);
+    testBulkOps(p, frag, 0);
     return RDB_OK;
 }
 
@@ -84,13 +86,13 @@ RdbRes handle_raw_end(RdbParser *p, void *userData) {
 
 RdbRes handle_string_value(RdbParser *p, void *userData, RdbBulk str) {
     UNUSED(userData);
-    testBulkOps(p, str);
+    testBulkOps(p, str, 0);
     return RDB_OK;
 }
 
 RdbRes handle_list_element(RdbParser *p, void *userData, RdbBulk b) {
     UNUSED(userData);
-    testBulkOps(p, b);
+    testBulkOps(p, b, 0);
     return RDB_OK;
 }
 

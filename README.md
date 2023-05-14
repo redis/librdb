@@ -109,7 +109,7 @@ parsed data. Future plan to support built-in Handlers:
 * Convert RDB to RESP protocol handlers. (Status: Todo)
 * Memory Analyze (Status: Todo)
 
-#### Using multiple sets of Handlers
+#### Multiple registration - same level
 It is possible to attach to parser more than one set of handlers at the same level.
 That is, for a given data at a given level, the parser will call each of the handlers that
 registered at that level.   
@@ -122,7 +122,18 @@ More common reason is that a handlers can be used also as a Filter to decide whe
 propagate data to the next set of handlers in-line (Such built-in filters can be 
 found at extension library of this project). Note that for any given level, order of
 calls to handlers will be the opposite to order of their registration to that level.
-It's also possible to mix multiple registrations from level1 and level2, but not level0.
+
+#### Multiple registration - different levels
+Some of the more advanced usages might require parsing different data types at different 
+levels of the parser. The callbacks that are common to all levels (and not specific to 
+current parsing key. See in API: `HANDLERS_COMMON_CALLBACKS`), if registered at different 
+levels then all of them will be called, one by one, starting from level 0. 
+
+As for the callbacks of RDB object types, like mentioned, each level has its own way to 
+handle the data with distinct set of callbacks. It is the duty of the application to 
+configure for each RDB object type at what level it is needed to get parsed by calling 
+`RDB_handleByLevel()` (can be called in the middle of parsing). Otherwise, the parser will 
+resolve it by parsing and calling handlers that are registered at lowest level.
 
 ## Usage
 Following examples avoid error check to keep it concise. Full example can be found in 
@@ -278,7 +289,7 @@ callbacks. This includes the options:
 
 The external allocation options give the opportunity to allocate the data by the parser in
 specific layout, as the application expects. For more information, lookup for 
-structure `RdbBulkAllocType` at [librdb-api.h](api/librdb-api.h).
+`RdbBulkAllocType` at [librdb-api.h](api/librdb-api.h).
 
 ## Implementation notes
 The Redis RDB file format consists of a series of opcodes followed by the actual data that
