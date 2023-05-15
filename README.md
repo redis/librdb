@@ -109,31 +109,19 @@ parsed data. Future plan to support built-in Handlers:
 * Convert RDB to RESP protocol handlers. (Status: Todo)
 * Memory Analyze (Status: Todo)
 
-#### Multiple registration - same level
 It is possible to attach to parser more than one set of handlers at the same level.
 That is, for a given data at a given level, the parser will call each of the handlers that
-registered at that level.   
-
-One reason to do so can be because usually retrieving RDB file is the most time-consuming
-task of the parser, and it can save time by making a single parse yet invoke multiple sets 
-of handlers.
+registered at that level. One reason to do so can be because usually retrieving RDB file 
+is the most time-consuming task of the parser, and it can save time by making a single 
+parse yet invoke multiple sets of handlers.
 
 More common reason is that a handlers can be used also as a Filter to decide whether to
 propagate data to the next set of handlers in-line (Such built-in filters can be 
 found at extension library of this project). Note that for any given level, order of
 calls to handlers will be the opposite to order of their registration to that level.
 
-#### Multiple registration - different levels
-Some of the more advanced usages might require parsing different data types at different 
-levels of the parser. The callbacks that are common to all levels (and not specific to 
-current parsing key. See in API: `HANDLERS_COMMON_CALLBACKS`), if registered at different 
-levels then all of them will be called, one by one, starting from level 0. 
-
-As for the callbacks of RDB object types, like mentioned, each level has its own way to 
-handle the data with distinct set of callbacks. It is the duty of the application to 
-configure for each RDB object type at what level it is needed to get parsed by calling 
-`RDB_handleByLevel()` (can be called in the middle of parsing). Otherwise, the parser will 
-resolve it by parsing and calling handlers that are registered at lowest level.
+Furthermore, it is also possible to attach multiple handlers at different levels, which is 
+described in the [Advanced](#Advanced) section.
 
 ## Usage
 Following examples avoid error check to keep it concise. Full example can be found in 
@@ -191,6 +179,7 @@ Whether it is Reader or Handlers, once a new block is created, it is being attac
 parser and the parse will take ownership and will release the blocks either during its own
 destruction, or when newer block replacing old one.
 
+<a name="Advanced"></a>
 ## Advanced
 ### Customized Reader
 The built-in readers should be sufficient for most purposes. However, if they do not meet
@@ -290,6 +279,18 @@ callbacks. This includes the options:
 The external allocation options give the opportunity to allocate the data by the parser in
 specific layout, as the application expects. For more information, lookup for 
 `RdbBulkAllocType` at [librdb-api.h](api/librdb-api.h).
+
+### Multiple handlers at different levels
+Some of the more advanced usages might require parsing different data types at different
+levels of the parser. As each level has its own way to handle the data with distinct set
+of callbacks, it is the duty of the application to configure for each RDB object type at
+what level it is needed to get handled by calling `RDB_handleByLevel()`. Otherwise, the
+parser will resolve it by parsing and calling handlers that are registered at lowest level.
+
+As for the common callbacks to all levels (which includes `handleNewRdb`, `handleNewDb`,
+`handleEndRdb`, `handleDbSize` and `handleAuxField`) if registered at different
+levels then all of them will be called, one by one, starting from handlers that are 
+registered at the lowest level.
 
 ## Implementation notes
 The Redis RDB file format consists of a series of opcodes followed by the actual data that
