@@ -8,7 +8,7 @@ static void test_createReader_missingFile(void **state) {
     UNUSED(state);
 
     RdbParser *parser = RDB_createParserRdb(NULL);
-    RdbReader *reader = RDBX_createReaderFile(parser, "./test/dumps/non_exist_file.rdb");
+    RdbxReaderFile *reader = RDBX_createReaderFile(parser, "./test/dumps/non_exist_file.rdb");
 
     /* verify didn't get back reader instance */
     assert_null(reader);
@@ -23,7 +23,7 @@ static void test_createReader_missingFile(void **state) {
     RDB_deleteParser(parser);
 }
 
-static void test_createHandlersRdb2Json_and_2_FilterKey(void **state) {
+static void test_createHandlersRdbToJson_and_2_FilterKey(void **state) {
     UNUSED(state);
     char expJson[] = QUOTE(
             "redis-ver":"255.255.255",
@@ -45,13 +45,13 @@ static void test_createHandlersRdb2Json_and_2_FilterKey(void **state) {
     const char *jsonfile = PATH_TMP_FOLDER("multiple_lists_strings.json");
 
     assert_non_null(RDBX_createReaderFile(parser, rdbfile));
-    assert_non_null(RDBX_createHandlersRdb2Json(parser,
+    assert_non_null(RDBX_createHandlersToJson(parser,
                                               RDBX_CONV_JSON_ENC_PLAIN,
                                               jsonfile,
                                               RDB_LEVEL_DATA));
 
-    assert_non_null(RDBX_createHandlersFilterKey(parser, ".*i.*", 0, RDB_LEVEL_DATA));
-    assert_non_null(RDBX_createHandlersFilterKey(parser, "mylist.*", 0, RDB_LEVEL_DATA));
+    assert_non_null(RDBX_createHandlersFilterKey(parser, ".*i.*", 0));
+    assert_non_null(RDBX_createHandlersFilterKey(parser, "mylist.*", 0));
 
 
     while ((status = RDB_parse(parser)) == RDB_STATUS_WAIT_MORE_DATA);
@@ -98,12 +98,12 @@ static void test_mixed_levels_registration(void **state) {
     const char *jsonfileData = PATH_TMP_FOLDER("multiple_lists_strings_data.json");
 
     assert_non_null(RDBX_createReaderFile(parser, rdbfile));
-    assert_non_null(RDBX_createHandlersRdb2Json(parser,
+    assert_non_null(RDBX_createHandlersToJson(parser,
                                                 RDBX_CONV_JSON_ENC_PLAIN,
                                                 jsonfileData,
                                                 RDB_LEVEL_DATA));
 
-    assert_non_null(RDBX_createHandlersRdb2Json(parser,
+    assert_non_null(RDBX_createHandlersToJson(parser,
                                                 RDBX_CONV_JSON_ENC_PLAIN,
                                                 jsonfileRaw,
                                                 RDB_LEVEL_RAW));
@@ -146,7 +146,7 @@ int group_main(void) {
     /* Insert here your test functions */
     const struct CMUnitTest tests[] = {
         cmocka_unit_test(test_createReader_missingFile),
-        cmocka_unit_test(test_createHandlersRdb2Json_and_2_FilterKey),
+        cmocka_unit_test(test_createHandlersRdbToJson_and_2_FilterKey),
         cmocka_unit_test(test_mixed_levels_registration),
     };
     return cmocka_run_group_tests(tests, NULL, NULL);
@@ -156,11 +156,17 @@ int group_main(void) {
 int main(int argc, char *argv[]) {
     struct timeval st, et;
     char *runGroupPrefix = NULL;
+    const char *hostname = NULL;
+    int port = 0;
     int result = 0;
 
     /* Parse command-line arguments */
     for (int i = 1; i < argc; i++) {
-        if ((strcmp(argv[i], "-r") == 0 || strcmp(argv[i], "--run-group") == 0) && i+1 < argc) {
+        if ((strcmp(argv[i], "-p") == 0 || strcmp(argv[i], "--port") == 0) && i+1 < argc) {
+            port =  atoi(argv[++i]);
+        } else if ((strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--hostname") == 0) && i+1 < argc) {
+            hostname = argv[++i];
+        } else if ((strcmp(argv[i], "-r") == 0 || strcmp(argv[i], "--run-group") == 0) && i+1 < argc) {
             runGroupPrefix = argv[++i];
         } else {
             printf("Invalid argument: %s\n", argv[i]);
@@ -170,27 +176,32 @@ int main(int argc, char *argv[]) {
 
     gettimeofday(&st,NULL);
 
-    printf ("\n*************** START TESTING *******************\n");
-    setenv("LIBRDB_SIM_WAIT_MORE_DATA", "0", 1);
-    RUN_TEST_GROUP(group_main);
-    RUN_TEST_GROUP(group_rdb_to_json);
-    RUN_TEST_GROUP(group_mem_management);
-    RUN_TEST_GROUP(group_bulk_ops);
+    if ((port != 0) && (hostname != NULL)) {
+        printf("Using External server for the test.");
 
-    RUN_TEST_GROUP(group_pause);
+    } else {
+        printf("\n*************** START TESTING *******************\n");
+        setenv("LIBRDB_SIM_WAIT_MORE_DATA", "0", 1);
+        RUN_TEST_GROUP(group_main);
+        RUN_TEST_GROUP(group_rdb_to_json);
+        RUN_TEST_GROUP(group_mem_management);
+        RUN_TEST_GROUP(group_bulk_ops);
 
-    printf ("\n*************** SIMULATING WAIT_MORE_DATA *******************\n");
-    setenv("LIBRDB_SIM_WAIT_MORE_DATA", "1", 1);
-    RUN_TEST_GROUP(group_main);
-    RUN_TEST_GROUP(group_rdb_to_json);
-    RUN_TEST_GROUP(group_mem_management);
-    RUN_TEST_GROUP(group_bulk_ops);
-    printf ("\n*************** END TESTING *******************\n");
+        RUN_TEST_GROUP(group_pause);
 
-    gettimeofday(&et,NULL);
+        printf("\n*************** SIMULATING WAIT_MORE_DATA *******************\n");
+        setenv("LIBRDB_SIM_WAIT_MORE_DATA", "1", 1);
+        RUN_TEST_GROUP(group_main);
+        RUN_TEST_GROUP(group_rdb_to_json);
+        RUN_TEST_GROUP(group_mem_management);
+        RUN_TEST_GROUP(group_bulk_ops);
+        printf("\n*************** END TESTING *******************\n");
 
-    int elapsed = (et.tv_sec - st.tv_sec)*1000 + (et.tv_usec - st.tv_usec)/1000;
-    printf("Total time: %d milliseconds\n",elapsed);
+        gettimeofday(&et, NULL);
+
+        int elapsed = (et.tv_sec - st.tv_sec) * 1000 + (et.tv_usec - st.tv_usec) / 1000;
+        printf("Total time: %d milliseconds\n", elapsed);
+    }
 
     printResPicture(result);
     return result;

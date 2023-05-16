@@ -52,7 +52,7 @@ static void test_extern_alloc(void **state) {
         RDB_setLogLevel(parser, RDB_LOG_ERROR);
 
         assert_non_null(RDBX_createReaderFile(parser, PATH_DUMP_FOLDER("single_key.rdb")));
-        assert_non_null(RDBX_createHandlersRdb2Json(parser,
+        assert_non_null(RDBX_createHandlersToJson(parser,
                                                   RDBX_CONV_JSON_ENC_PLAIN,
                                                   PATH_TMP_FOLDER("single_key.json"),
                                                   RDB_LEVEL_DATA));

@@ -208,7 +208,7 @@ _LIBRDB_API RdbReader *RDB_createReaderRdb(RdbParser *p,
  * Create set of handlers, at requested level (lvl), to be filled up with
  * callback handlers.
  *
- * Used by:  RDBX_createHandlersRdb2Json
+ * Used by:  RDBX_createHandlersToJson
  *           RDBX_createHandlersFilterKey
  *           <user-defined-handlers>
  ****************************************************************/
@@ -245,6 +245,7 @@ _LIBRDB_API void RDB_setMaxRawLenHandling(RdbParser *p, size_t size);
 _LIBRDB_API void RDB_setDeepIntegCheck(RdbParser *p, int deep);
 _LIBRDB_API size_t RDB_getBytesProcessed(RdbParser *p);
 _LIBRDB_API RdbState RDB_getState(RdbParser *p);
+_LIBRDB_API int RDB_getNumHandlers(RdbParser *p, RdbHandlersLevel lvl);
 _LIBRDB_API void RDB_IgnoreChecksum(RdbParser *p);
 
 /* logger */

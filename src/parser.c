@@ -322,6 +322,10 @@ _LIBRDB_API RdbState RDB_getState(RdbParser *p) {
     return p->state;
 }
 
+_LIBRDB_API int RDB_getNumHandlers(RdbParser *p, RdbHandlersLevel lvl) {
+    return p->numHandlers[lvl];
+}
+
 _LIBRDB_API RdbRes RDB_getErrorCode(RdbParser *p) {
     return p->errorCode;
 }

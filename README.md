@@ -131,7 +131,7 @@ Following examples avoid error check to keep it concise. Full example can be fou
 
       RdbParser *parser = RDB_createParserRdb(NULL);
       RDBX_createReaderFile(parser, "dump.rdb");
-      RDBX_createHandlersRdb2Json(parser, encoding, "db.json", RDB_LEVEL_DATA);
+      RDBX_createHandlersToJson(parser, encoding, "db.json", RDB_LEVEL_DATA);
       RDB_parse(parser); 
       RDB_deleteParser(parser); /* delete also reader & Handlers */
 
@@ -161,8 +161,8 @@ Following examples avoid error check to keep it concise. Full example can be fou
 
       RdbParser *parser = RDB_createParserRdb(NULL);
       RDBX_createReaderFile(parser, "dump.rdb");
-      RDBX_createHandlersRdb2Json(parser, encoding, "redis.json", RDB_LEVEL_DATA);
-      RDBX_createHandlersFilterKey(parser, "id_*", 0, RDB_LEVEL_DATA);
+      RDBX_createHandlersToJson(parser, encoding, "redis.json", RDB_LEVEL_DATA);
+      RDBX_createHandlersFilterKey(parser, "id_*", 0);
       RDB_parse(parser);
       RDB_deleteParser(parser);
   
@@ -170,7 +170,7 @@ Following examples avoid error check to keep it concise. Full example can be fou
 
       unsigned char rdbContent[] =  {'R', 'E', 'D', 'I', 'S', .... };
       RdbParser *parser = RDB_createParserRdb(NULL);
-      RDBX_createHandlersRdb2Json(parser, encoding, "redis.json", RDB_LEVEL_DATA);
+      RDBX_createHandlersToJson(parser, encoding, "redis.json", RDB_LEVEL_DATA);
       RDB_parseBuff(parser, rdbContent, sizeof(rdbContent), 1 /*EOF*/);
       RDB_deleteParser(parser);
 
@@ -206,12 +206,12 @@ beyond the scope of this library. A conceptual invocation of such flow can be:
 Another way to work asynchronously with the parser is just feeding the parser with chunks 
 of streamed buffers by using the `RDB_parseBuff()` function:
 
-      int parseRdb2Json(int file_descriptor, const char *fnameOut)
+      int parseRdbToJson(int file_descriptor, const char *fnameOut)
       {
         RdbStatus status;
         const int BUFF_SIZE = 200000;
         RdbParser *parser = RDB_createParserRdb(NULL);
-        RDBX_createHandlersRdb2Json(parser, encoding, fnameOut, RDB_LEVEL_DATA);
+        RDBX_createHandlersToJson(parser, encoding, fnameOut, RDB_LEVEL_DATA);
         void *buf = malloc(BUFF_SIZE);
         do {                        
             int bytes_read = read(file_descriptor, buf, BUFF_SIZE);
@@ -241,7 +241,7 @@ configured interval, at which point it will automatically pause and return
       size_t intervalBytes = 1048576;  
       RdbParser *parser = RDB_createParserRdb(memAlloc);
       RDBX_createReaderFile(parser, "dump.rdb");
-      RDBX_createHandlersRdb2Json(parser, encoding, "db.json", RDB_LEVEL_DATA);
+      RDBX_createHandlersToJson(parser, encoding, "db.json", RDB_LEVEL_DATA);
       RDB_setPauseInterval(parser, intervalBytes);
       while (RDB_parse(parser) == RDB_STATUS_PAUSED) {
           /* do something else in between */

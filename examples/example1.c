@@ -29,9 +29,9 @@ void logger(RdbLogLevel l, const char *msg) {
  *******************************************************************/
 int main() {
     RdbParser *parser;
-    RdbReader *reader;
-    RdbHandlers *handlers;
-    RdbHandlers *filterKey;
+    RdbxReaderFile *reader;
+    RdbxToJson *rdbToJson;
+    RdbxFilterKey *filterKey;
     RdbRes err=RDB_OK;
 
     const char *infile = "./dumps/multiple_lists_strings.rdb";
@@ -48,12 +48,12 @@ int main() {
     reader = RDBX_createReaderFile(parser, infile);
     if (!reader) goto PARSER_ERROR;
 
-    /* Create RDB2JSON built-in Handlers */
-    handlers = RDBX_createHandlersRdb2Json(parser, RDBX_CONV_JSON_ENC_PLAIN, outfile, RDB_LEVEL_DATA);
-    if (!handlers) goto PARSER_ERROR;
+    /* Create RDB to JSON built-in Handlers */
+    rdbToJson = RDBX_createHandlersToJson(parser, RDBX_CONV_JSON_ENC_PLAIN, outfile, RDB_LEVEL_DATA);
+    if (!rdbToJson) goto PARSER_ERROR;
 
     /* Filter keys that starts with the word `mylist` */
-    filterKey = RDBX_createHandlersFilterKey(parser, "mylist.*", 0 /*flags*/, RDB_LEVEL_DATA);
+    filterKey = RDBX_createHandlersFilterKey(parser, "mylist.*", 0 /*flags*/);
     if (!filterKey) goto PARSER_ERROR;
 
     /* Run the parser */

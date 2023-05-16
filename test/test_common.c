@@ -84,7 +84,7 @@ void testVariousCases(const char *rdbfile,
         RdbParser *parser = RDB_createParserRdb(pMemAlloc);
         RDB_setLogLevel(parser, RDB_LOG_ERROR);
         assert_non_null(RDBX_createReaderFile(parser, rdbfile));
-        assert_non_null(RDBX_createHandlersRdb2Json(parser, RDBX_CONV_JSON_ENC_PLAIN, jsonfile, parseLevel));
+        assert_non_null(RDBX_createHandlersToJson(parser, RDBX_CONV_JSON_ENC_PLAIN, jsonfile, parseLevel));
         while ((status = RDB_parse(parser)) == RDB_STATUS_WAIT_MORE_DATA);
         assert_int_equal(status, RDB_STATUS_OK);
         RDB_deleteParser(parser);
@@ -98,7 +98,7 @@ void testVariousCases(const char *rdbfile,
         parser = RDB_createParserRdb(pMemAlloc);
         RDB_setLogLevel(parser, RDB_LOG_ERROR);
         assert_non_null(RDBX_createReaderFile(parser, rdbfile));
-        assert_non_null(RDBX_createHandlersRdb2Json(parser, RDBX_CONV_JSON_ENC_PLAIN, jsonfile, parseLevel));
+        assert_non_null(RDBX_createHandlersToJson(parser, RDBX_CONV_JSON_ENC_PLAIN, jsonfile, parseLevel));
         RDB_setPauseInterval(parser, 1 /*bytes*/);
         while (1) {
             status = RDB_parse(parser);
@@ -127,7 +127,7 @@ void testVariousCases(const char *rdbfile,
         remove(jsonfile);
         parser = RDB_createParserRdb(pMemAlloc);
         RDB_setLogLevel(parser, RDB_LOG_ERROR);
-        assert_non_null(RDBX_createHandlersRdb2Json(parser, RDBX_CONV_JSON_ENC_PLAIN, jsonfile, parseLevel));
+        assert_non_null(RDBX_createHandlersToJson(parser, RDBX_CONV_JSON_ENC_PLAIN, jsonfile, parseLevel));
         parseBuffOneCharEachTime(parser, buffer, bufLen, 1);
         RDB_deleteParser(parser);
         assert_json_file(jsonfile, expJson);
@@ -137,7 +137,7 @@ void testVariousCases(const char *rdbfile,
         remove(jsonfile);
         parser = RDB_createParserRdb(pMemAlloc);
         RDB_setLogLevel(parser, RDB_LOG_ERROR);
-        assert_non_null(RDBX_createHandlersRdb2Json(parser, RDBX_CONV_JSON_ENC_PLAIN, jsonfile, parseLevel));
+        assert_non_null(RDBX_createHandlersToJson(parser, RDBX_CONV_JSON_ENC_PLAIN, jsonfile, parseLevel));
         RDB_setPauseInterval(parser, 1 /*bytes*/);
         while (1) {
             status = RDB_parseBuff(parser, buffer, bufLen, 1);
