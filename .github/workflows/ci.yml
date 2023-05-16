@@ -27,6 +27,10 @@ jobs:
 
         shell: bash
 
+      - name: Update submodules recursively
+        run: |
+          git submodule update --init --recursive
+
       - name: Build and run project
         run: |
           export LD_LIBRARY_PATH=/usr/local/lib/
