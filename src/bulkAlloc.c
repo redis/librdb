@@ -1,7 +1,7 @@
 #include <assert.h>
 #include <string.h>
 #include <stdio.h>
-#include "utils.h"
+#include "../deps/redis/utils.h"
 #include "bulkAlloc.h"
 
 #define STACK_SIZE 100000
@@ -52,7 +52,7 @@ static inline BulkType bulkUnmanagedResolveAllocType(RdbParser *p, AllocUnmngTyp
 
 /*** LIB API functions ***/
 
-_LIBRDB_API void RDB_bulkFree(RdbParser *p, RdbBulkCopy b) {
+_LIBRDB_API void RDB_bulkCopyFree(RdbParser *p, RdbBulkCopy b) {
     switch (p->mem.bulkAllocType) {
         case RDB_BULK_ALLOC_STACK:
             /* fall through - Note that even when bulkAllocType is set to RDB_BULK_ALLOC_STACK,
@@ -67,7 +67,7 @@ _LIBRDB_API void RDB_bulkFree(RdbParser *p, RdbBulkCopy b) {
             break;
         default:
             RDB_reportError(p, RDB_ERR_INVALID_BULK_ALLOC_TYPE,
-                "RDB_bulkFree(): Invalid bulk allocation type: %d", p->mem.bulkAllocType);
+                "RDB_bulkCopyFree(): Invalid bulk allocation type: %d", p->mem.bulkAllocType);
             break;
     }
 }

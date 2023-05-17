@@ -80,7 +80,7 @@ static RdbxToJson *initRdbToJsonCtx(RdbParser *p, RdbxToJsonEnc encoding, const 
     FILE *f;
 
     if (!(f = fopen(filename, "w"))) {
-        RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_FAILED_OPEN_FILE,
+        RDB_reportError(p, (RdbRes) RDBX_ERR_FAILED_OPEN_FILE,
                         "HandlersRdbToJson: Failed to open file");
         return NULL;
     }
@@ -139,7 +139,7 @@ static RdbRes handlingEndKey(RdbParser *p, void *userData) {
             return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
     }
 
-    RDB_bulkFree(p, ctx->keyCtx.key);
+    RDB_bulkCopyFree(p, ctx->keyCtx.key);
 
     /* update new state */
     ctx->state = R2J_IN_DB;

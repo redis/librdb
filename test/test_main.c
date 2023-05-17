@@ -25,6 +25,10 @@ static void test_createReader_missingFile(void **state) {
 
 static void test_createHandlersRdbToJson_and_2_FilterKey(void **state) {
     UNUSED(state);
+
+    const char *rdbfile = PATH_DUMP_FOLDER("multiple_lists_strings.rdb");
+    const char *jsonfile = PATH_TMP_FOLDER("multiple_lists_strings.json");
+
     char expJson[] = QUOTE(
             "redis-ver":"255.255.255",
             "redis-bits":"64",
@@ -41,9 +45,6 @@ static void test_createHandlersRdbToJson_and_2_FilterKey(void **state) {
     RdbStatus  status;
     RdbParser *parser = RDB_createParserRdb(NULL);
     RDB_setLogLevel(parser, RDB_LOG_ERROR);
-    const char *rdbfile = PATH_DUMP_FOLDER("multiple_lists_strings.rdb");
-    const char *jsonfile = PATH_TMP_FOLDER("multiple_lists_strings.json");
-
     assert_non_null(RDBX_createReaderFile(parser, rdbfile));
     assert_non_null(RDBX_createHandlersToJson(parser,
                                               RDBX_CONV_JSON_ENC_PLAIN,
@@ -58,7 +59,7 @@ static void test_createHandlersRdbToJson_and_2_FilterKey(void **state) {
     assert_int_equal( status, RDB_STATUS_OK);
 
     RDB_deleteParser(parser);
-    assert_json_file(jsonfile, expJson);
+    assert_payload_file(jsonfile, expJson, 1);
 }
 
 static void test_mixed_levels_registration(void **state) {
@@ -90,13 +91,13 @@ static void test_mixed_levels_registration(void **state) {
             }]
     );
 
-    RdbStatus  status;
-    RdbParser *parser = RDB_createParserRdb(NULL);
-    RDB_setLogLevel(parser, RDB_LOG_ERROR);
     const char *rdbfile = PATH_DUMP_FOLDER("multiple_lists_strings.rdb");
     const char *jsonfileRaw = PATH_TMP_FOLDER("multiple_lists_strings_raw.json");
     const char *jsonfileData = PATH_TMP_FOLDER("multiple_lists_strings_data.json");
 
+    RdbStatus  status;
+    RdbParser *parser = RDB_createParserRdb(NULL);
+    RDB_setLogLevel(parser, RDB_LOG_ERROR);
     assert_non_null(RDBX_createReaderFile(parser, rdbfile));
     assert_non_null(RDBX_createHandlersToJson(parser,
                                                 RDBX_CONV_JSON_ENC_PLAIN,
@@ -117,8 +118,8 @@ static void test_mixed_levels_registration(void **state) {
     assert_int_equal( status, RDB_STATUS_OK);
 
     RDB_deleteParser(parser);
-    assert_json_file(jsonfileRaw, expJsonRaw);
-    assert_json_file(jsonfileData, expJsonData);
+    assert_payload_file(jsonfileRaw, expJsonRaw, 1);
+    assert_payload_file(jsonfileData, expJsonData, 1);
 }
 
 static void printResPicture(int result) {
@@ -183,6 +184,7 @@ int main(int argc, char *argv[]) {
         printf("\n*************** START TESTING *******************\n");
         setenv("LIBRDB_SIM_WAIT_MORE_DATA", "0", 1);
         RUN_TEST_GROUP(group_main);
+        RUN_TEST_GROUP(group_rdb_to_resp);
         RUN_TEST_GROUP(group_rdb_to_json);
         RUN_TEST_GROUP(group_mem_management);
         RUN_TEST_GROUP(group_bulk_ops);
@@ -192,6 +194,7 @@ int main(int argc, char *argv[]) {
         printf("\n*************** SIMULATING WAIT_MORE_DATA *******************\n");
         setenv("LIBRDB_SIM_WAIT_MORE_DATA", "1", 1);
         RUN_TEST_GROUP(group_main);
+        RUN_TEST_GROUP(group_rdb_to_resp);
         RUN_TEST_GROUP(group_rdb_to_json);
         RUN_TEST_GROUP(group_mem_management);
         RUN_TEST_GROUP(group_bulk_ops);

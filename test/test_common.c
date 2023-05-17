@@ -3,7 +3,7 @@
 #include <stdlib.h>
 #include "test_common.h"
 
-char* sanitizeJson(char* str) {
+char* sanitizeFile(char* str) {
     int i, j;
     int len = strlen(str);
     char* output = str;
@@ -17,7 +17,7 @@ char* sanitizeJson(char* str) {
     return output;
 }
 
-void assert_json_file(const char *filename, char *expJson) {
+void assert_payload_file(const char *filename, char *expPayload, int sanitize) {
     FILE* fp;
     char* str;
     size_t size;
@@ -35,7 +35,10 @@ void assert_json_file(const char *filename, char *expJson) {
     str[size] = '\0';
     fclose(fp);
 
-    assert_string_equal( sanitizeJson(str) , sanitizeJson(expJson));
+    if (sanitize)
+        assert_string_equal( sanitizeFile(str) , sanitizeFile(expPayload));
+    else
+        assert_string_equal(str , expPayload);
     free(str);
 }
 
@@ -88,7 +91,7 @@ void testVariousCases(const char *rdbfile,
         while ((status = RDB_parse(parser)) == RDB_STATUS_WAIT_MORE_DATA);
         assert_int_equal(status, RDB_STATUS_OK);
         RDB_deleteParser(parser);
-        assert_json_file(jsonfile, expJson);
+        assert_payload_file(jsonfile, expJson, 1);
 
         /*** 2. RDB_parse - set pause-interval to 1 byte ***/
         int looseCounterAssert = 0;
@@ -121,7 +124,7 @@ void testVariousCases(const char *rdbfile,
         else
             assert_int_equal(countPauses + 1, bufLen);
         RDB_deleteParser(parser);
-        assert_json_file(jsonfile, expJson);
+        assert_payload_file(jsonfile, expJson, 1);
 
         /*** 3. RDB_parseBuff - parse buffer. Use buffer of size 1 char ***/
         remove(jsonfile);
@@ -130,7 +133,7 @@ void testVariousCases(const char *rdbfile,
         assert_non_null(RDBX_createHandlersToJson(parser, RDBX_CONV_JSON_ENC_PLAIN, jsonfile, parseLevel));
         parseBuffOneCharEachTime(parser, buffer, bufLen, 1);
         RDB_deleteParser(parser);
-        assert_json_file(jsonfile, expJson);
+        assert_payload_file(jsonfile, expJson, 1);
 
         /*** 4. RDB_parseBuff - parse a single buffer. set pause-interval to 1 byte ***/
         countPauses = 0;
@@ -152,7 +155,7 @@ void testVariousCases(const char *rdbfile,
         }
         assert_int_equal(countPauses + 1, bufLen);
         RDB_deleteParser(parser);
-        assert_json_file(jsonfile, expJson);
+        assert_payload_file(jsonfile, expJson, 1);
 
         free(buffer);
     }

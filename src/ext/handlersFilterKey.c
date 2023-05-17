@@ -86,7 +86,7 @@ RdbxFilterKey *RDBX_createHandlersFilterKey(RdbParser *p,
 
     // compile the regular expression
     if (regcomp(&ctx->regex_compiled, keyRegex, REG_EXTENDED) != 0) {
-        RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_FAILED_COMPILING_REGEX,
+        RDB_reportError(p, (RdbRes) RDBX_ERR_FILTER_FAILED_COMPILE_REGEX,
                         "FilterKey: Error compiling regular expression");
         deleteFilterKeyCtx(p, ctx);
         return NULL;

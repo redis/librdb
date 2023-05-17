@@ -39,6 +39,6 @@ $(TARGET_TEST_STATIC): $(OBJECTS)
 	$(CC) -MM $(CFLAGS) $*.c > $*.d
 
 clean:
-	@rm -rvf $(TARGET_TEST) $(TARGET_TEST_STATIC) ./*.o ./*.d ./log/*.log;
+	@rm -rvf $(TARGET_TEST) $(TARGET_TEST_STATIC) ./tmp/*.* ./*.o ./*.d ./log/*.log;
 
 .PHONY: all clean

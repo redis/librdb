@@ -135,12 +135,13 @@ Following examples avoid error check to keep it concise. Full example can be fou
       RDB_parse(parser); 
       RDB_deleteParser(parser); /* delete also reader & Handlers */
 
-- Parsing RDB file to RESP Commands:
+- Parsing RDB file to RESP protocol:
 
-      RdbParser *parser = RDB_createParserRdb(NULL);
-      RDBX_createReaderFile(parser, "dump.rdb");
-      RDBX_CreateHandlersRdbRaw2Redis(parser, encoding, sockfd_Redis);
-      RDB_parse(parser);
+      RdbParser *p = RDB_createParserRdb(NULL);
+      RDBX_createReaderFile(p, rdbfile);
+      RdbxToResp *rdbToResp = RDBX_createHandlersToResp(p, &config);
+      RDBX_createRespFileWriter(p, rdbToResp, "./rdbDump.resp");
+      RDB_parse(p);
       RDB_deleteParser(parser);
 
 - Parsing RDB file with user callbacks:

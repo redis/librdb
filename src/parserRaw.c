@@ -6,7 +6,7 @@
 #include "parser.h"
 #include "defines.h"
 #include "../deps/redis/endianconv.h"
-#include "utils.h"
+#include "../deps/redis/utils.h"
 #include "../deps/redis/listpack.h"
 
 #define MAX_STRING_WRITE_CHUNK (1024*63)

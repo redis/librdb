@@ -16,7 +16,7 @@ inline void unused(void *dummy, ...) { (void)(dummy);}
 #define PATH_DUMP_FOLDER(file) "./test/dumps/"file
 #define PATH_TMP_FOLDER(file) "./test/tmp/"file
 
-void assert_json_file(const char *filename, char *expJson);
+void assert_payload_file(const char *filename, char *expPayload, int sanitize);
 void parseBuffOneCharEachTime(RdbParser *p, unsigned char *buff, size_t size, int isEOF);
 void readFileToBuff(const char* filename, unsigned char** buffer, size_t* length);
 
@@ -25,6 +25,7 @@ void testVariousCases(const char *rdbfile,
                       char *expJson,
                       RdbHandlersLevel parseLevel);
 
+extern int group_rdb_to_resp();
 extern int group_main(void);
 extern int group_rdb_to_json(void);
 extern int group_mem_management(void);

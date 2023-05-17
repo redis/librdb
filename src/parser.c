@@ -12,7 +12,7 @@
 #include "parser.h"
 #include "defines.h"
 #include "../deps/redis/endianconv.h"
-#include "utils.h"
+#include "../deps/redis/utils.h"
 #include "../deps/redis/listpack.h"
 #include "../deps/redis/lzf.h"
 

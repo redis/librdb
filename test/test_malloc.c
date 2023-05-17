@@ -59,7 +59,7 @@ static void test_extern_alloc(void **state) {
         while ((status = RDB_parse(parser)) == RDB_STATUS_WAIT_MORE_DATA);
         assert_int_equal(status, RDB_STATUS_OK);
         RDB_deleteParser(parser);
-        assert_json_file(PATH_TMP_FOLDER("single_key.json"), expJson);
+        assert_payload_file(PATH_TMP_FOLDER("single_key.json"), expJson, 1);
 
         switch (bulkAllocType) {
             case RDB_BULK_ALLOC_STACK:

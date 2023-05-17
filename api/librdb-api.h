@@ -45,6 +45,7 @@ typedef enum RdbRes {
 
     RDB_ERR_GENERAL,
 
+    RDB_ERR_FAIL_ALLOC,
     RDB_ERR_FAILED_CREATE_PARSER,
     RDB_ERR_FAILED_OPEN_LOG_FILE,
     RDB_ERR_FAILED_READ_RDB_FILE,
@@ -377,7 +378,7 @@ void RDB_free(RdbParser *p, void *ptr);
  ****************************************************************/
 _LIBRDB_API  RdbBulkCopy RDB_bulkClone(RdbParser *p, RdbBulk b);
 
-_LIBRDB_API  void RDB_bulkFree(RdbParser *p, RdbBulkCopy b);
+_LIBRDB_API  void RDB_bulkCopyFree(RdbParser *p, RdbBulkCopy b);
 
 _LIBRDB_API  size_t RDB_bulkLen(RdbParser *p, RdbBulk b);
 

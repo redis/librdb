@@ -45,7 +45,7 @@
 //#include "listpack_malloc.h"
 
 //#include "redisassert.h"
-#include "../../src/utils.h"
+#include "utils.h"
 //#include "util.h"
 
 

@@ -30,7 +30,7 @@ void testBulkOps(RdbParser *p, RdbBulk b, int strlenCheck) {
         assert_ptr_not_equal(b, bcopy); /* xclone imp creates a new copy */
 
     assert_string_equal(b, bcopy);
-    RDB_bulkFree(p, bcopy);
+    RDB_bulkCopyFree(p, bcopy);
 
     /* Try clone non exist bulk */
     RdbBulk nonExistBulk = "NON EXIST BULK";

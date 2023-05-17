@@ -18,7 +18,7 @@ clean:
 	$(MAKE) -C examples -f Makefile clean
 	$(MAKE) -C test -f Makefile clean
 
-cleanall:
+distclean:
 	$(MAKE) -C deps -f Makefile clean
 	$(MAKE) -C src -f Makefile clean
 	$(MAKE) -C src/ext -f Makefile clean
@@ -42,7 +42,7 @@ help:
 	@echo "    valgrind   - Run tests with static lib and valgrind."
 	@echo "    example    - Run the example."
 	@echo "    clean      - Clean without deps folders"
-	@echo "    cleanall   - Clean including deps folders"
+	@echo "    distclean  - Clean including deps folders"
 	@echo "    help       - Prints this message."
 
 
