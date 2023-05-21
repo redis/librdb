@@ -10,6 +10,7 @@ extern "C" {
 /* Incomplete structures */
 typedef struct RdbxRespFileWriter RdbxRespFileWriter;
 typedef struct RdbxReaderFile RdbxReaderFile;
+typedef struct RdbxReaderFileDesc RdbxReaderFileDesc;
 typedef struct RdbxFilterKey RdbxFilterKey;
 typedef struct RdbxToJson RdbxToJson;
 typedef struct RdbxToResp RdbxToResp;
@@ -35,11 +36,12 @@ typedef enum {
 } RdbxRes;
 
 /****************************************************************
- * Create File Reader
+ * Create RDB Reader
  ****************************************************************/
 
 _LIBRDB_API RdbxReaderFile *RDBX_createReaderFile(RdbParser *parser, const char *filename);
-_LIBRDB_API RdbReader *RDBX_createReaderSocket(int fd);
+
+_LIBRDB_API RdbxReaderFileDesc *RDBX_createReaderFileDesc(RdbParser *p, int fd, int closeWhenDone);
 
 /****************************************************************
  * Create RDB to JSON Handlers

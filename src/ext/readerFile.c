@@ -52,8 +52,3 @@ RdbxReaderFile *RDBX_createReaderFile(RdbParser *p, const char *filename) {
     RDB_createReaderRdb(p, readFile, ctx, deleteReaderFile);
     return ctx;
 }
-
-RdbReader *RDBX_createReaderSocket(int fd) {
-    UNUSED(fd);
-    return NULL;
-}
