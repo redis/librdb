@@ -5,6 +5,10 @@
 #include "../../deps/redis/utils.h"
 #include "../../deps/redis/endianconv.h"
 
+#define RETURN_ON_WRITE_ERR(cmd) do {\
+    if (unlikely(0 == (cmd))) return (RdbRes) RDBX_ERR_RESP_WRITE; \
+    } while(0);
+
 #define WRITE_CONST_STR(wr, str, endCmd) (wr)->write((wr)->ctx, str, sizeof(str) - 1, endCmd)
 
 struct RdbxToResp {
@@ -48,15 +52,14 @@ static void deleteRdbToRespCtx(RdbParser *p, void *context) {
 }
 
 static size_t writeStrLength(RdbxRespWriter *writer, char prefix, long count) {
-    char cbuf[128];
-    int clen;
+    char buf[128];
+    int len;
 
-    cbuf[0] = prefix;
-    clen = 1+ll2string(cbuf+1,sizeof(cbuf)-1,count);
-    cbuf[clen++] = '\r';
-    cbuf[clen++] = '\n';
-    if ((writer->write(writer->ctx, cbuf, clen, 0)) == 0 ) return 0;
-    return clen;
+    buf[0] = prefix;
+    len = 1 + ll2string(buf + 1, sizeof(buf) - 1, count);
+    buf[len++] = '\r';
+    buf[len++] = '\n';
+    return writer->write(writer->ctx, buf, len, 0);
 }
 
 static int rdbVerFromRedisVer(const char *ver) {
@@ -102,15 +105,13 @@ static void resolveSupportRestore(RdbParser *p, RdbxToResp *ctx, int srcRdbVer) 
             isRestore = 0;
     }
 
-    /* by default all data-types are handled by lowest level that is
-     * registered, unless configured otherwise */
-    if (!isRestore) {
-        for (int i = 0 ; i < RDB_DATA_TYPE_MAX ; ++i) {
-            RDB_handleByLevel(p, (RdbDataType) i, RDB_LEVEL_DATA, 0);
-        }
-        RDB_handleByLevel(p, RDB_DATA_TYPE_MODULE, RDB_LEVEL_RAW, 0);
-        return;
+    RdbHandlersLevel lvl = (isRestore) ? RDB_LEVEL_RAW : RDB_LEVEL_DATA;
+    for (int i = 0 ; i < RDB_DATA_TYPE_MAX ; ++i) {
+        RDB_handleByLevel(p, (RdbDataType) i, lvl, 0);
     }
+
+    /* librdb cannot parse a module object */
+    RDB_handleByLevel(p, RDB_DATA_TYPE_MODULE, RDB_LEVEL_RAW, 0);
 }
 
 /*** Handling common ***/
@@ -122,7 +123,6 @@ static RdbRes toRespHandlingNewRdb(RdbParser *p, void *userData, int rdbVersion)
     /* If not configured respWriter then output it to STDOUT */
     assert (ctx->respWriterConfigured == 1);
 
-    /* TODO: configure handlers based on srcRdbVer vs Target rdb version */
     resolveSupportRestore(p, ctx, rdbVersion);
 
     return RDB_OK;
@@ -161,17 +161,17 @@ static RdbRes toRespHandlingString(RdbParser *p, void *userData, RdbBulk value) 
     RdbxRespWriter *writer = &ctx->respWriter;
 
     /* write SET */
-    WRITE_CONST_STR(writer, "*3\r\n$3\r\nSET\r\n", 0);
+    RETURN_ON_WRITE_ERR(WRITE_CONST_STR(writer, "*3\r\n$3\r\nSET\r\n", 0));
 
     /* write key */
-    writeStrLength(writer, '$', ctx->keyCtx.keyLen);
-    writer->write(writer->ctx, ctx->keyCtx.key, ctx->keyCtx.keyLen, 0);
-    WRITE_CONST_STR(writer, "\r\n", 0);
+    RETURN_ON_WRITE_ERR(writeStrLength(writer, '$', ctx->keyCtx.keyLen));
+    RETURN_ON_WRITE_ERR(writer->write(writer->ctx, ctx->keyCtx.key, ctx->keyCtx.keyLen, 0));
+    RETURN_ON_WRITE_ERR(WRITE_CONST_STR(writer, "\r\n", 0));
 
     /* write value */
-    writeStrLength(writer, '$', RDB_bulkLen(p, value));
-    writer->writeBulk(writer->ctx, value, 0);
-    WRITE_CONST_STR(writer, "\r\n", 1);
+    RETURN_ON_WRITE_ERR(writeStrLength(writer, '$', RDB_bulkLen(p, value)));
+    RETURN_ON_WRITE_ERR(writer->writeBulk(writer->ctx, value, 0));
+    RETURN_ON_WRITE_ERR(WRITE_CONST_STR(writer, "\r\n", 1));
     return RDB_OK;
 }
 
@@ -180,17 +180,17 @@ static RdbRes toRespHandlingList (RdbParser *p, void *userData, RdbBulk value) {
     RdbxRespWriter *writer = &ctx->respWriter;
 
     /* write RPUSH */
-    WRITE_CONST_STR(writer, "*3\r\n$5\r\nRPUSH\r\n", 0);
+    RETURN_ON_WRITE_ERR(WRITE_CONST_STR(writer, "*3\r\n$5\r\nRPUSH\r\n", 0));
 
     /* write key */
     writeStrLength(writer, '$', ctx->keyCtx.keyLen);
     writer->write(writer->ctx, ctx->keyCtx.key, ctx->keyCtx.keyLen, 0);
-    WRITE_CONST_STR(writer, "\r\n", 0);
+    RETURN_ON_WRITE_ERR(WRITE_CONST_STR(writer, "\r\n", 0));
 
     /* write value */
     writeStrLength(writer, '$', RDB_bulkLen(p, value));
     writer->writeBulk(writer->ctx, value, 0);
-    WRITE_CONST_STR(writer, "\r\n", 1);
+    RETURN_ON_WRITE_ERR(WRITE_CONST_STR(writer, "\r\n", 1));
 
     return RDB_OK;
 }
@@ -206,17 +206,17 @@ static RdbRes toRespHandlingRawBegin(RdbParser *p, void *userData, size_t size) 
     int numArgs = 4;
     char cmd[64];
     int cmdLen = sprintf(cmd, "*%d\r\n$7\r\nRESTORE\r\n", numArgs);
-    writer->write(writer->ctx, cmd, cmdLen, 0);
+    RETURN_ON_WRITE_ERR(writer->write(writer->ctx, cmd, cmdLen, 0));
 
     /* write key */
-    writeStrLength(writer, '$', ctx->keyCtx.keyLen);
-    writer->write(writer->ctx, ctx->keyCtx.key, ctx->keyCtx.keyLen, 0);
+    RETURN_ON_WRITE_ERR(writeStrLength(writer, '$', ctx->keyCtx.keyLen));
+    RETURN_ON_WRITE_ERR(writer->write(writer->ctx, ctx->keyCtx.key, ctx->keyCtx.keyLen, 0));
 
     /* newline + write TTL */
-    WRITE_CONST_STR(writer, "\r\n$1\r\n0\r\n", 0);
+    RETURN_ON_WRITE_ERR(WRITE_CONST_STR(writer, "\r\n$1\r\n0\r\n", 0));
 
     /* start write value by writing its length */
-    writeStrLength(writer, '$', size  + 10 /*footer*/);
+    RETURN_ON_WRITE_ERR(writeStrLength(writer, '$', size  + 10 /*footer*/));
     return RDB_OK;
 }
 
@@ -224,7 +224,7 @@ static RdbRes toRespHandlingRawFrag(RdbParser *p, void *userData, RdbBulk frag) 
     UNUSED(p);
     RdbxToResp *ctx = (RdbxToResp *) userData;
     ctx->crc = crc64(ctx->crc, (unsigned char *) frag, RDB_bulkLen(p, frag) );
-    ctx->respWriter.writeBulk(ctx->respWriter.ctx, frag, 0);
+    RETURN_ON_WRITE_ERR(ctx->respWriter.writeBulk(ctx->respWriter.ctx, frag, 0));
     return RDB_OK;
 }
 
@@ -242,9 +242,8 @@ static RdbRes toRespHandlingRawFragEnd(RdbParser *p, void *userData) {
     memrev64ifbe(crc);
     memcpy(footer+2, crc, 8);
 
-    // todo check for error
-    if ((writer->write(writer->ctx, footer, 10, 1)) == 0 ) return 0;
-    WRITE_CONST_STR(&(ctx->respWriter), "\r\n", 1);
+    RETURN_ON_WRITE_ERR(writer->write(writer->ctx, footer, 10, 1));
+    RETURN_ON_WRITE_ERR(WRITE_CONST_STR(&(ctx->respWriter), "\r\n", 1));
     return RDB_OK;
 }
 

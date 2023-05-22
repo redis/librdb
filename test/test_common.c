@@ -182,7 +182,6 @@ void testRdbToRespVariousCases(const char *rdbfile,
 
     /* verify number of commands counted */
     UNUSED(expNumCmds);
-    //assert_int_equal( RDBX_getRespFileWriterCmdCount(writer), expNumCmds);
 
     RDB_deleteParser(p);
     assert_payload_file(respfile, expResp, 0);

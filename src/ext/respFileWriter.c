@@ -30,10 +30,6 @@ void respFileWriteDelete(void *context) {
     }
 }
 
-long RDBX_getRespFileWriterCmdCount(RdbxRespFileWriter *wr) {
-    return wr->cmdCount;
-}
-
 RdbxRespFileWriter *RDBX_createRespFileWriter(RdbParser *p, RdbxToResp *rdbToResp, const char* filePath) {
     RdbxRespFileWriter *ctx;
     FILE* filePtr;
