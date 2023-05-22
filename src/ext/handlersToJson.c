@@ -71,6 +71,10 @@ static void outputQuotedEscaping(RdbxToJson *ctx, char *data, size_t len) {
 
 static void deleteRdbToJsonCtx(RdbParser *p, void *data) {
     RdbxToJson *ctx = (RdbxToJson *) data;
+
+    if (ctx->keyCtx.key)
+        RDB_bulkCopyFree(p, ctx->keyCtx.key);
+
     if (ctx->outfile) fclose(ctx->outfile);
     RDB_free(p, ctx->conf.filename);
     RDB_free(p, ctx);
@@ -140,6 +144,7 @@ static RdbRes handlingEndKey(RdbParser *p, void *userData) {
     }
 
     RDB_bulkCopyFree(p, ctx->keyCtx.key);
+    ctx->keyCtx.key = NULL;
 
     /* update new state */
     ctx->state = R2J_IN_DB;

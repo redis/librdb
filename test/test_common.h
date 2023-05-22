@@ -20,10 +20,16 @@ void assert_payload_file(const char *filename, char *expPayload, int sanitize);
 void parseBuffOneCharEachTime(RdbParser *p, unsigned char *buff, size_t size, int isEOF);
 void readFileToBuff(const char* filename, unsigned char** buffer, size_t* length);
 
-void testVariousCases(const char *rdbfile,
+void testRdbToJsonVariousCases(const char *rdbfile,
                       const char *jsonfile,
                       char *expJson,
                       RdbHandlersLevel parseLevel);
+
+void testRdbToRespVariousCases(const char *rdbfile,
+                               const char *respfile,
+                               char *expResp,
+                               RdbxToRespConf *conf,
+                               int expNumCmds);
 
 extern int group_rdb_to_resp();
 extern int group_main(void);

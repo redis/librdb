@@ -41,7 +41,7 @@ RdbxRespFileWriter *RDBX_createRespFileWriter(RdbParser *p, RdbxToResp *rdbToRes
     if (filePath == NULL) {
         filePtr = stdout;
     } else {
-        filePtr = fopen(filePath, "w");
+        filePtr = fopen(filePath, "wb");
         if (filePtr == NULL) {
             RDB_reportError(p, (RdbRes) RDBX_ERR_FAILED_OPEN_FILE, "createRespWriter: Failed to open file: %s", filePath);
             return NULL;
@@ -60,7 +60,7 @@ RdbxRespFileWriter *RDBX_createRespFileWriter(RdbParser *p, RdbxToResp *rdbToRes
 
     /* Attach this writer to rdbToResp */
     RdbxRespWriter writer = {ctx, respFileWrite, respFileWriteBulk, respFileWriteDelete};
-    RDB_attachRespWriter(rdbToResp, &writer);
+    RDBX_attachRespWriter(rdbToResp, &writer);
     return ctx;
 }
 

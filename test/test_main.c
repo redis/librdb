@@ -110,9 +110,8 @@ static void test_mixed_levels_registration(void **state) {
                                                 RDB_LEVEL_RAW));
 
     /* at what level of the parser each obj type should be handled and callback */
-    RDB_handleByLevel(parser, RDB_OBJ_TYPE_STRING, RDB_LEVEL_RAW);
-    RDB_handleByLevel(parser, RDB_OBJ_TYPE_QUICKLIST, RDB_LEVEL_DATA);
-    RDB_handleByLevel(parser, RDB_OBJ_TYPE_QUICKLIST2, RDB_LEVEL_DATA);
+    RDB_handleByLevel(parser, RDB_DATA_TYPE_STRING, RDB_LEVEL_RAW, 0);
+    RDB_handleByLevel(parser, RDB_DATA_TYPE_LIST, RDB_LEVEL_DATA, 0);
 
     while ((status = RDB_parse(parser)) == RDB_STATUS_WAIT_MORE_DATA);
     assert_int_equal( status, RDB_STATUS_OK);
@@ -181,10 +180,13 @@ int main(int argc, char *argv[]) {
         printf("Using External server for the test.");
 
     } else {
+
+        //setenv("LIBRDB_DEBUG_DATA", "1", 1); /*<< to see parser states printouts*/
+
         printf("\n*************** START TESTING *******************\n");
         setenv("LIBRDB_SIM_WAIT_MORE_DATA", "0", 1);
-        RUN_TEST_GROUP(group_main);
         RUN_TEST_GROUP(group_rdb_to_resp);
+        RUN_TEST_GROUP(group_main);
         RUN_TEST_GROUP(group_rdb_to_json);
         RUN_TEST_GROUP(group_mem_management);
         RUN_TEST_GROUP(group_bulk_ops);

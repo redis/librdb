@@ -133,13 +133,13 @@ Following examples avoid error check to keep it concise. Full example can be fou
       RDBX_createReaderFile(parser, "dump.rdb");
       RDBX_createHandlersToJson(parser, encoding, "db.json", RDB_LEVEL_DATA);
       RDB_parse(parser); 
-      RDB_deleteParser(parser); /* delete also reader & Handlers */
+      RDB_deleteParser(parser);
 
 - Parsing RDB file to RESP protocol:
 
       RdbParser *p = RDB_createParserRdb(NULL);
       RDBX_createReaderFile(p, rdbfile);
-      RdbxToResp *rdbToResp = RDBX_createHandlersToResp(p, &config);
+      RdbxToResp *rdbToResp = RDBX_createHandlersToResp(p, NULL);
       RDBX_createRespFileWriter(p, rdbToResp, "./rdbDump.resp");
       RDB_parse(p);
       RDB_deleteParser(parser);

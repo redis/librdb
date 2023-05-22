@@ -1,4 +1,5 @@
 #include <stdio.h>
+#include <assert.h>
 #include <string.h>
 #include <stdlib.h>
 #include "test_common.h"
@@ -36,9 +37,9 @@ void assert_payload_file(const char *filename, char *expPayload, int sanitize) {
     fclose(fp);
 
     if (sanitize)
-        assert_string_equal( sanitizeFile(str) , sanitizeFile(expPayload));
+        assert_string_equal( sanitizeFile(expPayload) , sanitizeFile(str));
     else
-        assert_string_equal(str , expPayload);
+        assert_string_equal(expPayload, str);
     free(str);
 }
 
@@ -66,7 +67,7 @@ void readFileToBuff(const char* filename, unsigned char** buffer, size_t* length
  * bulk allocation type (bulkAllocType) this includes allocating from stack, heap, external,
  * or optimized-external allocation mode.
  */
-void testVariousCases(const char *rdbfile,
+void testRdbToJsonVariousCases(const char *rdbfile,
                       const char *jsonfile,
                       char *expJson,
                       RdbHandlersLevel parseLevel)
@@ -159,6 +160,32 @@ void testVariousCases(const char *rdbfile,
 
         free(buffer);
     }
+}
+
+void testRdbToRespVariousCases(const char *rdbfile,
+                               const char *respfile,
+                               char *expResp,
+                               RdbxToRespConf *conf,
+                               int expNumCmds)
+{
+    RdbStatus  status;
+    RdbxToResp *rdbToResp;
+    RdbxRespFileWriter *writer;
+    RdbParser *p = RDB_createParserRdb(NULL);
+    assert_non_null(RDBX_createReaderFile(p, rdbfile));
+    assert_non_null(rdbToResp = RDBX_createHandlersToResp(p, conf));
+    assert_non_null(writer = RDBX_createRespFileWriter(p, rdbToResp, respfile));
+    RDB_setLogLevel(p, RDB_LOG_ERROR);
+
+    while ((status = RDB_parse(p)) == RDB_STATUS_WAIT_MORE_DATA);
+    assert_int_equal( status, RDB_STATUS_OK);
+
+    /* verify number of commands counted */
+    UNUSED(expNumCmds);
+    //assert_int_equal( RDBX_getRespFileWriterCmdCount(writer), expNumCmds);
+
+    RDB_deleteParser(p);
+    assert_payload_file(respfile, expResp, 0);
 }
 
 void parseBuffOneCharEachTime(RdbParser *p, unsigned char *buff, size_t size, int isEOF) {

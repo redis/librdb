@@ -112,7 +112,7 @@ _LIBRDB_API RdbParser *RDB_createParserRdb(RdbMemAlloc *memAlloc) {
     p->totalHandlers = 0;
     p->firstHandlers = NULL;
 
-    for (int i = 0 ; i < RDB_OBJ_TYPE_MAX ; ++i) {
+    for (int i = 0 ; i < RDB_TYPE_MAX ; ++i) {
         p->handleTypeObjByLevel[i] = RDB_LEVEL_MAX;
     }
 
@@ -399,8 +399,47 @@ _LIBRDB_API RdbHandlers *RDB_createHandlersData(RdbParser *p,
     return hndl;
 }
 
-_LIBRDB_API void RDB_handleByLevel(RdbParser *p, RdbObjType t, RdbHandlersLevel lvl) {
-    p->handleTypeObjByLevel[t] = lvl;
+_LIBRDB_API void RDB_handleByLevel(RdbParser *p, RdbDataType type, RdbHandlersLevel lvl, unsigned int flags) {
+    UNUSED(flags);
+    switch (type) {
+        case RDB_DATA_TYPE_STRING:
+            p->handleTypeObjByLevel[RDB_TYPE_STRING] = lvl;
+            break;
+        case RDB_DATA_TYPE_LIST:
+            p->handleTypeObjByLevel[RDB_TYPE_LIST] = lvl;
+            p->handleTypeObjByLevel[RDB_TYPE_LIST_ZIPLIST] = lvl;
+            p->handleTypeObjByLevel[RDB_TYPE_LIST_QUICKLIST] = lvl;
+            p->handleTypeObjByLevel[RDB_TYPE_LIST_QUICKLIST_2] = lvl;
+            break;
+        case RDB_DATA_TYPE_SET:
+            p->handleTypeObjByLevel[RDB_TYPE_SET] = lvl;
+            p->handleTypeObjByLevel[RDB_TYPE_SET_INTSET] = lvl;
+            p->handleTypeObjByLevel[RDB_TYPE_SET_LISTPACK] = lvl;
+            break;
+        case RDB_DATA_TYPE_ZSET:
+            p->handleTypeObjByLevel[RDB_TYPE_ZSET] = lvl;
+            p->handleTypeObjByLevel[RDB_TYPE_ZSET_2] = lvl;
+            p->handleTypeObjByLevel[RDB_TYPE_ZSET_ZIPLIST] = lvl;
+            p->handleTypeObjByLevel[RDB_TYPE_ZSET_LISTPACK] = lvl;
+            break;
+        case RDB_DATA_TYPE_HASH:
+            p->handleTypeObjByLevel[RDB_TYPE_HASH] = lvl;
+            p->handleTypeObjByLevel[RDB_TYPE_HASH_ZIPMAP] = lvl;
+            p->handleTypeObjByLevel[RDB_TYPE_HASH_ZIPLIST] = lvl;
+            p->handleTypeObjByLevel[RDB_TYPE_HASH_LISTPACK] = lvl;
+            break;
+        case RDB_DATA_TYPE_MODULE:
+            p->handleTypeObjByLevel[RDB_TYPE_MODULE_2] = lvl;
+            break;
+        case RDB_DATA_TYPE_STREAM:
+            p->handleTypeObjByLevel[RDB_TYPE_STREAM_LISTPACKS] = lvl;
+            p->handleTypeObjByLevel[RDB_TYPE_STREAM_LISTPACKS_2] = lvl;
+            p->handleTypeObjByLevel[RDB_TYPE_STREAM_LISTPACKS_3] = lvl;
+            break;
+        default:
+            assert(0);
+    }
+
 }
 
 /*** various functions ***/
@@ -535,7 +574,7 @@ static void resolveMultipleLevelsRegistration(RdbParser *p) {
             (p->numHandlers[1]) ? RDB_LEVEL_STRUCT :
             RDB_LEVEL_DATA ;
 
-    for (int i = 0 ; i < RDB_OBJ_TYPE_MAX ; ++i) {
+    for (int i = 0 ; i < RDB_TYPE_MAX ; ++i) {
         /* check if not configured already by app */
         if (p->handleTypeObjByLevel[i] == RDB_LEVEL_MAX)
             p->handleTypeObjByLevel[i] = lvl;
@@ -752,10 +791,13 @@ RdbStatus elementRdbHeader(RdbParser *p) {
     /* read rdb version */
     p->rdbversion = atoi(((char *) binfo->ref) + 5);
     if (p->rdbversion < 1 || p->rdbversion > RDB_VERSION) {
-        RDB_reportError(p, RDB_ERR_WRONG_FILE_VERSION,
+        RDB_reportError(p, RDB_ERR_UNSUPPORTED_RDB_VERSION,
             "Can't handle RDB format version: %d", p->rdbversion);
         return RDB_STATUS_ERROR;
     }
+
+    RDB_log(p, RDB_LOG_INFO, "The parsed RDB file version is: %d", p->rdbversion);
+
 
     CALL_COMMON_HANDLERS_CB(p, handleNewRdb, p->rdbversion);
 

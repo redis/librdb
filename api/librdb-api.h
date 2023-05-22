@@ -52,7 +52,7 @@ typedef enum RdbRes {
     RDB_ERR_NO_MEMORY,
     RDB_ERR_FAILED_OPEN_RDB_FILE,
     RDB_ERR_WRONG_FILE_SIGNATURE,
-    RDB_ERR_WRONG_FILE_VERSION,
+    RDB_ERR_UNSUPPORTED_RDB_VERSION,
     RDB_ERR_FAILED_PARTIAL_READ_RDB_FILE,
     RDB_ERR_PARSER_RETURNED_INVALID_LIBRDB_STATUS,
     RDB_ERR_INVALID_LEN_ENCODING,
@@ -395,21 +395,24 @@ int RDB_isRefBulk(RdbParser *p, RdbBulk b);
  *
  * As for the callbacks of RDB object types, each level has its own way to
  * handle the data with distinct set of callbacks interfaces. In case of multiple
- * levels registration, the application should configure for each RDB object type
+ * levels registration, the application should configure for each RDB data type
  * at what level it is needed to get parsed by calling `RDB_handleByLevel()`.
  * Otherwise, the parser will resolve it by parsing and calling handlers that are
  * registered at lowest level.
  *****************************************************************/
-typedef enum RdbObjType {
-    /* values aligned with RDB opcodes (defines.h) */
-    RDB_OBJ_TYPE_STRING=0,
-    RDB_OBJ_TYPE_QUICKLIST=14,
-    RDB_OBJ_TYPE_QUICKLIST2=18,
-    RDB_OBJ_TYPE_MAX=22
-} RdbObjType;
+typedef enum RdbDataType {
+    RDB_DATA_TYPE_STRING=0,
+    RDB_DATA_TYPE_LIST,
+    RDB_DATA_TYPE_SET,
+    RDB_DATA_TYPE_ZSET,
+    RDB_DATA_TYPE_HASH,
+    RDB_DATA_TYPE_MODULE,
+    RDB_DATA_TYPE_STREAM,
+    RDB_DATA_TYPE_MAX
+} RdbDataType;
 
-/* Can be called at any point along parsing */
-_LIBRDB_API void RDB_handleByLevel(RdbParser *p, RdbObjType t, RdbHandlersLevel lvl);
+/* Can be called at any point along parsing (Useful after parsing source rdb version) */
+_LIBRDB_API void RDB_handleByLevel(RdbParser *p, RdbDataType t, RdbHandlersLevel lvl, unsigned int flags);
 
 #ifdef __cplusplus
 }

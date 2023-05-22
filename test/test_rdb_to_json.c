@@ -18,7 +18,7 @@ static void test_r2j_single_list_data(void **state) {
         ]
     );
 
-    testVariousCases(PATH_DUMP_FOLDER("single_list.rdb"),
+    testRdbToJsonVariousCases(PATH_DUMP_FOLDER("single_list.rdb"),
                   PATH_TMP_FOLDER("single_list.json"),
                   expJson,
                   RDB_LEVEL_DATA);
@@ -41,7 +41,7 @@ static void test_r2j_single_list_struct(void **state) {
             ]
     );
 
-    testVariousCases(PATH_DUMP_FOLDER("single_list.rdb"),
+    testRdbToJsonVariousCases(PATH_DUMP_FOLDER("single_list.rdb"),
                   PATH_TMP_FOLDER("single_list.json"),
                   expJson,
                   RDB_LEVEL_STRUCT);
@@ -62,7 +62,7 @@ static void test_r2j_single_list_raw (void **state) {
                 {"mylist":"\x12\x01\x02\x19\x19\x00\x00\x00\x03\x00\x84val3\x05\x84val2\x05\x84val1\x05\xff"}
             ]
     );
-    testVariousCases(PATH_DUMP_FOLDER("single_list.rdb"),
+    testRdbToJsonVariousCases(PATH_DUMP_FOLDER("single_list.rdb"),
                   PATH_TMP_FOLDER("single_list.json"),
                   expJson,
                   RDB_LEVEL_RAW);
@@ -86,7 +86,7 @@ static void test_r2j_multiple_lists_and_strings_data (void **state) {
         }]
     );
 
-    testVariousCases(PATH_DUMP_FOLDER("multiple_lists_strings.rdb"),
+    testRdbToJsonVariousCases(PATH_DUMP_FOLDER("multiple_lists_strings.rdb"),
                   PATH_TMP_FOLDER("multiple_lists_strings.json"),
                   expJson,
                   RDB_LEVEL_DATA);
@@ -110,7 +110,7 @@ static void test_r2j_multiple_lists_and_strings_struct (void **state) {
         }]
     );
 
-    testVariousCases(PATH_DUMP_FOLDER("multiple_lists_strings.rdb"),
+    testRdbToJsonVariousCases(PATH_DUMP_FOLDER("multiple_lists_strings.rdb"),
                      PATH_TMP_FOLDER("multiple_lists_strings.json"),
                      expJson,
                      RDB_LEVEL_STRUCT);
@@ -134,7 +134,7 @@ static void test_r2j_multiple_lists_and_strings_raw (void **state) {
             }]
     );
 
-    testVariousCases(PATH_DUMP_FOLDER("multiple_lists_strings.rdb"),
+    testRdbToJsonVariousCases(PATH_DUMP_FOLDER("multiple_lists_strings.rdb"),
                   PATH_TMP_FOLDER("multiple_lists_strings.json"),
                   expJson,
                   RDB_LEVEL_RAW);
@@ -155,7 +155,7 @@ static void test_r2j_single_string_data(void **state) {
                 {"xxx":"111"}
             ]
     );
-    testVariousCases(PATH_DUMP_FOLDER("single_key.rdb"),
+    testRdbToJsonVariousCases(PATH_DUMP_FOLDER("single_key.rdb"),
                   PATH_TMP_FOLDER("single_key.json"),
                   expJson,
                   RDB_LEVEL_DATA);
@@ -176,7 +176,7 @@ static void test_r2j_single_string_struct (void **state) {
             {"xxx":"111"}
             ]
     );
-    testVariousCases(PATH_DUMP_FOLDER("single_key.rdb"),
+    testRdbToJsonVariousCases(PATH_DUMP_FOLDER("single_key.rdb"),
                      PATH_TMP_FOLDER("single_key.json"),
                      expJson,
                      RDB_LEVEL_STRUCT);
@@ -197,7 +197,7 @@ static void test_r2j_single_string_raw (void **state) {
                 {"xxx":"\x00\xc0o"}
             ]
     );
-    testVariousCases(PATH_DUMP_FOLDER("single_key.rdb"),
+    testRdbToJsonVariousCases(PATH_DUMP_FOLDER("single_key.rdb"),
                   PATH_TMP_FOLDER("single_key.json"),
                   expJson,
                   RDB_LEVEL_RAW);
@@ -218,7 +218,7 @@ static void test_r2j_multiple_dbs (void **state) {
             ]
     );
 
-    testVariousCases(PATH_DUMP_FOLDER("multiple_dbs.rdb"),
+    testRdbToJsonVariousCases(PATH_DUMP_FOLDER("multiple_dbs.rdb"),
                      PATH_TMP_FOLDER("multiple_dbs.json"),
                      expJson,
                      RDB_LEVEL_DATA);

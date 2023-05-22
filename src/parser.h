@@ -3,6 +3,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include "defines.h"
 #include "../api/librdb-api.h"
 
 #define MAX_ERROR_MSG 1024
@@ -229,7 +230,7 @@ struct RdbParser {
     int numHandlers[RDB_LEVEL_MAX];
     int totalHandlers;
     RdbHandlers *firstHandlers;
-    RdbHandlersLevel handleTypeObjByLevel[RDB_OBJ_TYPE_MAX];
+    RdbHandlersLevel handleTypeObjByLevel[RDB_TYPE_MAX];
 
     /*** configuration ***/
     RdbMemAlloc mem;

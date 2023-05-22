@@ -31,6 +31,7 @@
 #define RDB_TYPE_STREAM_LISTPACKS_2 19
 #define RDB_TYPE_SET_LISTPACK  20
 #define RDB_TYPE_STREAM_LISTPACKS_3 21
+#define RDB_TYPE_MAX                22
 /* NOTE: WHEN ADDING NEW RDB TYPE, UPDATE rdbIsObjectType() BELOW */
 
 /* Special RDB opcodes (saved/loaded with rdbSaveType/rdbLoadType). */

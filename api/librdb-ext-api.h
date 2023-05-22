@@ -14,6 +14,7 @@ typedef struct RdbxReaderFileDesc RdbxReaderFileDesc;
 typedef struct RdbxFilterKey RdbxFilterKey;
 typedef struct RdbxToJson RdbxToJson;
 typedef struct RdbxToResp RdbxToResp;
+typedef struct RdbxRespWriter RdbxRespWriter;
 
 /****************************************************************
 * Error codes
@@ -58,7 +59,7 @@ _LIBRDB_API RdbxToJson *RDBX_createHandlersToJson(RdbParser *p,
                                                 RdbHandlersLevel lvl);
 
 /****************************************************************
- * Create Filters extensions
+ * Create Filter Handlers
  ****************************************************************/
 
 _LIBRDB_API RdbxFilterKey *RDBX_createHandlersFilterKey(RdbParser *p,
@@ -67,29 +68,55 @@ _LIBRDB_API RdbxFilterKey *RDBX_createHandlersFilterKey(RdbParser *p,
 
 /****************************************************************
  * Create RDB to RESP Handlers
+ * The RDB to RESP handlers (RdbxToResp) provide a way to generate a stream of
+ * redis protocol commands. The output of if it will be consumed
+ * by an instance of type RESP writer (RdbxRespWriter. Explained below).
  ****************************************************************/
 
-typedef struct RdbxRespWriter {
+typedef struct RdbxToRespConf {
+    /* todo: support the option of expire, del, select db */
+
+    /* If set, then data-types will be translated to RESTORE with
+     * raw data (version specific) instead of data-types commands */
+    int supportRestore;
+
+    /* relevant only if supportRestore is set */
+    struct {
+        /* It is required to verify that the target (consumer) of the RESP payload
+         * is aligned with the version of the source RDB file. Otherwise, restore
+         * won't be respected */
+
+        /* Configure what is target RDB version. if equals 0, then the value
+         * will be resolved by the value of dstRedisVersion. */
+        int dstRdbVersion;
+
+        /* an alternative configuration to dstRdbVersion */
+        const char *dstRedisVersion;
+    } restore;
+
+} RdbxToRespConf;
+
+_LIBRDB_API RdbxToResp *RDBX_createHandlersToResp(RdbParser *, RdbxToRespConf *);
+
+/****************************************************************
+ * Create RESP writer
+ * Create instance for writing RDB to RESP stream. Can Either use built-in
+ * RESP File writer (RdbxRespFileWriter) or create one of your own by
+ * filling struct RdbxRespWriter and attaching it to RDB to RESP handlers
+ * by calling function RDBX_attachRespWriter.
+ ****************************************************************/
+
+/* todo: modify write functions to return RdbRes. Check returned values for all calls */
+struct RdbxRespWriter {
     void *ctx;
     size_t (*write)(void *ctx, char *str, int len, int endCmd);
     size_t (*writeBulk)(void *context, RdbBulk bulk, int endCmd);
     void (*delete)(void *ctx);
-} RdbxRespWriter;
+};
 
-typedef struct RdbxToRespConfig {
-    const char* targetRedisVer;
-} RdbxToRespConfig;
+_LIBRDB_API void RDBX_attachRespWriter(RdbxToResp *rdbToResp, RdbxRespWriter *writer);
 
-_LIBRDB_API RdbxToResp *RDBX_createHandlersToResp(RdbParser *p, RdbxToRespConfig *config);
-
-/* Either Creation of RdbxRespFileWriter will register or create customized one */
-_LIBRDB_API void RDB_attachRespWriter(RdbxToResp *rdbToResp, RdbxRespWriter *writer);
-
-/****************************************************************
- * Create RESP writer
- ****************************************************************/
-
-/* if filePath is NULL then STDOUT will be used */
+/* if filePath is NULL then write stdout */
 _LIBRDB_API RdbxRespFileWriter *RDBX_createRespFileWriter(RdbParser *p,
                                                           RdbxToResp *rdbToResp,
                                                           const char* filepath);
