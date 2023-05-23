@@ -106,7 +106,7 @@ Level0. The same goes between Level2 and Level1 correspondingly.
 The **Handlers** represent a set of builtin or user-defined functions that will be called on the
 parsed data. Future plan to support built-in Handlers:
 * Convert RDB to JSON file handlers. (Status: WIP)
-* Convert RDB to RESP protocol handlers. (Status: Todo)
+* Convert RDB to RESP protocol handlers. (Status: WIP)
 * Memory Analyze (Status: Todo)
 
 It is possible to attach to parser more than one set of handlers at the same level.

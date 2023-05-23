@@ -120,6 +120,27 @@ static void test_r2r_single_list_restore(void **state) {
                               (char *) expRespRestore, &r2rConf, 1);
 }
 
+static void test_r2r_multiple_lists_and_strings(void **state) {
+    UNUSED(state);
+    RdbxToRespConf r2rConf;
+
+    char expResp[] = "*3\r\n$3\r\nSET\r\n$7\r\nstring2\r\n$9\r\nHi there!\r\n"
+                     "*3\r\n$5\r\nRPUSH\r\n$7\r\nmylist1\r\n$2\r\nv1\r\n"
+                     "*3\r\n$5\r\nRPUSH\r\n$7\r\nmylist3\r\n$2\r\nv3\r\n"
+                     "*3\r\n$5\r\nRPUSH\r\n$7\r\nmylist3\r\n$2\r\nv2\r\n"
+                     "*3\r\n$5\r\nRPUSH\r\n$7\r\nmylist3\r\n$2\r\nv1\r\n"
+                     "*3\r\n$3\r\nSET\r\n$14\r\nlzf_compressed\r\n$118\r\ncccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\r\n"
+                     "*3\r\n$3\r\nSET\r\n$7\r\nstring1\r\n$4\r\nblaa\r\n"
+                     "*3\r\n$5\r\nRPUSH\r\n$7\r\nmylist2\r\n$2\r\nv2\r\n"
+                     "*3\r\n$5\r\nRPUSH\r\n$7\r\nmylist2\r\n$2\r\nv1\r\n";
+
+    /* Won't use RESTORE command because target RDB ver. < source RDB ver. */
+    r2rConf.supportRestore = 1;
+    r2rConf.restore.dstRdbVersion = 6;
+    testRdbToRespVariousCases(PATH_DUMP_FOLDER("multiple_lists_strings.rdb"),
+                              PATH_TMP_FOLDER("multiple_lists_strings.resp"),
+                              expResp, &r2rConf, 1);
+}
 /*************************** group_rdb_to_json *******************************/
 int group_rdb_to_resp(void) {
     const struct CMUnitTest tests[] = {
@@ -127,6 +148,7 @@ int group_rdb_to_resp(void) {
             cmocka_unit_test(test_r2r_single_string),
             cmocka_unit_test(test_r2r_single_list_restore),
             cmocka_unit_test(test_r2r_single_list),
+            cmocka_unit_test(test_r2r_multiple_lists_and_strings),
     };
     return cmocka_run_group_tests(tests, NULL, NULL);
 }
