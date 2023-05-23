@@ -183,13 +183,13 @@ static RdbRes toRespHandlingList (RdbParser *p, void *userData, RdbBulk value) {
     RETURN_ON_WRITE_ERR(WRITE_CONST_STR(writer, "*3\r\n$5\r\nRPUSH\r\n", 0));
 
     /* write key */
-    writeStrLength(writer, '$', ctx->keyCtx.keyLen);
-    writer->write(writer->ctx, ctx->keyCtx.key, ctx->keyCtx.keyLen, 0);
+    RETURN_ON_WRITE_ERR(writeStrLength(writer, '$', ctx->keyCtx.keyLen));
+    RETURN_ON_WRITE_ERR(writer->write(writer->ctx, ctx->keyCtx.key, ctx->keyCtx.keyLen, 0));
     RETURN_ON_WRITE_ERR(WRITE_CONST_STR(writer, "\r\n", 0));
 
     /* write value */
-    writeStrLength(writer, '$', RDB_bulkLen(p, value));
-    writer->writeBulk(writer->ctx, value, 0);
+    RETURN_ON_WRITE_ERR(writeStrLength(writer, '$', RDB_bulkLen(p, value)));
+    RETURN_ON_WRITE_ERR(writer->writeBulk(writer->ctx, value, 0));
     RETURN_ON_WRITE_ERR(WRITE_CONST_STR(writer, "\r\n", 1));
 
     return RDB_OK;
