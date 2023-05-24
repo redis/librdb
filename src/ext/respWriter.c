@@ -9,19 +9,19 @@ struct RdbxRespFileWriter {
 };
 
 size_t respFileWrite(void *context, char *str, int len, int endCmd) {
-    struct RdbxRespFileWriter *ctx = (RdbxRespFileWriter *) context;
+    struct RdbxRespFileWriter *ctx = context;
     ctx->cmdCount += endCmd;
     return fwrite(str, sizeof(char), len, ctx->filePtr);
 }
 
 size_t respFileWriteBulk(void *context, RdbBulk b, int endCmd) {
-    struct RdbxRespFileWriter *ctx = (RdbxRespFileWriter *) context;
+    struct RdbxRespFileWriter *ctx = context;
     UNUSED(endCmd);
     return fwrite(b, sizeof(char), RDB_bulkLen(ctx->p, b), ctx->filePtr);
 }
 
 void respFileWriteDelete(void *context) {
-    struct RdbxRespFileWriter *ctx = (RdbxRespFileWriter *) context;
+    struct RdbxRespFileWriter *ctx = context;
     if (ctx != NULL) {
         if (ctx->filePtr != stdout) {
             fclose(ctx->filePtr);

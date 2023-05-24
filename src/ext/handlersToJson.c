@@ -109,7 +109,7 @@ static RdbxToJson *initRdbToJsonCtx(RdbParser *p, RdbxToJsonEnc encoding, const 
 /*** Handling common ***/
 
 static RdbRes handlingAuxField(RdbParser *p, void *userData, RdbBulk auxkey, RdbBulk auxval) {
-    RdbxToJson *ctx = (RdbxToJson *) userData;
+    RdbxToJson *ctx = userData;
     UNUSED(p);
 
     /* output json part */
@@ -122,7 +122,7 @@ static RdbRes handlingAuxField(RdbParser *p, void *userData, RdbBulk auxkey, Rdb
 }
 
 static RdbRes handlingEndKey(RdbParser *p, void *userData) {
-    RdbxToJson *ctx = (RdbxToJson *) userData;
+    RdbxToJson *ctx = userData;
 
     /* output json part */
     switch(ctx->state) {
@@ -153,7 +153,7 @@ static RdbRes handlingEndKey(RdbParser *p, void *userData) {
 }
 
 static RdbRes handlingNewKey(RdbParser *p, void *userData, RdbBulk key, RdbKeyInfo *info) {
-    RdbxToJson *ctx = (RdbxToJson *) userData;
+    RdbxToJson *ctx = userData;
 
     if (ctx->state != R2J_IN_DB) {
         RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
@@ -176,7 +176,7 @@ static RdbRes handlingNewKey(RdbParser *p, void *userData, RdbBulk key, RdbKeyIn
 
 static RdbRes handlingNewDb(RdbParser *p, void *userData, int db) {
     UNUSED(db);
-    RdbxToJson *ctx = (RdbxToJson *) userData;
+    RdbxToJson *ctx = userData;
 
     if (ctx->state == R2J_IDLE) {
         ouput_fprintf(ctx, "[{\n");
@@ -197,7 +197,7 @@ static RdbRes handlingNewDb(RdbParser *p, void *userData, int db) {
 }
 
 static RdbRes handlingEndRdb(RdbParser *p, void *userData) {
-    RdbxToJson *ctx = (RdbxToJson *) userData;
+    RdbxToJson *ctx = userData;
 
     if (ctx->state != R2J_IN_DB) {
         RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
@@ -218,7 +218,7 @@ static RdbRes handlingEndRdb(RdbParser *p, void *userData) {
 
 static RdbRes handlingString(RdbParser *p, void *userData, RdbBulk value) {
     UNUSED(p);
-    RdbxToJson *ctx = (RdbxToJson *) userData;
+    RdbxToJson *ctx = userData;
 
     /* output json part */
     outputQuotedEscaping(ctx, value, RDB_bulkLen(p, value));
@@ -227,7 +227,7 @@ static RdbRes handlingString(RdbParser *p, void *userData, RdbBulk value) {
 }
 
 static RdbRes handlingList(RdbParser *p, void *userData, RdbBulk str) {
-    RdbxToJson *ctx = (RdbxToJson *) userData;
+    RdbxToJson *ctx = userData;
 
     if (ctx->state == R2J_IN_KEY) {
 
@@ -258,7 +258,7 @@ static RdbRes handlingList(RdbParser *p, void *userData, RdbBulk str) {
 /*** Handling struct ***/
 
 static RdbRes handlingQListNode(RdbParser *p, void *userData, RdbBulk listNode) {
-    RdbxToJson *ctx = (RdbxToJson *) userData;
+    RdbxToJson *ctx = userData;
 
     if (ctx->state == R2J_IN_KEY) {
 
@@ -290,7 +290,7 @@ static RdbRes handlingQListNode(RdbParser *p, void *userData, RdbBulk listNode) 
 
 static RdbRes handlingFrag(RdbParser *p, void *userData, RdbBulk frag) {
     UNUSED(p);
-    RdbxToJson *ctx = (RdbxToJson *) userData;
+    RdbxToJson *ctx = userData;
     /* output json part */
     ctx->encfunc(ctx, frag, RDB_bulkLen(p, frag));
     return RDB_OK;
@@ -299,14 +299,14 @@ static RdbRes handlingFrag(RdbParser *p, void *userData, RdbBulk frag) {
 static RdbRes handlingRawBegin(RdbParser *p, void *userData, size_t size) {
     UNUSED(p);
     UNUSED(size);
-    RdbxToJson *ctx = (RdbxToJson *) userData;
+    RdbxToJson *ctx = userData;
     ouput_fprintf(ctx, "\"");
     return RDB_OK;
 }
 
 static RdbRes handlingRawEnd(RdbParser *p, void *userData) {
     UNUSED(p);
-    RdbxToJson *ctx = (RdbxToJson *) userData;
+    RdbxToJson *ctx = userData;
     ouput_fprintf(ctx, "\"");
     return RDB_OK;
 }

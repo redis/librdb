@@ -118,7 +118,7 @@ static void resolveSupportRestore(RdbParser *p, RdbxToResp *ctx, int srcRdbVer) 
 
 static RdbRes toRespHandlingNewRdb(RdbParser *p, void *userData, int rdbVersion) {
     UNUSED(p);
-    RdbxToResp *ctx = (RdbxToResp *) userData;
+    RdbxToResp *ctx = userData;
 
     /* If not configured respWriter then output it to STDOUT */
     assert (ctx->respWriterConfigured == 1);
@@ -130,7 +130,7 @@ static RdbRes toRespHandlingNewRdb(RdbParser *p, void *userData, int rdbVersion)
 
 static RdbRes toRespHandlingNewKey(RdbParser *p, void *userData, RdbBulk key, RdbKeyInfo *info) {
     UNUSED(info);
-    RdbxToResp *ctx = (RdbxToResp *) userData;
+    RdbxToResp *ctx = userData;
 
     if (ctx->keyCtx.key != NULL)
         RDB_bulkCopyFree(p, ctx->keyCtx.key);
@@ -145,7 +145,7 @@ static RdbRes toRespHandlingNewKey(RdbParser *p, void *userData, RdbBulk key, Rd
 
 static RdbRes toRespHandlingEndKey(RdbParser *p, void *userData) {
     UNUSED(p);
-    RdbxToResp *ctx = (RdbxToResp *) userData;
+    RdbxToResp *ctx = userData;
 
     if (ctx->keyCtx.key != NULL)
         RDB_bulkCopyFree(p, ctx->keyCtx.key);
@@ -157,7 +157,7 @@ static RdbRes toRespHandlingEndKey(RdbParser *p, void *userData) {
 /*** Handling data ***/
 
 static RdbRes toRespHandlingString(RdbParser *p, void *userData, RdbBulk value) {
-    RdbxToResp *ctx = (RdbxToResp *) userData;
+    RdbxToResp *ctx = userData;
     RdbxRespWriter *writer = &ctx->respWriter;
 
     /* write SET */
@@ -176,7 +176,7 @@ static RdbRes toRespHandlingString(RdbParser *p, void *userData, RdbBulk value) 
 }
 
 static RdbRes toRespHandlingList (RdbParser *p, void *userData, RdbBulk value) {
-    RdbxToResp *ctx = (RdbxToResp *) userData;
+    RdbxToResp *ctx = userData;
     RdbxRespWriter *writer = &ctx->respWriter;
 
     /* write RPUSH */
@@ -199,7 +199,7 @@ static RdbRes toRespHandlingList (RdbParser *p, void *userData, RdbBulk value) {
 
 static RdbRes toRespHandlingRawBegin(RdbParser *p, void *userData, size_t size) {
     UNUSED(p);
-    RdbxToResp *ctx = (RdbxToResp *) userData;
+    RdbxToResp *ctx = userData;
     RdbxRespWriter *writer = &ctx->respWriter;
 
     /* write RESTORE */
@@ -222,7 +222,7 @@ static RdbRes toRespHandlingRawBegin(RdbParser *p, void *userData, size_t size) 
 
 static RdbRes toRespHandlingRawFrag(RdbParser *p, void *userData, RdbBulk frag) {
     UNUSED(p);
-    RdbxToResp *ctx = (RdbxToResp *) userData;
+    RdbxToResp *ctx = userData;
     ctx->crc = crc64(ctx->crc, (unsigned char *) frag, RDB_bulkLen(p, frag) );
     RETURN_ON_WRITE_ERR(ctx->respWriter.writeBulk(ctx->respWriter.ctx, frag, 0));
     return RDB_OK;
@@ -230,7 +230,7 @@ static RdbRes toRespHandlingRawFrag(RdbParser *p, void *userData, RdbBulk frag) 
 
 static RdbRes toRespHandlingRawFragEnd(RdbParser *p, void *userData) {
     UNUSED(p);
-    RdbxToResp *ctx = (RdbxToResp *) userData;
+    RdbxToResp *ctx = userData;
     RdbxRespWriter *writer = &ctx->respWriter;
     uint64_t *crc = &(ctx->crc);
 

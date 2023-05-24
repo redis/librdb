@@ -23,7 +23,7 @@ static void deleteFilterKeyCtx(RdbParser *p, void *data) {
 
 static RdbRes filterHandlingNewKey(RdbParser *p, void *userData, RdbBulk key, RdbKeyInfo *info) {
     UNUSED(p, info);
-    RdbxFilterKey *ctx = (RdbxFilterKey *) userData;
+    RdbxFilterKey *ctx = userData;
     ctx->cbReturnValue = (regexec(&ctx->regex_compiled, key, 0, NULL, 0)) ? RDB_OK_DONT_PROPAGATE : RDB_OK;
     return ctx->cbReturnValue;
 }
