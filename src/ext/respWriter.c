@@ -1,11 +1,12 @@
 #include <stdio.h>
-#include <stdlib.h>
 #include "common.h"
+#include <string.h>
+
 
 struct RdbxRespFileWriter {
     long cmdCount;
     RdbParser *p;
-    FILE* filePtr;   /* either stdout or pointer to open file */
+    FILE *filePtr;   /* either stdout or pointer to open file */
 };
 
 size_t respFileWrite(void *context, char *str, int len, int endCmd) {
@@ -30,23 +31,24 @@ void respFileWriteDelete(void *context) {
     }
 }
 
-RdbxRespFileWriter *RDBX_createRespFileWriter(RdbParser *p, RdbxToResp *rdbToResp, const char* filePath) {
+RdbxRespFileWriter *RDBX_createRespFileWriter(RdbParser *p, RdbxToResp *rdbToResp, const char *filePath) {
     RdbxRespFileWriter *ctx;
-    FILE* filePtr;
+    FILE *filePtr;
 
     if (filePath == NULL) {
         filePtr = stdout;
     } else {
         filePtr = fopen(filePath, "wb");
         if (filePtr == NULL) {
-            RDB_reportError(p, (RdbRes) RDBX_ERR_FAILED_OPEN_FILE, "createRespWriter: Failed to open file: %s", filePath);
+            RDB_reportError(p, (RdbRes) RDBX_ERR_FAILED_OPEN_FILE, "createRespWriter: Failed to open file: %s",
+                            filePath);
             return NULL;
         }
     }
 
     if ((ctx = RDB_alloc(p, sizeof(RdbxRespFileWriter))) == NULL) {
         fclose(filePtr);
-        RDB_reportError(p, (RdbRes) RDBX_ERR_RESP_FAILED_ALLOC, "Failed to allocate RdbxRespFileWriter");
+        RDB_reportError(p, (RdbRes) RDBX_ERR_RESP_FAILED_ALLOC, "Failed to allocate struct RdbxRespFileWriter");
         return NULL;
     }
 
@@ -59,4 +61,3 @@ RdbxRespFileWriter *RDBX_createRespFileWriter(RdbParser *p, RdbxToResp *rdbToRes
     RDBX_attachRespWriter(rdbToResp, &writer);
     return ctx;
 }
-

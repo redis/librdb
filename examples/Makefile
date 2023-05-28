@@ -20,6 +20,11 @@ CFLAGS      = -fPIC -O3 $(STD) $(STACK) $(WARNS)
 DEBUG       = -g3 -DDEBUG=1
 LIBS        = -L /usr/lib -L $(LIB_DIR) -l $(LIB_NAME) -l $(LIB_NAME_EXT)
 
+ifeq ($(BUILD_TLS),yes)
+CFLAGS+=-DUSE_OPENSSL=1
+LIBS+=-lssl -lcrypto
+endif
+
 ######################################### RULES #######################################
 all: $(TARGET_TEST)
 	@echo "Done.";

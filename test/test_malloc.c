@@ -26,20 +26,6 @@ static void test_extern_alloc(void **state) {
     UNUSED(state);
     RdbStatus  status;
 
-    char expJson[] = QUOTE(
-            "redis-ver":"255.255.255",
-            "redis-bits":"64",
-            "ctime":"1672087814",
-            "used-mem":"972952",
-            "repl-stream-db":"0",
-            "repl-id":"67ebe8f627f436e2630eef8661a697fa33563a8f",
-            "repl-offset":"162341903",
-            "aof-base":"0",
-            [
-                {"xxx":"111"}
-            ]
-    );
-
     for (int bulkAllocType = 0 ; bulkAllocType < RDB_BULK_ALLOC_MAX ; ++bulkAllocType) {
         memset(counters, 0, sizeof(counters));
 
@@ -51,15 +37,15 @@ static void test_extern_alloc(void **state) {
         RdbParser *parser = RDB_createParserRdb(&mem);
         RDB_setLogLevel(parser, RDB_LOG_ERROR);
 
-        assert_non_null(RDBX_createReaderFile(parser, PATH_DUMP_FOLDER("single_key.rdb")));
+        assert_non_null(RDBX_createReaderFile(parser, DUMP_FOLDER("single_key.rdb")));
+        RdbxToJsonConf r2jConf = {RDB_LEVEL_DATA, RDBX_CONV_JSON_ENC_PLAIN, 0, 1};
         assert_non_null(RDBX_createHandlersToJson(parser,
-                                                  RDBX_CONV_JSON_ENC_PLAIN,
-                                                  PATH_TMP_FOLDER("single_key.json"),
-                                                  RDB_LEVEL_DATA));
+                                                  TMP_FOLDER("single_key.json"),
+                                                  &r2jConf));
         while ((status = RDB_parse(parser)) == RDB_STATUS_WAIT_MORE_DATA);
         assert_int_equal(status, RDB_STATUS_OK);
         RDB_deleteParser(parser);
-        assert_payload_file(PATH_TMP_FOLDER("single_key.json"), expJson, 1);
+        assert_json_equal(TMP_FOLDER("single_key.json"), DUMP_FOLDER("single_key_data.json"));
 
         switch (bulkAllocType) {
             case RDB_BULK_ALLOC_STACK:

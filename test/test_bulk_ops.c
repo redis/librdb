@@ -114,7 +114,7 @@ static void test_raw_handlers_callbacks_bulk_ops (void **state) {
 
         RdbParser *parser = RDB_createParserRdb(&mem);
         RDB_setLogger(parser, loggerCb);
-        assert_non_null(RDBX_createReaderFile(parser, PATH_DUMP_FOLDER("multiple_lists_strings.rdb")));
+        assert_non_null(RDBX_createReaderFile(parser, DUMP_FOLDER("multiple_lists_strings.rdb")));
         assert_non_null(RDB_createHandlersRaw(parser, &callbacks, user_data, NULL));
         while ((status = RDB_parse(parser)) == RDB_STATUS_WAIT_MORE_DATA);
         assert_int_equal( status, RDB_STATUS_OK);
@@ -141,7 +141,7 @@ static void test_struct_handlers_callbacks_bulk_ops (void **state) {
 
         RdbParser *parser = RDB_createParserRdb(&mem);
         RDB_setLogger(parser, loggerCb);
-        assert_non_null(RDBX_createReaderFile(parser, PATH_DUMP_FOLDER("multiple_lists_strings.rdb")));
+        assert_non_null(RDBX_createReaderFile(parser, DUMP_FOLDER("multiple_lists_strings.rdb")));
         assert_non_null(RDB_createHandlersStruct(parser, &callbacks, user_data, NULL));
         while ((status = RDB_parse(parser)) == RDB_STATUS_WAIT_MORE_DATA);
         assert_int_equal( status, RDB_STATUS_OK);
@@ -166,7 +166,7 @@ static void test_data_handlers_callbacks_bulk_ops (void **state) {
 
         RdbParser *parser = RDB_createParserRdb(&mem);
         RDB_setLogger(parser, loggerCb);
-        assert_non_null(RDBX_createReaderFile(parser, PATH_DUMP_FOLDER("multiple_lists_strings.rdb")));
+        assert_non_null(RDBX_createReaderFile(parser, DUMP_FOLDER("multiple_lists_strings.rdb")));
         assert_non_null(RDB_createHandlersData(parser, &callbacks, user_data, NULL));
         while ((status = RDB_parse(parser)) == RDB_STATUS_WAIT_MORE_DATA);
         assert_int_equal( status, RDB_STATUS_OK);

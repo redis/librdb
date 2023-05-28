@@ -14,17 +14,21 @@ with further development. Community contributions are welcome, yet please note t
 the codebase is still undergoing significant changes and may evolve in the future.
 
 ## Getting Started
+If you just wish to get a basic understanding of the library's functionality, without
+running tests (To see parser internal state printouts, execute the command 
+`export LIBRDB_DEBUG_DATA=1` beforehand):
+
+    % make lib example
+
 To build and run tests, you need to have cmocka unit testing framework installed and then:
 
-    make
+    % make
 
-If you just wish to get a basic understanding of the library's functionality, without
-running tests:
 
-    make lib 
-    make example
+To build with TLS support, you'll need OpenSSL development libraries (e.g.
+libssl-dev on Debian/Ubuntu) and run:
 
-To see parser internal state printouts, execute the command `export LIBRDB_DEBUG_DATA=1` beforehand.
+    % make BUILD_TLS=yes
 
 ## Motivation behind this project
 There is a genuine need by the Redis community for a versatile RDB file parser that can 
@@ -131,7 +135,7 @@ Following examples avoid error check to keep it concise. Full example can be fou
 
       RdbParser *parser = RDB_createParserRdb(NULL);
       RDBX_createReaderFile(parser, "dump.rdb");
-      RDBX_createHandlersToJson(parser, encoding, "db.json", RDB_LEVEL_DATA);
+      RDBX_createHandlersToJson(parser, "db.json", NULL);
       RDB_parse(parser); 
       RDB_deleteParser(parser);
 
@@ -162,7 +166,7 @@ Following examples avoid error check to keep it concise. Full example can be fou
 
       RdbParser *parser = RDB_createParserRdb(NULL);
       RDBX_createReaderFile(parser, "dump.rdb");
-      RDBX_createHandlersToJson(parser, encoding, "redis.json", RDB_LEVEL_DATA);
+      RDBX_createHandlersToJson(parser, "redis.json", NULL);
       RDBX_createHandlersFilterKey(parser, "id_*", 0);
       RDB_parse(parser);
       RDB_deleteParser(parser);
@@ -171,7 +175,7 @@ Following examples avoid error check to keep it concise. Full example can be fou
 
       unsigned char rdbContent[] =  {'R', 'E', 'D', 'I', 'S', .... };
       RdbParser *parser = RDB_createParserRdb(NULL);
-      RDBX_createHandlersToJson(parser, encoding, "redis.json", RDB_LEVEL_DATA);
+      RDBX_createHandlersToJson(parser, "redis.json", NULL);
       RDB_parseBuff(parser, rdbContent, sizeof(rdbContent), 1 /*EOF*/);
       RDB_deleteParser(parser);
 
@@ -212,7 +216,7 @@ of streamed buffers by using the `RDB_parseBuff()` function:
         RdbStatus status;
         const int BUFF_SIZE = 200000;
         RdbParser *parser = RDB_createParserRdb(NULL);
-        RDBX_createHandlersToJson(parser, encoding, fnameOut, RDB_LEVEL_DATA);
+        RDBX_createHandlersToJson(parser, fnameOut, NULL);
         void *buf = malloc(BUFF_SIZE);
         do {                        
             int bytes_read = read(file_descriptor, buf, BUFF_SIZE);
@@ -242,7 +246,7 @@ configured interval, at which point it will automatically pause and return
       size_t intervalBytes = 1048576;  
       RdbParser *parser = RDB_createParserRdb(memAlloc);
       RDBX_createReaderFile(parser, "dump.rdb");
-      RDBX_createHandlersToJson(parser, encoding, "db.json", RDB_LEVEL_DATA);
+      RDBX_createHandlersToJson(parser, "db.json", NULL);
       RDB_setPauseInterval(parser, intervalBytes);
       while (RDB_parse(parser) == RDB_STATUS_PAUSED) {
           /* do something else in between */

@@ -1,3 +1,7 @@
+ifeq ($(BUILD_TLS),yes)
+export BUILD_TLS
+endif
+
 all:
 	$(MAKE) -C deps -f Makefile all
 	$(MAKE) -C src -f Makefile all

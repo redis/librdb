@@ -1,0 +1,11 @@
+"redis-ver":"255.255.255",
+"redis-bits":"64",
+"ctime":"1677580558",
+"used-mem":"937464",
+"aof-base":"0",
+"string2":"Hi there!",
+"mylist1":["v1"],
+"mylist3":["v3","v2","v1"],
+"lzf_compressed":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
+"string1":"blaa",
+"mylist2":["v2","v1"]

@@ -49,7 +49,7 @@ int main() {
     if (!reader) goto PARSER_ERROR;
 
     /* Create RDB to JSON built-in Handlers */
-    rdbToJson = RDBX_createHandlersToJson(parser, RDBX_CONV_JSON_ENC_PLAIN, outfile, RDB_LEVEL_DATA);
+    rdbToJson = RDBX_createHandlersToJson(parser, outfile, NULL);
     if (!rdbToJson) goto PARSER_ERROR;
 
     /* Filter keys that starts with the word `mylist` */

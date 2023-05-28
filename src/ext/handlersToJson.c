@@ -20,13 +20,9 @@ typedef enum
     R2J_IN_ZSET
 } RdbxToJsonState;
 
-typedef struct RdbxToJsonConfig {
-    char *filename;
-    RdbxToJsonEnc encoding;
-} RdbxToJsonConfig;
-
 struct RdbxToJson {
-    RdbxToJsonConfig conf;
+    char *filename;
+    RdbxToJsonConf conf;
     RdbxToJsonState state;
     FILE *outfile;
     void (*encfunc)(struct RdbxToJson *ctx, char *p, size_t len);
@@ -76,11 +72,11 @@ static void deleteRdbToJsonCtx(RdbParser *p, void *data) {
         RDB_bulkCopyFree(p, ctx->keyCtx.key);
 
     if (ctx->outfile) fclose(ctx->outfile);
-    RDB_free(p, ctx->conf.filename);
+    RDB_free(p, ctx->filename);
     RDB_free(p, ctx);
 }
 
-static RdbxToJson *initRdbToJsonCtx(RdbParser *p, RdbxToJsonEnc encoding, const char *filename) {
+static RdbxToJson *initRdbToJsonCtx(RdbParser *p, const char *filename, RdbxToJsonConf *conf) {
     FILE *f;
 
     if (!(f = fopen(filename, "w"))) {
@@ -91,13 +87,21 @@ static RdbxToJson *initRdbToJsonCtx(RdbParser *p, RdbxToJsonEnc encoding, const 
 
     /* init RdbToJson context */
     RdbxToJson *ctx = RDB_alloc(p, sizeof(RdbxToJson));
-    ctx->conf.filename = RDB_alloc(p, strlen(filename)+1);
-    strcpy(ctx->conf.filename, filename);
+    ctx->filename = RDB_alloc(p, strlen(filename)+1);
+    strcpy(ctx->filename, filename);
     ctx->outfile = f;
     ctx->state = R2J_IDLE;
     ctx->count_keys = 0;
-    ctx->conf.encoding = encoding;
-    switch(encoding) {
+
+    /* default configuration */
+    ctx->conf.encoding = RDBX_CONV_JSON_ENC_PLAIN;
+    ctx->conf.level = RDB_LEVEL_DATA;
+    ctx->conf.skipAuxField = 0;
+
+    /* override configuration if provided */
+    if (conf) ctx->conf = *conf;
+
+    switch(ctx->conf.encoding) {
         case RDBX_CONV_JSON_ENC_PLAIN: ctx->encfunc = outputPlainEscaping; break;
         case RDBX_CONV_JSON_ENC_BASE64: /* todo: support base64 */
         default: assert(0); break;
@@ -179,10 +183,14 @@ static RdbRes handlingNewDb(RdbParser *p, void *userData, int db) {
     RdbxToJson *ctx = userData;
 
     if (ctx->state == R2J_IDLE) {
-        ouput_fprintf(ctx, "[{\n");
+        if (!ctx->conf.flatten) ouput_fprintf(ctx, "[{\n");
     } else if (ctx->state == R2J_IN_DB) {
         /* output json part */
-        ouput_fprintf(ctx, "},{\n");
+        if (!ctx->conf.flatten) {
+            ouput_fprintf(ctx, "},{\n");
+        } else {
+            ouput_fprintf(ctx, ",\n");
+        }
     } else {
         RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
                         "handlingNewDb(): Invalid state value: %d", ctx->state);
@@ -206,7 +214,7 @@ static RdbRes handlingEndRdb(RdbParser *p, void *userData) {
     }
 
     /* output json part */
-    ouput_fprintf(ctx, "\n}]\n");
+    if (!ctx->conf.flatten) ouput_fprintf(ctx, "\n}]\n");
 
     /* update new state */
     ctx->state = R2J_IDLE;
@@ -311,29 +319,31 @@ static RdbRes handlingRawEnd(RdbParser *p, void *userData) {
     return RDB_OK;
 }
 
-RdbxToJson *RDBX_createHandlersToJson(RdbParser *p, RdbxToJsonEnc encoding, const char *filename, RdbHandlersLevel lvl) {
-    RdbxToJson *ctx = initRdbToJsonCtx(p, encoding, filename);
+RdbxToJson *RDBX_createHandlersToJson(RdbParser *p, const char *filename, RdbxToJsonConf *conf) {
+    RdbxToJson *ctx = initRdbToJsonCtx(p, filename, conf);
     if (ctx == NULL) return NULL;
 
     CallbacksUnion callbacks;
     memset (&callbacks, 0, sizeof(callbacks));
 
-    callbacks.common.handleAuxField = handlingAuxField;
+    if (!(ctx->conf.skipAuxField))
+        callbacks.common.handleAuxField = handlingAuxField;
+
     callbacks.common.handleNewKey = handlingNewKey;
     callbacks.common.handleEndKey = handlingEndKey;
     callbacks.common.handleNewDb = handlingNewDb;
     callbacks.common.handleEndRdb = handlingEndRdb;
 
-    if (lvl == RDB_LEVEL_DATA) {
+    if (ctx->conf.level == RDB_LEVEL_DATA) {
         callbacks.dataCb.handleStringValue = handlingString;
         callbacks.dataCb.handleListElement = handlingList;
         RDB_createHandlersData(p, &callbacks.dataCb, ctx, deleteRdbToJsonCtx);
-    } else  if (lvl == RDB_LEVEL_STRUCT) {
+    } else  if (ctx->conf.level == RDB_LEVEL_STRUCT) {
         callbacks.structCb.handleStringValue = handlingString;
         callbacks.structCb.handlerQListNode = handlingQListNode;
         callbacks.structCb.handlerPlainNode = handlingList;
         RDB_createHandlersStruct(p, &callbacks.structCb, ctx, deleteRdbToJsonCtx);
-    } else if (lvl == RDB_LEVEL_RAW) {
+    } else if (ctx->conf.level == RDB_LEVEL_RAW) {
         callbacks.rawCb.handleFrag = handlingFrag;
         callbacks.rawCb.handleBegin = handlingRawBegin;
         callbacks.rawCb.handleEnd = handlingRawEnd;

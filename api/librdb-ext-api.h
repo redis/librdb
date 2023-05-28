@@ -15,6 +15,7 @@ typedef struct RdbxFilterKey RdbxFilterKey;
 typedef struct RdbxToJson RdbxToJson;
 typedef struct RdbxToResp RdbxToResp;
 typedef struct RdbxRespWriter RdbxRespWriter;
+typedef struct RdbxRespToTcpLoader RdbxRespToTcpLoader;
 
 /****************************************************************
 * Error codes
@@ -35,8 +36,11 @@ typedef enum {
     RDBX_ERR_RESP_FAILED_ALLOC,
     RDBX_ERR_RESP_INIT_CONN_ERROR,
 
-    /* resp writer */
+    /* resp writer/loader */
     RDBX_ERR_RESP_WRITE,
+    RDBX_ERR_RESP2TCP_CREATE_SOCKET,
+    RDBX_ERR_RESP2TCP_INVALID_ADDRESS,
+    RDBX_ERR_RESP2TCP_FAILED_CONNECT,
 } RdbxRes;
 
 /****************************************************************
@@ -56,10 +60,16 @@ typedef enum RdbxToJsonEnc {
     RDBX_CONV_JSON_ENC_BASE64
 } RdbxToJsonEnc;
 
+typedef struct RdbxToJsonConf {
+    RdbHandlersLevel level;
+    RdbxToJsonEnc encoding;
+    int skipAuxField;
+    int flatten; /* 0=db hirarchy preserved 1=flatten json */
+} RdbxToJsonConf;
+
 _LIBRDB_API RdbxToJson *RDBX_createHandlersToJson(RdbParser *p,
-                                                RdbxToJsonEnc encoding,
                                                 const char *filename,
-                                                RdbHandlersLevel lvl);
+                                                RdbxToJsonConf *c);
 
 /****************************************************************
  * Create Filter Handlers
@@ -108,7 +118,8 @@ _LIBRDB_API RdbxToResp *RDBX_createHandlersToResp(RdbParser *, RdbxToRespConf *)
  *
  * Create instance for writing RDB to RESP stream.
  *
- * Used by:  RDBX_createRespFileWriter
+ * Used by:  RDBX_createRespToTcpLoader
+ *           RDBX_createRespFileWriter
  *           <user-defined-handlers>
  ****************************************************************/
 
@@ -130,6 +141,16 @@ _LIBRDB_API void RDBX_attachRespWriter(RdbxToResp *rdbToResp, RdbxRespWriter *wr
 _LIBRDB_API RdbxRespFileWriter *RDBX_createRespFileWriter(RdbParser *p,
                                                           RdbxToResp *rdbToResp,
                                                           const char* filepath);
+
+/****************************************************************
+ * Create RESP to Redis TCP connection
+ *
+ * If provided path is NULL then write stdout
+ ****************************************************************/
+_LIBRDB_API RdbxRespToTcpLoader *RDBX_createRespToTcpLoader(RdbParser *p,
+                                                          RdbxToResp *rdbToResp,
+                                                          const char* hostname,
+                                                          int port);
 
 #ifdef __cplusplus
 }
