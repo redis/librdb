@@ -86,8 +86,17 @@ char *readFile(const char *filename,  size_t *length) {
 
 void assert_payload_file(const char *filename, char *expPayload, char *charsToSkip) {
     char *filedata = readFile(filename, NULL);
-    assert_string_equal( sanitizeData(expPayload, charsToSkip),
-                         sanitizeData(filedata, charsToSkip));
+    if (strcmp(sanitizeData(expPayload, charsToSkip), sanitizeData(filedata, charsToSkip)) != 0) {
+        printf("payload file %s not as expected.\n", filename);
+        printf("---- %s ----\n", filename);
+        char *f1 = readFile(filename, NULL);
+        printf ("%s", f1);
+        free(f1);
+        printf("\n---- Expected ----\n");
+        printf("%s", expPayload);
+        printf("\n------------\n");
+        assert_true(0);
+    }
     free(filedata);
 }
 
@@ -244,17 +253,19 @@ end_cmp:
     fclose(file1);
     fclose(file2);
 
-    if (!res) return;
+    if (res == 0) return;
 
     printf("Json files not equal.\n");
     printf("---- %s ----\n", filename1);
     char *f1 = readFile(filename1, NULL);
     printf ("%s", f1);
+    free(f1);
+
     printf("\n---- %s ----\n", filename2);
     char *f2 = readFile(filename2, NULL);
     printf ("%s", f2);
-    printf("\n------------\n");
-    free(f1);
     free(f2);
+    printf("\n------------\n");
+
     assert_true(0);
 }

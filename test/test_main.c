@@ -137,12 +137,11 @@ int main(int argc, char *argv[]) {
         }
     }
 
-    gettimeofday(&st,NULL);
+    /* another way to configure redis installation folder for external testing */
+    if (getenv("LIBRDB_REDIS_FOLDER"))
+        redisServerFolder = getenv("LIBRDB_REDIS_FOLDER");
 
-    if (redisServerFolder != 0) {
-        printf("\n*************** EXTERNAL TESTING *******************\n");
-        RUN_TEST_GROUP(group_rdb_to_loader, redisServerFolder);
-    }
+    gettimeofday(&st,NULL);
 
     //setenv("LIBRDB_DEBUG_DATA", "1", 1); /* << to see parser states printouts */
 
@@ -163,6 +162,12 @@ int main(int argc, char *argv[]) {
     RUN_TEST_GROUP(group_rdb_to_json);
     RUN_TEST_GROUP(group_mem_management);
     RUN_TEST_GROUP(group_bulk_ops);
+
+    if (redisServerFolder != 0) {
+        setenv("LIBRDB_SIM_WAIT_MORE_DATA", "0", 1);
+        printf("\n*************** EXTERNAL TESTING *******************\n");
+        RUN_TEST_GROUP(group_rdb_to_loader, redisServerFolder);
+    }
     printf("\n*************** END TESTING *******************\n");
 
     gettimeofday(&et, NULL);

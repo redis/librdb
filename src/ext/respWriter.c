@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include "common.h"
 #include <string.h>
-
+#include <unistd.h>
 
 struct RdbxRespFileWriter {
     long cmdCount;
@@ -9,21 +9,33 @@ struct RdbxRespFileWriter {
     FILE *filePtr;   /* either stdout or pointer to open file */
 };
 
-size_t respFileWrite(void *context, char *str, int len, int endCmd) {
+/* return 0 for success. 1 Otherwise. */
+int respFileWritev(void *context, const struct iovec *iov, int count, uint64_t bulksBitmask, int endCmd) {
+    UNUSED(bulksBitmask);
     struct RdbxRespFileWriter *ctx = context;
     ctx->cmdCount += endCmd;
-    return fwrite(str, sizeof(char), len, ctx->filePtr);
+
+    /* not optimized code */
+    for (int i = 0 ; i < count ; ++i) {
+        if (unlikely(fwrite(iov[i].iov_base, sizeof(char), iov[i].iov_len, ctx->filePtr) != iov[i].iov_len)) {
+            RDB_reportError(ctx->p, (RdbRes) RDBX_ERR_RESP_WRITE, "Failed to write RESP to file");
+            return 1;
+        }
+    }
+
+    return 0;
 }
 
-size_t respFileWriteBulk(void *context, RdbBulk b, int endCmd) {
+/* return 0 for success. 1 Otherwise. */
+int respFileFlush(void *context) {
     struct RdbxRespFileWriter *ctx = context;
-    UNUSED(endCmd);
-    return fwrite(b, sizeof(char), RDB_bulkLen(ctx->p, b), ctx->filePtr);
+    return (EOF == fflush(ctx->filePtr)) ? 1 : 0;
 }
 
 void respFileWriteDelete(void *context) {
     struct RdbxRespFileWriter *ctx = context;
     if (ctx != NULL) {
+        fflush(ctx->filePtr);
         if (ctx->filePtr != stdout) {
             fclose(ctx->filePtr);
         }
@@ -57,7 +69,7 @@ RdbxRespFileWriter *RDBX_createRespFileWriter(RdbParser *p, RdbxToResp *rdbToRes
     ctx->p = p;
 
     /* Attach this writer to rdbToResp */
-    RdbxRespWriter writer = {ctx, respFileWrite, respFileWriteBulk, respFileWriteDelete};
+    RdbxRespWriter writer = {ctx, respFileWriteDelete, respFileWritev, respFileFlush};
     RDBX_attachRespWriter(rdbToResp, &writer);
     return ctx;
 }

@@ -1,4 +1,5 @@
 #include <sys/time.h>
+#include <sys/uio.h>
 #include "librdb-api.h"
 #ifndef LIBRDB_API_EXT_H
 #define LIBRDB_API_EXT_H
@@ -41,6 +42,8 @@ typedef enum {
     RDBX_ERR_RESP2TCP_CREATE_SOCKET,
     RDBX_ERR_RESP2TCP_INVALID_ADDRESS,
     RDBX_ERR_RESP2TCP_FAILED_CONNECT,
+    RDBX_ERR_RESP2TCP_FAILED_READ,
+    RDBX_ERR_RESP2TCP_FAILED_WRITE,
 } RdbxRes;
 
 /****************************************************************
@@ -125,9 +128,11 @@ _LIBRDB_API RdbxToResp *RDBX_createHandlersToResp(RdbParser *, RdbxToRespConf *)
 
 struct RdbxRespWriter {
     void *ctx;
-    size_t (*write)(void *ctx, char *str, int len, int endCmd);
-    size_t (*writeBulk)(void *context, RdbBulk bulk, int endCmd);
     void (*delete)(void *ctx);
+
+    /* return 0 on success. Otherwise 1 */
+    int (*writev) (void *ctx, const struct iovec *ioVec, int count, uint64_t bulksBitmask, int endCmd);
+    int (*flush) (void *ctx);
 };
 
 _LIBRDB_API void RDBX_attachRespWriter(RdbxToResp *rdbToResp, RdbxRespWriter *writer);

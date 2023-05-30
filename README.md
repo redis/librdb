@@ -141,16 +141,16 @@ Following examples avoid error check to keep it concise. Full example can be fou
 
 - Parsing RDB file to RESP protocol:
 
-      RdbParser *p = RDB_createParserRdb(NULL);
-      RDBX_createReaderFile(p, rdbfile);
-      RdbxToResp *rdbToResp = RDBX_createHandlersToResp(p, NULL);
-      RDBX_createRespFileWriter(p, rdbToResp, "./rdbDump.resp");
-      RDB_parse(p);
+      RdbParser *parser = RDB_createParserRdb(NULL);
+      RDBX_createReaderFile(parser, rdbfile);
+      RdbxToResp *rdbToResp = RDBX_createHandlersToResp(parser, NULL);
+      RDBX_createRespFileWriter(parser, rdbToResp, "./rdbDump.resp");
+      RDB_parse(parser);
       RDB_deleteParser(parser);
 
 - Parsing RDB file with user callbacks:
 
-      RdbRes myHandleNewKey(RdbParser *p, void *userData,  RdbBulk key,...) { 
+      RdbRes myHandleNewKey(RdbParser *parser, void *userData,  RdbBulk key,...) { 
           printf("%s\n", key);
           return RDB_OK;
       } 
@@ -203,8 +203,8 @@ asynchronous operation is complete, so the application can call `RDB_parse()` ag
 async indication for read completion from the customized reader to the application is
 beyond the scope of this library. A conceptual invocation of such flow can be:
 
-      myAsyncReader = RDB_createReaderRdb(p, myAsyncRdFunc, myAsyncRdData, myAsyncRdDeleteFunc);
-      while(RDB_parse(p) == RDB_STATUS_WAIT_MORE_DATA) {
+      myAsyncReader = RDB_createReaderRdb(parser, myAsyncRdFunc, myAsyncRdData, myAsyncRdDeleteFunc);
+      while(RDB_parse(parser) == RDB_STATUS_WAIT_MORE_DATA) {
          my_reader_completed_await(myAsyncReader); 
       }
 

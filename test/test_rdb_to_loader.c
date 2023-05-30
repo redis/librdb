@@ -18,7 +18,7 @@ void setupGroup() {
     pid_t pid = fork();
     assert_int_not_equal (pid, -1);
 
-    redisPort = findFreePort(6379, 6479);
+    redisPort = findFreePort(6500, 6600);
 
     if (pid == 0) { /* child */
         char redisPortStr[10];
@@ -28,12 +28,16 @@ void setupGroup() {
 
         snprintf(fullpath, 255, "%s/%s", redisServerFolder, "redis-server");
         snprintf(redisPortStr, sizeof(redisPortStr), "%d", redisPort);
-
         execl(fullpath, fullpath, "--port", redisPortStr , "--dir", "./test/tmp/", "--logfile", "./redis.log", (char*)NULL);
-        exit(EXIT_SUCCESS);
+
+        /* If execl returns, an error occurred! */
+        perror("execl");
+        exit(1);
     } else { /* parent */
-        assert_int_equal(0, waitpid(pid, &status, WNOHANG));
-        runSystemCmdRetry(5, "%s/redis-cli -p %d ping | grep -i pong", redisServerFolder, redisPort);
+        UNUSED(status);
+
+        /* wait to server to become available */
+        runSystemCmdRetry(5, "%s/redis-cli -p %d ping | grep -i pong > /dev/null", redisServerFolder, redisPort);
 
         redis_pid = pid;
 
@@ -43,15 +47,15 @@ void setupGroup() {
 }
 
 void teardownGroup() {
-    runSystemCmd("%s/redis-cli -p %d shutdown", redisServerFolder, redisPort);
+    runSystemCmd("%s/redis-cli -p %d shutdown > /dev/null", redisServerFolder, redisPort);
     wait(NULL);
     printf("Teardown complete.\n");
 }
 
 static int setupTest(void **state) {
     UNUSED(state);
-    runSystemCmd("%s/redis-cli -p %d flushall", redisServerFolder, redisPort);
-    runSystemCmd("%s/redis-cli -p %d save", redisServerFolder, redisPort);
+    runSystemCmd("%s/redis-cli -p %d flushall > /dev/null", redisServerFolder, redisPort);
+    runSystemCmd("%s/redis-cli -p %d save > /dev/null", redisServerFolder, redisPort);
     return 0;
 }
 
@@ -93,7 +97,7 @@ static void test_rdb_to_loader_common(const char *rdbfile) {
     RDB_deleteParser(parser);
 
     /* DUMP-RDB from Redis */
-    runSystemCmd("%s/redis-cli -p %d save", redisServerFolder, redisPort);
+    runSystemCmd("%s/redis-cli -p %d save > /dev/null", redisServerFolder, redisPort);
 
     /* DUMP-RDB to JSON */
     parser = RDB_createParserRdb(NULL);
@@ -130,8 +134,8 @@ int group_rdb_to_loader(const char *folder) {
     redisServerFolder = folder;
 
     const struct CMUnitTest tests[] = {
-            cmocka_unit_test_setup(test_rdb_to_loader_single_string, setupTest),
             cmocka_unit_test_setup(test_rdb_to_loader_single_list, setupTest),
+            cmocka_unit_test_setup(test_rdb_to_loader_single_string, setupTest),
             cmocka_unit_test_setup(test_rdb_to_loader_multiple_lists_strings, setupTest),
     };
 

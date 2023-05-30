@@ -15,28 +15,82 @@
 #include <openssl/err.h>
 #endif
 
+#define NUM_PENDING_CMDS_HIGH_THRESHOLD 200
+#define NUM_PENDING_CMDS_LOW_THRESHOLD  100
+
 struct RdbxRespToTcpLoader {
+
+    struct {
+        int num;
+        int highThreshold;
+        int lowThreshold;
+    } pendingCmds;
+
     RdbParser *p;
     int fd;
 };
 
+/* return 0 for success. 1 Otherwise. */
+int readReplies(RdbxRespToTcpLoader *ctx, int numToRead) {
+    char buffer[2048];
+    int numRead = 0;
+
+    while (numRead < numToRead) {
+        /* Read a single-line reply into the buffer */
+        ssize_t bytesRead = read(ctx->fd, buffer, sizeof(buffer) - 1);
+
+        if (bytesRead > 0) {
+            /* Iterate through the read bytes to find the end of the lines */
+            for (int i = 0; i < bytesRead; i++) {
+                if (buffer[i] == '\n') {
+                    numRead++;
+                }
+            }
+        } else {
+            //
+            RDB_reportError(ctx->p, (RdbRes) RDBX_ERR_RESP2TCP_FAILED_READ,
+                            "Failed to read responses from socket.");
+            ctx->pendingCmds.num -= numRead;
+            return 1;
+        }
+    }
+    ctx->pendingCmds.num -= numRead;
+    return 0;
+}
+
+/* return 0 for success. 1 Otherwise. */
+int tcpLoaderFlush(void *context) {
+    RdbxRespToTcpLoader *ctx = context;
+    if (ctx->pendingCmds.num)
+        return readReplies(ctx, ctx->pendingCmds.num);
+    return 0;
+}
+
+/* return 0 for success. 1 Otherwise. */
+int tcpLoaderWritev(void *context, const struct iovec *iov, int count, uint64_t bulksBitmask, int endCmd) {
+    UNUSED(endCmd);
+    UNUSED(bulksBitmask);
+    RdbxRespToTcpLoader *ctx = context;
+    if (unlikely(writev(ctx->fd, iov, count) == -1)) {
+        RDB_reportError(ctx->p, (RdbRes) RDBX_ERR_RESP2TCP_FAILED_WRITE, "Failed to write tcp socket");
+        return 1;
+    }
+
+    ctx->pendingCmds.num += endCmd;
+
+    /* read replies if crosses high threshold of number pending commands till reach low threshold */
+    if (unlikely(ctx->pendingCmds.num >= ctx->pendingCmds.highThreshold)) {
+        return readReplies(ctx, ctx->pendingCmds.num - ctx->pendingCmds.lowThreshold);
+    }
+    return 0;
+}
+
 void tcpLoaderDelete(void *context) {
     struct RdbxRespToTcpLoader *ctx = context;
+    tcpLoaderFlush(ctx);
     shutdown(ctx->fd, SHUT_WR); /* graceful shutdown */
     close(ctx->fd);
     RDB_free(ctx->p, ctx);
-}
-
-size_t tcpLoaderWrite(void *context, char *str, int len, int endCmd) {
-    UNUSED(endCmd);
-    RdbxRespToTcpLoader *ctx = context;
-    return write(ctx->fd, str, len);
-}
-
-size_t tcpLoaderWriteBulk(void *context, RdbBulk b, int endCmd) {
-    UNUSED(endCmd);
-    struct RdbxRespToTcpLoader *ctx = context;
-    return write(ctx->fd, b, RDB_bulkLen(ctx->p, b));
 }
 
 _LIBRDB_API RdbxRespToTcpLoader *RDBX_createRespToTcpLoader(RdbParser *p,
@@ -75,11 +129,15 @@ _LIBRDB_API RdbxRespToTcpLoader *RDBX_createRespToTcpLoader(RdbParser *p,
         return NULL;
     }
 
+    memset(ctx, 0, sizeof(RdbxRespToTcpLoader));
     ctx->p = p;
     ctx->fd = sockfd;
+    ctx->pendingCmds.num = 0;
+    ctx->pendingCmds.highThreshold = NUM_PENDING_CMDS_HIGH_THRESHOLD;
+    ctx->pendingCmds.lowThreshold = NUM_PENDING_CMDS_LOW_THRESHOLD;
 
     /* Attach this writer to rdbToResp */
-    RdbxRespWriter inst = {ctx, tcpLoaderWrite, tcpLoaderWriteBulk, tcpLoaderDelete};
+    RdbxRespWriter inst = {ctx, tcpLoaderDelete, tcpLoaderWritev, tcpLoaderFlush};
     RDBX_attachRespWriter(rdbToResp, &inst);
 
     return ctx;
