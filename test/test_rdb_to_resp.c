@@ -34,6 +34,7 @@ static void test_r2r_single_string(void **state) {
     unsigned char expRespData[] = "*3\r\n$3\r\nSET\r\n$3\r\nxxx\r\n$3\r\n111\r\n";
     RdbxToRespConf r2rConf;
 
+    memset(&r2rConf, 0, sizeof(r2rConf));
     /* Won't use RESTORE command because target RDB ver. < source RDB ver. */
     r2rConf.supportRestore = 1;
     r2rConf.restore.dstRdbVersion = 10;
@@ -74,6 +75,7 @@ static void test_r2r_single_string_restore(void **state) {
     };
 
     /* Use RESTORE command because target RDB ver. == source RDB ver. */
+    memset(&r2rConf, 0, sizeof(r2rConf));
     r2rConf.supportRestore = 1;
     r2rConf.restore.dstRdbVersion = 11;
     testRdbToRespCommon(DUMP_FOLDER("single_key.rdb"), (char *) expRespRestore, &r2rConf, 1);
@@ -94,6 +96,7 @@ static void test_r2r_single_list(void **state) {
                      "*3\r\n$5\r\nRPUSH\r\n$6\r\nmylist\r\n$4\r\nval1\r\n";
 
     /* Won't use RESTORE command because target RDB ver. < source RDB ver. */
+    memset(&r2rConf, 0, sizeof(r2rConf));
     r2rConf.supportRestore = 1;
     r2rConf.restore.dstRdbVersion = 6;
     testRdbToRespCommon(DUMP_FOLDER("single_list.rdb"), expResp, &r2rConf, 1);
@@ -127,6 +130,7 @@ static void test_r2r_single_list_restore(void **state) {
             0x27, 0x0D, 0x0A };      // '\x27', '\r', '\n'
 
     /* Use RESTORE command because target RDB ver. == source RDB ver. */
+    memset(&r2rConf, 0, sizeof(r2rConf));
     r2rConf.supportRestore = 1;
     r2rConf.restore.dstRdbVersion = 11;
     testRdbToRespCommon(DUMP_FOLDER("single_list.rdb"), (char *) expRespRestore, &r2rConf, 1);
@@ -147,6 +151,7 @@ static void test_r2r_multiple_lists_and_strings(void **state) {
                      "*3\r\n$5\r\nRPUSH\r\n$7\r\nmylist2\r\n$2\r\nv1\r\n";
 
     /* Won't use RESTORE command because target RDB ver. < source RDB ver. */
+    memset(&r2rConf, 0, sizeof(r2rConf));
     r2rConf.supportRestore = 1;
     r2rConf.restore.dstRdbVersion = 6;
     testRdbToRespCommon(DUMP_FOLDER("multiple_lists_strings.rdb"), expResp, &r2rConf, 1);

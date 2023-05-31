@@ -1,13 +1,13 @@
 #include <assert.h>
 #include <string.h>
-#include "../deps/redis/lzf.h"
+#include "../../deps/redis/lzf.h"
 /*#include "../deps/redis/crc64.h"*/
 #include "bulkAlloc.h"
 #include "parser.h"
 #include "defines.h"
-#include "../deps/redis/endianconv.h"
-#include "../deps/redis/utils.h"
-#include "../deps/redis/listpack.h"
+#include "../../deps/redis/endianconv.h"
+#include "../../deps/redis/utils.h"
+#include "../../deps/redis/listpack.h"
 
 #define MAX_STRING_WRITE_CHUNK (1024*63)
 #define DATA_SIZE_UNKNOWN_AHEAD 0

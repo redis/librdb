@@ -4,7 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include "defines.h"
-#include "../api/librdb-api.h"
+#include "../../api/librdb-api.h"
 
 #define MAX_ERROR_MSG 1024
 #define MAX_APP_BULKS 2

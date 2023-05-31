@@ -98,6 +98,11 @@ typedef struct RdbxToRespConf {
      * (specific) aligned, optimization */
     int supportRestore;
 
+    /* todo: support rdb2resp del key before write */
+    int delKeyBeforeWrite;
+
+    int applySelectDbCmds;
+
     /* relevant only if supportRestore is set. */
     struct {
         /* It is required to verify that the target (consumer) of the RESP payload

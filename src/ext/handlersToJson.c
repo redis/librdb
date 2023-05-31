@@ -67,9 +67,10 @@ static void outputQuotedEscaping(RdbxToJson *ctx, char *data, size_t len) {
 
 static void deleteRdbToJsonCtx(RdbParser *p, void *data) {
     RdbxToJson *ctx = (RdbxToJson *) data;
-
     if (ctx->keyCtx.key)
         RDB_bulkCopyFree(p, ctx->keyCtx.key);
+
+    RDB_log(p, RDB_LOG_DBG, "handlersToJson: Closing file %s", ctx->filename);
 
     if (ctx->outfile) fclose(ctx->outfile);
     RDB_free(p, ctx->filename);
@@ -84,6 +85,8 @@ static RdbxToJson *initRdbToJsonCtx(RdbParser *p, const char *filename, RdbxToJs
                         "HandlersRdbToJson: Failed to open file");
         return NULL;
     }
+
+    RDB_log(p, RDB_LOG_DBG, "handlersToJson: Opening file %s", filename);
 
     /* init RdbToJson context */
     RdbxToJson *ctx = RDB_alloc(p, sizeof(RdbxToJson));

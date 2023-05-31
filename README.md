@@ -325,7 +325,7 @@ returns the next item in the queue. Otherwise, if the parser managed to reach a 
 parsing-element state, then all cached data in the pool will be **flushed**. 
 
 The bulk-pool is also known as parsing-element's **cache**. To learn more about it, 
-refer to the comment at the start of the file [bulkAlloc.h](src/bulkAlloc.h).
+refer to the comment at the start of the file [bulkAlloc.h](src/lib/bulkAlloc.h).
 
 ### Parsing-Element states
 Having gained understanding of the importance of bulk-pool rollback and replay for

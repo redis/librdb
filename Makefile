@@ -4,28 +4,31 @@ endif
 
 all:
 	$(MAKE) -C deps -f Makefile all
-	$(MAKE) -C src -f Makefile all
+	$(MAKE) -C src/lib -f Makefile all
 	$(MAKE) -C src/ext -f Makefile all
+	$(MAKE) -C src/cli -f Makefile all
 	$(MAKE) -C examples -f Makefile all
 	$(MAKE) -C test -f Makefile all
 	./runtests -v
 
 lib:
 	$(MAKE) -C deps -f Makefile all
-	$(MAKE) -C src -f Makefile all
+	$(MAKE) -C src/lib -f Makefile all
 	$(MAKE) -C src/ext -f Makefile all
 	$(MAKE) -C examples -f Makefile all
 
 clean:
-	$(MAKE) -C src -f Makefile clean
+	$(MAKE) -C src/lib -f Makefile clean
 	$(MAKE) -C src/ext -f Makefile clean
+	$(MAKE) -C src/cli -f Makefile clean
 	$(MAKE) -C examples -f Makefile clean
 	$(MAKE) -C test -f Makefile clean
 
 distclean:
 	$(MAKE) -C deps -f Makefile clean
-	$(MAKE) -C src -f Makefile clean
+	$(MAKE) -C src/lib -f Makefile clean
 	$(MAKE) -C src/ext -f Makefile clean
+	$(MAKE) -C src/cli -f Makefile clean
 	$(MAKE) -C examples -f Makefile clean
 	$(MAKE) -C test -f Makefile clean
 

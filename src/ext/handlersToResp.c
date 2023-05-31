@@ -66,14 +66,17 @@ static void deleteRdbToRespCtx(RdbParser *p, void *context) {
     RDB_free(p, ctx);
 }
 
-static void iov_stringLen(struct iovec *iov, long count, char *buf) {
+static int iov_stringLen(struct iovec *iov, long count, char *buf) {
     int len = 0;
     len = ll2string(buf, sizeof(buf) - 1, count);
-    buf[len++] = '\r';
-    buf[len++] = '\n';
+
+    int lenWithNewLine = len;
+    buf[lenWithNewLine++] = '\r';
+    buf[lenWithNewLine++] = '\n';
 
     iov->iov_base = buf;
-    iov->iov_len = len;
+    iov->iov_len = lenWithNewLine;
+    return len;
 }
 
 static int rdbVerFromRedisVer(const char *ver) {
@@ -141,6 +144,23 @@ static inline RdbRes writevWrap(RdbxToResp *ctx, const struct iovec *iov, int cn
 
 /*** Handling common ***/
 
+static RdbRes toRespHandlingNewDb(RdbParser *p, void *userData, int dbid) {
+    UNUSED(p);
+
+    struct iovec iov[10];
+    char dbidStr[10], cntStr[10];
+
+    RdbxToResp *ctx = userData;
+
+    int cnt = ll2string(dbidStr, sizeof(dbidStr), dbid);
+
+    IOV_CONST_STR(&iov[0], "*2\r\n$6\r\nSELECT\r\n$");
+    iov_stringLen(&iov[1], cnt, cntStr);
+    IOV_STRING(&iov[2], dbidStr, cnt);
+    IOV_CONST_STR(&iov[3], "\r\n");
+    return writevWrap(ctx, iov, 4, 0 /*bulksBitmask*/, 1);
+}
+
 static RdbRes toRespHandlingNewRdb(RdbParser *p, void *userData, int rdbVersion) {
     UNUSED(p);
     RdbxToResp *ctx = userData;
@@ -153,6 +173,8 @@ static RdbRes toRespHandlingNewRdb(RdbParser *p, void *userData, int rdbVersion)
     return RDB_OK;
 }
 
+/* todo: support option rdb2resp del key before write */
+/* todo: support expiry */
 static RdbRes toRespHandlingNewKey(RdbParser *p, void *userData, RdbBulk key, RdbKeyInfo *info) {
     UNUSED(info);
     RdbxToResp *ctx = userData;
@@ -259,6 +281,8 @@ static RdbRes toRespHandlingRawFrag(RdbParser *p, void *userData, RdbBulk frag) 
     if (likely(!(ctx->rawCtx.sentFirstFrag))) {
         char keyLenStr[64], totalLenStr[64];
 
+        ctx->rawCtx.sentFirstFrag = 1;
+
         IOV_CONST_STR(&iov[iovs++], "*4\r\n$7\r\nRESTORE\r\n$");        /* RESTORE */
         iov_stringLen(&iov[iovs++], ctx->keyCtx.keyLen, keyLenStr);     /* write key len */
         IOV_STRING(&iov[iovs++], ctx->keyCtx.key, ctx->keyCtx.keyLen);  /* write key */
@@ -266,7 +290,7 @@ static RdbRes toRespHandlingRawFrag(RdbParser *p, void *userData, RdbBulk frag) 
         iov_stringLen(&iov[iovs++], ctx->rawCtx.valSize + 10, totalLenStr);    /* write value length */
         IOV_STRING(&iov[iovs++], frag, RDB_bulkLen(p, frag));           /* write value */
         bulksBitmask = 1 << 5;
-        ctx->rawCtx.sentFirstFrag = 1;
+
     } else {
         bulksBitmask = 1 << 0;
         IOV_STRING(&iov[iovs++], frag, RDB_bulkLen(p, frag)); /* write value */
@@ -315,6 +339,8 @@ _LIBRDB_API RdbxToResp *RDBX_createHandlersToResp(RdbParser *p, RdbxToRespConf *
     RdbHandlersDataCallbacks dataCb;
     memset(&dataCb, 0, sizeof(RdbHandlersDataCallbacks));
     dataCb.handleNewRdb = toRespHandlingNewRdb;
+    if (ctx->conf.applySelectDbCmds)
+        dataCb.handleNewDb = toRespHandlingNewDb;
     dataCb.handleNewKey = toRespHandlingNewKey;
     dataCb.handleEndKey = toRespHandlingEndKey;
     dataCb.handleStringValue = toRespHandlingString;

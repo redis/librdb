@@ -37,7 +37,7 @@ void setupGroup() {
         UNUSED(status);
 
         /* wait to server to become available */
-        runSystemCmdRetry(5, "%s/redis-cli -p %d ping | grep -i pong > /dev/null", redisServerFolder, redisPort);
+        runSystemCmdRetry(5, "%s/redis-cli -p %d ping | grep -i pong", redisServerFolder, redisPort);
 
         redis_pid = pid;
 
@@ -70,7 +70,7 @@ static void test_rdb_to_loader_common(const char *rdbfile) {
     RdbStatus status;
 
     /* Won't use RESTORE command because target RDB ver. < source RDB ver. */
-    RdbxToRespConf rdb2respConf = {1, {10, NULL}};
+    RdbxToRespConf rdb2respConf = {1, 0, 0, {10, NULL}};
     RdbxToJsonConf rdb2jsonConf = {RDB_LEVEL_DATA, RDBX_CONV_JSON_ENC_PLAIN, 1, 1};
 
     /* RDB to JSON */

@@ -1,7 +1,7 @@
 default: all
 
 LIB_NAME              = rdb
-LIB_DIR               = ../lib
+LIB_DIR               = ../../lib
 
 # Artifacts:
 TARGET_LIB            = $(LIB_DIR)/lib$(LIB_NAME).so
@@ -12,8 +12,8 @@ SOURCES  = $(notdir $(basename $(wildcard *.c)))
 OBJECTS  = $(patsubst %,%.o,$(SOURCES))
 
 # Source files in deps/redis directory
-REDIS_SOURCES = $(notdir $(basename $(wildcard ../deps/redis/*.c)))
-REDIS_OBJECTS = $(patsubst %,../deps/redis/%.o,$(REDIS_SOURCES))
+REDIS_SOURCES = $(notdir $(basename $(wildcard ../../deps/redis/*.c)))
+REDIS_OBJECTS = $(patsubst %,../../deps/redis/%.o,$(REDIS_SOURCES))
 
 EXTERN_RP_CONFIG=
 CC       = gcc

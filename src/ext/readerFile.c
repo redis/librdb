@@ -9,8 +9,9 @@ struct RdbxReaderFile {
 
 static void deleteReaderFile(RdbParser *p, void *rdata) {
     if (!rdata) return;
-
     RdbxReaderFile *readerData = (RdbxReaderFile *) rdata;
+
+    RDB_log(p, RDB_LOG_DBG, "RDB Reader: Closing file %s", readerData->filename);
     if (readerData->filename) RDB_free(p, readerData->filename);
     if(readerData->file) fclose(readerData->file);
     RDB_free(p, readerData);

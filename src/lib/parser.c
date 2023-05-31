@@ -7,14 +7,14 @@
 #include <stdarg.h>
 #include <string.h>
 #include <arpa/inet.h>
-#include "../deps/redis/crc64.h"
+#include "../../deps/redis/crc64.h"
 #include "bulkAlloc.h"
 #include "parser.h"
 #include "defines.h"
-#include "../deps/redis/endianconv.h"
-#include "../deps/redis/utils.h"
-#include "../deps/redis/listpack.h"
-#include "../deps/redis/lzf.h"
+#include "../../deps/redis/endianconv.h"
+#include "../../deps/redis/utils.h"
+#include "../../deps/redis/listpack.h"
+#include "../../deps/redis/lzf.h"
 
 #define DONE_FILL_BULK SIZE_MAX
 
@@ -593,6 +593,7 @@ static RdbStatus finalizeConfig(RdbParser *p, int isParseFromBuff) {
     }
 
     if ((p->debugData = getEnvVar(ENV_VAR_DEBUG_DATA, 0)) != 0) {
+        RDB_setLogLevel(p, RDB_LOG_DBG);
         RdbHandlersDataCallbacks cb = {.handleNewKey = handleNewKeyPrintDbg};
         RDB_createHandlersData(p, &cb, NULL, NULL);
     }
