@@ -12,8 +12,13 @@ static void deleteReaderFile(RdbParser *p, void *rdata) {
     RdbxReaderFile *readerData = (RdbxReaderFile *) rdata;
 
     RDB_log(p, RDB_LOG_DBG, "RDB Reader: Closing file %s", readerData->filename);
-    if (readerData->filename) RDB_free(p, readerData->filename);
-    if(readerData->file) fclose(readerData->file);
+
+    if (readerData->filename)
+        RDB_free(p, readerData->filename);
+
+    if(readerData->file)
+        fclose(readerData->file);
+
     RDB_free(p, readerData);
 }
 
@@ -38,9 +43,14 @@ static RdbStatus readFile(RdbParser *p, void *data, void *buf, size_t len) {
 RdbxReaderFile *RDBX_createReaderFile(RdbParser *p, const char *filename) {
     FILE *f;
 
-    if (!(f = fopen(filename, "rb"))) {
+    if (filename == NULL) {
         RDB_reportError(p, RDB_ERR_FAILED_OPEN_RDB_FILE,
-                           "Failed to open RDB file: %s", filename);
+                        "Filename is not provided", filename);
+        return NULL;
+    }
+
+    if (!(f = fopen(filename, "rb"))) {
+        RDB_reportError(p, RDB_ERR_FAILED_OPEN_RDB_FILE, "Failed to open RDB file: %s", filename);
         return NULL;
     }
 

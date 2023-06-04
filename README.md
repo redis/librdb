@@ -6,6 +6,12 @@ The Parser is implemented in the spirit of SAX parser. It fires off a series of 
 it reads the RDB file from beginning to end, and callbacks to handlers registered on
 selected types of data.
 
+
+The primary objective of this project is to offer an efficient and robust C library for 
+parsing Redis RDB files. It also provides an extension library for parsing to JSON and RESP 
+protocols, enabling consumption by various writers. Additionally, a command-line interface 
+(CLI) is available for utilizing these functionalities.
+
 ## Current status
 The project is currently in its early phase and is considered to be a draft. At present, 
 the parser is only capable of handling string and list data types. We are actively seeking 
@@ -24,11 +30,16 @@ To build and run tests, you need to have cmocka unit testing framework installed
 
     % make
 
+Run CLI extension of this library and parse RDB file to json (might need 
+`export LD_LIBRARY_PATH=./lib` beforehand):
 
-To build with TLS support, you'll need OpenSSL development libraries (e.g.
-libssl-dev on Debian/Ubuntu) and run:
+    % ./bin/rdb-convert ./test/dumps/multiple_lists_strings.rdb json
 
-    % make BUILD_TLS=yes
+Run against Redis server, say, on address 127.0.0.1:6379, and upload RDB file:
+
+    % ./bin/rdb-convert ./test/dumps/single_list.rdb resp -h 127.0.0.1 -p 6379
+
+(For more information and CLI usage, run it without any arguments)
 
 ## Motivation behind this project
 There is a genuine need by the Redis community for a versatile RDB file parser that can 
@@ -129,7 +140,8 @@ described in the [Advanced](#Advanced) section.
 
 ## Usage
 Following examples avoid error check to keep it concise. Full example can be found in 
-`examples` directory.
+`examples` directory. Note that there are different prefixes for parser functions in the 
+core library vs. extension library ("RDB" vs "RDBX").
 
 - Converting RDB file to JSON file:
 

@@ -113,7 +113,7 @@ int group_main(void) {
     const struct CMUnitTest tests[] = {
         cmocka_unit_test(test_createReader_missingFile),
         cmocka_unit_test(test_createHandlersRdbToJson_and_2_FilterKey),
-//        cmocka_unit_test(test_mixed_levels_registration),
+        cmocka_unit_test(test_mixed_levels_registration),
     };
     return cmocka_run_group_tests(tests, NULL, NULL);
 }
@@ -122,13 +122,12 @@ int group_main(void) {
 int main(int argc, char *argv[]) {
     struct timeval st, et;
     char *runGroupPrefix = NULL;
-    const char *redisServerFolder = NULL;
     int result = 0;
 
     /* Parse command-line arguments */
     for (int i = 1; i < argc; i++) {
         if ((strcmp(argv[i], "-f") == 0 || strcmp(argv[i], "--redis-folder") == 0) && i+1 < argc) {
-            redisServerFolder = argv[++i];
+            redisInstallFolder = argv[++i];
         } else if ((strcmp(argv[i], "-g") == 0 || strcmp(argv[i], "--run-group") == 0) && i+1 < argc) {
             runGroupPrefix = argv[++i];
         } else {
@@ -139,9 +138,11 @@ int main(int argc, char *argv[]) {
 
     /* another way to configure redis installation folder for external testing */
     if (getenv("LIBRDB_REDIS_FOLDER"))
-        redisServerFolder = getenv("LIBRDB_REDIS_FOLDER");
+        redisInstallFolder = getenv("LIBRDB_REDIS_FOLDER");
 
     gettimeofday(&st,NULL);
+
+    cleanTmpFolder();
 
     //setenv("LIBRDB_DEBUG_DATA", "1", 1); /* << to see parser states printouts */
 
@@ -152,8 +153,10 @@ int main(int argc, char *argv[]) {
     RUN_TEST_GROUP(group_rdb_to_json);
     RUN_TEST_GROUP(group_mem_management);
     RUN_TEST_GROUP(group_bulk_ops);
-
     RUN_TEST_GROUP(group_pause);
+    RUN_TEST_GROUP(group_rdb_to_loader); /*external*/
+    RUN_TEST_GROUP(group_test_cli); /*external*/
+
 
     printf("\n*************** SIMULATING WAIT_MORE_DATA *******************\n");
     setenv("LIBRDB_SIM_WAIT_MORE_DATA", "1", 1);
@@ -162,12 +165,9 @@ int main(int argc, char *argv[]) {
     RUN_TEST_GROUP(group_rdb_to_json);
     RUN_TEST_GROUP(group_mem_management);
     RUN_TEST_GROUP(group_bulk_ops);
+    RUN_TEST_GROUP(group_rdb_to_loader); /*external*/
+    RUN_TEST_GROUP(group_test_cli); /*external*/
 
-    if (redisServerFolder != 0) {
-        setenv("LIBRDB_SIM_WAIT_MORE_DATA", "0", 1);
-        printf("\n*************** EXTERNAL TESTING *******************\n");
-        RUN_TEST_GROUP(group_rdb_to_loader, redisServerFolder);
-    }
     printf("\n*************** END TESTING *******************\n");
 
     gettimeofday(&et, NULL);

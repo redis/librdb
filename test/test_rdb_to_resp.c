@@ -6,8 +6,7 @@
 
 static void testRdbToRespCommon(const char *rdbfile,
                                 char *expResp,
-                                RdbxToRespConf *conf,
-                                int expNumCmds)
+                                RdbxToRespConf *conf)
 {
     static int outputs = 0;
     static char respfile[50];
@@ -24,7 +23,6 @@ static void testRdbToRespCommon(const char *rdbfile,
     assert_int_equal( status, RDB_STATUS_OK);
 
     /* verify number of commands counted */
-    UNUSED(expNumCmds);
     RDB_deleteParser(p);
     assert_payload_file(respfile, expResp, NULL);
 }
@@ -38,21 +36,21 @@ static void test_r2r_single_string(void **state) {
     /* Won't use RESTORE command because target RDB ver. < source RDB ver. */
     r2rConf.supportRestore = 1;
     r2rConf.restore.dstRdbVersion = 10;
-    testRdbToRespCommon(DUMP_FOLDER("single_key.rdb"), (char *) expRespData, &r2rConf, 1);
+    testRdbToRespCommon(DUMP_FOLDER("single_key.rdb"), (char *) expRespData, &r2rConf);
 
     /* Avoid RESTORE command because corresponding RDB ver. of given Redis ver. < source RDB ver. */
     r2rConf.supportRestore = 1;
     r2rConf.restore.dstRdbVersion = 0;
     r2rConf.restore.dstRedisVersion = "7.0";   /* resolved to rdb version 10 */
-    testRdbToRespCommon(DUMP_FOLDER("single_key.rdb"), (char *) expRespData, &r2rConf, 1);
+    testRdbToRespCommon(DUMP_FOLDER("single_key.rdb"), (char *) expRespData, &r2rConf);
 
     /* Configure not to use RESTORE command */
     r2rConf.supportRestore = 0;
-    testRdbToRespCommon(DUMP_FOLDER("single_key.rdb"), (char *) expRespData, &r2rConf, 1);
+    testRdbToRespCommon(DUMP_FOLDER("single_key.rdb"), (char *) expRespData, &r2rConf);
 
     /* Default configuration avoid RESTORE */
     r2rConf.supportRestore = 0;
-    testRdbToRespCommon(DUMP_FOLDER("single_key.rdb"), (char *) expRespData, NULL, 1);
+    testRdbToRespCommon(DUMP_FOLDER("single_key.rdb"), (char *) expRespData, NULL);
 }
 
 static void test_r2r_single_string_restore(void **state) {
@@ -78,13 +76,13 @@ static void test_r2r_single_string_restore(void **state) {
     memset(&r2rConf, 0, sizeof(r2rConf));
     r2rConf.supportRestore = 1;
     r2rConf.restore.dstRdbVersion = 11;
-    testRdbToRespCommon(DUMP_FOLDER("single_key.rdb"), (char *) expRespRestore, &r2rConf, 1);
+    testRdbToRespCommon(DUMP_FOLDER("single_key.rdb"), (char *) expRespRestore, &r2rConf);
 
     /* Use RESTORE command because corresponding RDB ver. of given Redis ver. == source RDB ver. */
     r2rConf.supportRestore = 1;
     r2rConf.restore.dstRdbVersion = 0;
     r2rConf.restore.dstRedisVersion = "7.2";
-    testRdbToRespCommon(DUMP_FOLDER("single_key.rdb"), (char *) expRespRestore, &r2rConf, 1);
+    testRdbToRespCommon(DUMP_FOLDER("single_key.rdb"), (char *) expRespRestore, &r2rConf);
 }
 
 static void test_r2r_single_list(void **state) {
@@ -99,7 +97,7 @@ static void test_r2r_single_list(void **state) {
     memset(&r2rConf, 0, sizeof(r2rConf));
     r2rConf.supportRestore = 1;
     r2rConf.restore.dstRdbVersion = 6;
-    testRdbToRespCommon(DUMP_FOLDER("single_list.rdb"), expResp, &r2rConf, 1);
+    testRdbToRespCommon(DUMP_FOLDER("single_list.rdb"), expResp, &r2rConf);
 }
 
 static void test_r2r_single_list_restore(void **state) {
@@ -133,7 +131,7 @@ static void test_r2r_single_list_restore(void **state) {
     memset(&r2rConf, 0, sizeof(r2rConf));
     r2rConf.supportRestore = 1;
     r2rConf.restore.dstRdbVersion = 11;
-    testRdbToRespCommon(DUMP_FOLDER("single_list.rdb"), (char *) expRespRestore, &r2rConf, 1);
+    testRdbToRespCommon(DUMP_FOLDER("single_list.rdb"), (char *) expRespRestore, &r2rConf);
 }
 
 static void test_r2r_multiple_lists_and_strings(void **state) {
@@ -154,7 +152,7 @@ static void test_r2r_multiple_lists_and_strings(void **state) {
     memset(&r2rConf, 0, sizeof(r2rConf));
     r2rConf.supportRestore = 1;
     r2rConf.restore.dstRdbVersion = 6;
-    testRdbToRespCommon(DUMP_FOLDER("multiple_lists_strings.rdb"), expResp, &r2rConf, 1);
+    testRdbToRespCommon(DUMP_FOLDER("multiple_lists_strings.rdb"), expResp, &r2rConf);
 }
 /*************************** group_rdb_to_resp *******************************/
 int group_rdb_to_resp(void) {

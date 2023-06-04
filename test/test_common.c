@@ -6,9 +6,14 @@
 #include <unistd.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <dirent.h>
 
 /* server port to allocate for tests against live Redis */
 int redisPort;
+const char *redisInstallFolder;
+pid_t redis_pid = 0;
 
 void runSystemCmd(const char *cmdFormat, ...) {
     char cmd[256];
@@ -17,9 +22,10 @@ void runSystemCmd(const char *cmdFormat, ...) {
     vsnprintf(cmd, sizeof(cmd)-1, cmdFormat, args);
     va_end(args);
 
-    if (system(cmd)) {
+    int res = system(cmd);
+    if (res) {
         printf("\nFailed to run command: %s\n", cmd);
-        exit(1);
+        assert_true(0);
     }
 }
 
@@ -100,6 +106,27 @@ void assert_payload_file(const char *filename, char *expPayload, char *charsToSk
     free(filedata);
 }
 
+void cleanTmpFolder() {
+    const char *folder_path = "./test/tmp";
+
+    DIR *dir = opendir(folder_path);
+    assert_true(dir != NULL);
+
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL) {
+            if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
+            continue;
+
+        char file_path[1024];
+        snprintf(file_path, sizeof(file_path), "%s/%s", folder_path, entry->d_name);
+        assert_true (remove(file_path) != -1);
+    }
+
+    closedir(dir);
+}
+
+/*** setup external Redis Server ***/
+
 int findFreePort(int startPort, int endPort) {
     int reuse = 1;
     int port;
@@ -132,6 +159,49 @@ int findFreePort(int startPort, int endPort) {
 
     assert_true(0); /* No free port found within the range */
     return -1;
+}
+
+void cleanupRedisServer() {
+    if (redis_pid)
+        kill(redis_pid, SIGTERM);
+}
+
+void setupRedisServer() {
+    int status;
+    pid_t pid = fork();
+    assert_int_not_equal (pid, -1);
+
+    redisPort = findFreePort(6500, 6600);
+
+    if (pid == 0) { /* child */
+        char redisPortStr[10];
+        char fullpath[256];
+
+        printf ("Redis port: %d\n", redisPort);
+
+        snprintf(fullpath, 255, "%s/%s", redisInstallFolder, "redis-server");
+        snprintf(redisPortStr, sizeof(redisPortStr), "%d", redisPort);
+        execl(fullpath, fullpath, "--port", redisPortStr , "--dir", "./test/tmp/", "--logfile", "./redis.log", (char*)NULL);
+
+        /* If execl returns, an error occurred! */
+        perror("execl");
+        exit(1);
+    } else { /* parent */
+        UNUSED(status);
+
+        /* wait to server to become available */
+        runSystemCmdRetry(5, "%s/redis-cli -p %d ping 2>&1 | grep -i pong > /dev/null ", redisInstallFolder, redisPort);
+
+        redis_pid = pid;
+
+        /* Close any subprocess in case of exit due to error flow */
+        atexit(cleanupRedisServer);
+    }
+}
+
+void teardownRedisServer() {
+    runSystemCmd("%s/redis-cli -p %d shutdown > /dev/null 2>&1", redisInstallFolder, redisPort);
+    wait(NULL);
 }
 
 /*** simulate external malloc with verification ***/

@@ -1,9 +1,5 @@
 #include <string.h>
-#include <stdio.h>
 #include <stdlib.h>
-#include <unistd.h>
-#include <sys/types.h>
-#include <sys/wait.h>
 #include "test_common.h"
 
 static int setupTest(void **state) {
@@ -14,42 +10,30 @@ static int setupTest(void **state) {
 }
 
 /*
- * Testing RESP TCP against live server:
+ * Testing CLI RESP against live server:
  * 1. Run RDB to Json (out1.json)
- * 2. Run RDB against Redis and save DUMP-RDB
+ * 2. Run RDB with rdb-convert against Redis and save DUMP-RDB
  * 3. From DUMP-RDB generate Json (out2.json)
- * 4. assert_json_equal(out1.json , out2.json)
+ * 4. assert_json_equal(out1.json, out2.json)
  */
-static void test_rdb_to_loader_common(const char *rdbfile) {
+static void test_cli_resp_common(const char *rdbfile) {
     RdbParser *parser;
     RdbStatus status;
 
     /* Won't use RESTORE command because target RDB ver. < source RDB ver. */
-    RdbxToRespConf rdb2respConf = {1, 0, 0, 0, {10, NULL}};
     RdbxToJsonConf rdb2jsonConf = {RDB_LEVEL_DATA, RDBX_CONV_JSON_ENC_PLAIN, 1, 1};
 
     /* RDB to JSON */
     parser = RDB_createParserRdb(NULL);
     RDB_setLogLevel(parser, RDB_LOG_ERROR);
     assert_non_null(RDBX_createReaderFile(parser, rdbfile));
-    assert_non_null(RDBX_createHandlersToJson(parser,
-                                              TMP_FOLDER("out1.json"),
-                                              &rdb2jsonConf));
+    assert_non_null(RDBX_createHandlersToJson(parser, TMP_FOLDER("out1.json"), &rdb2jsonConf));
     while ((status = RDB_parse(parser)) == RDB_STATUS_WAIT_MORE_DATA);
     assert_int_equal(status, RDB_STATUS_OK);
     RDB_deleteParser(parser);
 
-    /* RDB to TCP */
-    RdbxToResp *rdbToResp;
-    parser = RDB_createParserRdb(NULL);
-    RDB_setLogLevel(parser, RDB_LOG_ERROR);
-    assert_non_null(RDBX_createReaderFile(parser, rdbfile));
-    assert_non_null(rdbToResp = RDBX_createHandlersToResp(parser, &rdb2respConf));
-    assert_non_null(RDBX_createRespToTcpLoader(parser, rdbToResp, "127.0.0.1", redisPort));
-    RDB_setLogLevel(parser, RDB_LOG_ERROR);
-    while ((status = RDB_parse(parser)) == RDB_STATUS_WAIT_MORE_DATA);
-    assert_int_equal(status, RDB_STATUS_OK);
-    RDB_deleteParser(parser);
+    /* rdb-convert RDB to RESP and stream toward Redis Server */
+    runSystemCmd("./bin/rdb-convert %s resp -h %s -p %d", rdbfile, "127.0.0.1", redisPort);
 
     /* DUMP-RDB from Redis */
     runSystemCmd("%s/redis-cli -p %d save > /dev/null", redisInstallFolder, redisPort);
@@ -69,23 +53,19 @@ static void test_rdb_to_loader_common(const char *rdbfile) {
     assert_json_equal(TMP_FOLDER("out1.json"), TMP_FOLDER("out2.json"));
 }
 
-static void test_rdb_to_loader_single_string(void **state) {
+static void test_cli_json(void **state) {
     UNUSED(state);
-    test_rdb_to_loader_common(DUMP_FOLDER("single_key.rdb"));
+    runSystemCmd("./bin/rdb-convert ./test/dumps/multiple_lists_strings.rdb json -w -o ./test/tmp/out.json  > /dev/null ");
+    assert_json_equal(DUMP_FOLDER("multiple_lists_strings_data.json"), "./test/tmp/out.json");
 }
 
-static void test_rdb_to_loader_single_list(void **state) {
+static void test_cli_resp_tcp(void **state) {
     UNUSED(state);
-    test_rdb_to_loader_common(DUMP_FOLDER("single_list.rdb"));
+    test_cli_resp_common(DUMP_FOLDER("multiple_lists_strings.rdb"));
 }
 
-static void test_rdb_to_loader_multiple_lists_strings(void **state) {
-    UNUSED(state);
-    test_rdb_to_loader_common(DUMP_FOLDER("multiple_lists_strings.rdb"));
-}
-
-/*************************** group_rdb_to_loader *******************************/
-int group_rdb_to_loader() {
+/*************************** group_test_cli *******************************/
+int group_test_cli(void) {
 
     if (!redisInstallFolder) {
         printf("[  SKIPPED ] (Redis installation folder is not configured)\n");
@@ -93,14 +73,12 @@ int group_rdb_to_loader() {
     }
 
     const struct CMUnitTest tests[] = {
-            cmocka_unit_test_setup(test_rdb_to_loader_single_list, setupTest),
-            cmocka_unit_test_setup(test_rdb_to_loader_single_string, setupTest),
-            cmocka_unit_test_setup(test_rdb_to_loader_multiple_lists_strings, setupTest),
+            cmocka_unit_test(test_cli_json),
+            cmocka_unit_test_setup(test_cli_resp_tcp, setupTest),
     };
 
     setupRedisServer();
     int res = cmocka_run_group_tests(tests, NULL, NULL);
     teardownRedisServer();
-
     return res;
 }

@@ -98,6 +98,7 @@ _LIBRDB_API RdbParser *RDB_createParserRdb(RdbMemAlloc *memAlloc) {
     p->mem = mem;
     p->reader = NULL;
     p->cache = NULL;
+    p->errorMsg[0] = '\0';
     p->appCbCtx.numBulks = 0;
     p->loggerCb = loggerCbDefault;
     p->logLevel = RDB_LOG_DBG;
@@ -499,10 +500,10 @@ static RdbStatus parserMainLoop(RdbParser *p) {
 
     if (unlikely(p->debugData)) {
         while (1) {
-            printf(">>> Parsing element %s [State=%d] => ",
-                   peInfo[p->parsingElement].funcname, p->elmCtx.state);
+            RDB_log(p, RDB_LOG_DBG, "[State=%d] %-20s ", p->elmCtx.state, peInfo[p->parsingElement].funcname);
             status = peInfo[p->parsingElement].func(p);
-            printf("status=%s\n", getStatusString(status));
+            RDB_log(p, RDB_LOG_DBG, "Return status=%s (next=%s)\n", getStatusString(status),
+                   peInfo[p->parsingElement].funcname);
             if (status != RDB_STATUS_OK) break;
         }
     } else {
@@ -535,7 +536,8 @@ static inline RdbStatus nextParsingElementKeyValue(RdbParser *p,
 
 static RdbRes handleNewKeyPrintDbg(RdbParser *p, void *userData, RdbBulk key, RdbKeyInfo *info) {
     UNUSED(p,userData,info);
-    printf("Key=%s, ", key);
+    UNUSED(key);
+    RDB_log(p, RDB_LOG_DBG, "Key=%s, ", key);
     return RDB_OK;
 }
 
@@ -1317,7 +1319,7 @@ static RdbStatus readRdbFromBuff(RdbParser *p, size_t len, AllocTypeRq type, cha
 
     IF_NOT_OK_RETURN(allocFromCache(p, len, type, refBuf, binfo));
 
-    /* if spItem was already filled (due to parser rollback). Nothing to do. */
+    /* if bulk-info was already filled (due to parser rollback). Nothing to do. */
     if (unlikely((*binfo)->written >= len))
         return RDB_STATUS_OK;
 

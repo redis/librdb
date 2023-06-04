@@ -100,7 +100,7 @@ typedef struct RdbxToRespConf {
 
     /* todo: support rdb2resp del key before write */
     int delKeyBeforeWrite;
-
+    int skipAuxField;
     int applySelectDbCmds;
 
     /* relevant only if supportRestore is set. */
@@ -114,7 +114,7 @@ typedef struct RdbxToRespConf {
         int dstRdbVersion;
 
         /* an alternative configuration to dstRdbVersion */
-        const char *dstRedisVersion;
+        char *dstRedisVersion;
     } restore;
 
 } RdbxToRespConf;

@@ -37,7 +37,7 @@ struct RdbxToJson {
     unsigned int count_db;
 };
 
-#define ouput_fprintf(ctx, ...) fprintf(ctx->outfile, ##__VA_ARGS__);
+#define ouput_fprintf(ctx, ...) fprintf(ctx->outfile, ##__VA_ARGS__)
 
 static void outputPlainEscaping(RdbxToJson *ctx, char *p, size_t len) {
     while(len--) {
@@ -67,12 +67,15 @@ static void outputQuotedEscaping(RdbxToJson *ctx, char *data, size_t len) {
 
 static void deleteRdbToJsonCtx(RdbParser *p, void *data) {
     RdbxToJson *ctx = (RdbxToJson *) data;
+
     if (ctx->keyCtx.key)
         RDB_bulkCopyFree(p, ctx->keyCtx.key);
 
     RDB_log(p, RDB_LOG_DBG, "handlersToJson: Closing file %s", ctx->filename);
 
-    if (ctx->outfile) fclose(ctx->outfile);
+    if ((ctx->outfile) && (ctx->outfile != stdout))
+        fclose(ctx->outfile);
+
     RDB_free(p, ctx->filename);
     RDB_free(p, ctx);
 }
@@ -80,7 +83,10 @@ static void deleteRdbToJsonCtx(RdbParser *p, void *data) {
 static RdbxToJson *initRdbToJsonCtx(RdbParser *p, const char *filename, RdbxToJsonConf *conf) {
     FILE *f;
 
-    if (!(f = fopen(filename, "w"))) {
+    if (filename == NULL) {
+        f = stdout;
+        filename = "<stdout>";
+    } else if (!(f = fopen(filename, "w"))) {
         RDB_reportError(p, (RdbRes) RDBX_ERR_FAILED_OPEN_FILE,
                         "HandlersRdbToJson: Failed to open file");
         return NULL;
@@ -217,7 +223,10 @@ static RdbRes handlingEndRdb(RdbParser *p, void *userData) {
     }
 
     /* output json part */
-    if (!ctx->conf.flatten) ouput_fprintf(ctx, "\n}]\n");
+    if (!ctx->conf.flatten)
+        ouput_fprintf(ctx, "\n}]\n");
+    else
+        ouput_fprintf(ctx, "\n");
 
     /* update new state */
     ctx->state = R2J_IDLE;

@@ -26,6 +26,8 @@ struct RdbxRespToTcpLoader {
         int lowThreshold;
     } pendingCmds;
 
+    size_t sentCmds;
+
     RdbParser *p;
     int fd;
 };
@@ -39,6 +41,8 @@ int readReplies(RdbxRespToTcpLoader *ctx, int numToRead) {
         /* Read a single-line reply into the buffer */
         ssize_t bytesRead = read(ctx->fd, buffer, sizeof(buffer) - 1);
 
+        /* TODO: Check responses for errors. */
+        /* TODO: Record pending commands in case of failure */
         if (bytesRead > 0) {
             /* Iterate through the read bytes to find the end of the lines */
             for (int i = 0; i < bytesRead; i++) {
@@ -77,6 +81,7 @@ int tcpLoaderWritev(void *context, const struct iovec *iov, int count, uint64_t 
     }
 
     ctx->pendingCmds.num += endCmd;
+    ctx->sentCmds += endCmd;
 
     /* read replies if crosses high threshold of number pending commands till reach low threshold */
     if (unlikely(ctx->pendingCmds.num >= ctx->pendingCmds.highThreshold)) {
@@ -135,6 +140,7 @@ _LIBRDB_API RdbxRespToTcpLoader *RDBX_createRespToTcpLoader(RdbParser *p,
     ctx->pendingCmds.num = 0;
     ctx->pendingCmds.highThreshold = NUM_PENDING_CMDS_HIGH_THRESHOLD;
     ctx->pendingCmds.lowThreshold = NUM_PENDING_CMDS_LOW_THRESHOLD;
+    ctx->sentCmds = 0;
 
     /* Attach this writer to rdbToResp */
     RdbxRespWriter inst = {ctx, tcpLoaderDelete, tcpLoaderWritev, tcpLoaderFlush};
