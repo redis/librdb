@@ -19,8 +19,12 @@ STACK    = -fstack-protector-all -Wstack-protector
 WARNS    = -Wall -Wextra -pedantic -Werror
 CFLAGS   = -fPIC -O3 $(STD) $(STACK) $(WARNS) $(EXTERN_RP_CONFIG)
 DEBUG    = -g3 -DDEBUG=1
+LDFLAGS  =
 LIBS     = -L $(LIB_DIR) -l $(LIB_NAME)
 
+ifeq ($(BUILD_TLS),yes)
+CFLAGS+=-DUSE_OPENSSL=1
+endif
 ######################################### RULES #######################################
 all: $(TARGET_LIB_EXT) $(TARGET_LIB_STATIC_EXT)
 	@echo "Done.";

@@ -1,0 +1,9 @@
+"redis-ver":"255.255.255",
+"redis-bits":"64",
+"ctime":"1677071222",
+"used-mem":"982208",
+"repl-stream-db":"0",
+"repl-id":"f42ea6b158e5926941d08bde6b9ecb6ae88dcd45",
+"repl-offset":"162395634",
+"aof-base":"0",
+"mylist":["val3","val2","val1"]

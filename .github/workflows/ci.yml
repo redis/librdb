@@ -24,11 +24,17 @@ jobs:
           make
           ctest
           sudo make install
+          # Install redis for tests against external Redis server
+          cd ~
+          git clone --branch 7.0.11 https://github.com/redis/redis.git
+          cd redis 
+          make
 
         shell: bash
 
       - name: Build and run project
         run: |
           export LD_LIBRARY_PATH=/usr/local/lib/
+          export LIBRDB_REDIS_FOLDER=~/redis/src
           make
         working-directory: ${{github.workspace}}

@@ -45,12 +45,14 @@ typedef enum RdbRes {
 
     RDB_ERR_GENERAL,
 
+    RDB_ERR_FAIL_ALLOC,
+    RDB_ERR_FAILED_CREATE_PARSER,
     RDB_ERR_FAILED_OPEN_LOG_FILE,
     RDB_ERR_FAILED_READ_RDB_FILE,
     RDB_ERR_NO_MEMORY,
     RDB_ERR_FAILED_OPEN_RDB_FILE,
     RDB_ERR_WRONG_FILE_SIGNATURE,
-    RDB_ERR_WRONG_FILE_VERSION,
+    RDB_ERR_UNSUPPORTED_RDB_VERSION,
     RDB_ERR_FAILED_PARTIAL_READ_RDB_FILE,
     RDB_ERR_PARSER_RETURNED_INVALID_LIBRDB_STATUS,
     RDB_ERR_INVALID_LEN_ENCODING,
@@ -83,11 +85,11 @@ typedef enum RdbRes {
 } RdbRes;
 
 typedef enum RdbState {
-    RDB_STATECONFIGURING=0,
-    RDB_STATERUNNING,
-    RDB_STATEPAUSED,
-    RDB_STATEENDED,
-    RDB_STATEERROR,
+    RDB_STATE_CONFIGURING=0,
+    RDB_STATE_RUNNING,
+    RDB_STATE_PAUSED,
+    RDB_STATE_ENDED,
+    RDB_STATE_ERROR,
 } RdbState;
 
 typedef enum RdbStatus {
@@ -124,6 +126,7 @@ typedef struct RdbKeyInfo {
     long long expiretime;
     uint64_t lru_idle;
     int lfu_freq;
+    int opcode;
 } RdbKeyInfo;
 
 /* misc function pointer typedefs */
@@ -139,7 +142,7 @@ typedef void (*RdbLoggerCB) (RdbLogLevel l, const char *msg);
 
 /* avoid nested structures */
 #define HANDLERS_COMMON_CALLBACKS \
-    RdbRes (*handleModuleDatatype)(RdbParser *p, void *userData, RdbBulk value); \
+    RdbRes (*handleNewRdb)(RdbParser *p, void *userData, int rdbVersion); \
     RdbRes (*handleNewDb)(RdbParser *p, void *userData,  int db); \
     RdbRes (*handleEndRdb)(RdbParser *p, void *userData); \
     RdbRes (*handleDbSize)(RdbParser *p, void *userData, uint64_t db_size, uint64_t exp_size); \
@@ -170,6 +173,7 @@ typedef struct RdbHandlersDataCallbacks {
 //    RdbRes (*handleSetElement)(RdbParser *p, void *userData, RdbBulk str, unsigned long sizeHint);
 //    RdbRes (*handleZsetElement)(RdbParser *p, void *userData, RdbBulk str, double score, unsigned long sizeHint);
 //    RdbRes (*handleHashElement)(RdbParser *p, void *userData, RdbBulk field, RdbBulk value, unsigned long sizeHint);
+//    RdbRes (*handleModuleDatatype)(RdbParser *p, void *userData, RdbBulk value);
     /* ... TBD ... */
 } RdbHandlersDataCallbacks;
 
@@ -205,7 +209,7 @@ _LIBRDB_API RdbReader *RDB_createReaderRdb(RdbParser *p,
  * Create set of handlers, at requested level (lvl), to be filled up with
  * callback handlers.
  *
- * Used by:  RDBX_createHandlersRdb2Json
+ * Used by:  RDBX_createHandlersToJson
  *           RDBX_createHandlersFilterKey
  *           <user-defined-handlers>
  ****************************************************************/
@@ -242,6 +246,7 @@ _LIBRDB_API void RDB_setMaxRawLenHandling(RdbParser *p, size_t size);
 _LIBRDB_API void RDB_setDeepIntegCheck(RdbParser *p, int deep);
 _LIBRDB_API size_t RDB_getBytesProcessed(RdbParser *p);
 _LIBRDB_API RdbState RDB_getState(RdbParser *p);
+_LIBRDB_API int RDB_getNumHandlers(RdbParser *p, RdbHandlersLevel lvl);
 _LIBRDB_API void RDB_IgnoreChecksum(RdbParser *p);
 
 /* logger */
@@ -373,11 +378,41 @@ void RDB_free(RdbParser *p, void *ptr);
  ****************************************************************/
 _LIBRDB_API  RdbBulkCopy RDB_bulkClone(RdbParser *p, RdbBulk b);
 
-_LIBRDB_API  void RDB_bulkFree(RdbParser *p, RdbBulkCopy b);
+_LIBRDB_API  void RDB_bulkCopyFree(RdbParser *p, RdbBulkCopy b);
 
 _LIBRDB_API  size_t RDB_bulkLen(RdbParser *p, RdbBulk b);
 
 int RDB_isRefBulk(RdbParser *p, RdbBulk b);
+
+/****************************************************************
+ * Multiple levels registration
+ * Some of the more advanced configuration might require parsing different data
+ * types at different levels of the parser.
+ *
+ * The callbacks that are common to all levels and not related to current key
+ * parsing (lookup HANDLERS_COMMON_CALLBACKS), if registered at different levels
+ * then all of them will be called, one by one, starting from level 0.
+ *
+ * As for the callbacks of RDB object types, each level has its own way to
+ * handle the data with distinct set of callbacks interfaces. In case of multiple
+ * levels registration, the application should configure for each RDB data type
+ * at what level it is needed to get parsed by calling `RDB_handleByLevel()`.
+ * Otherwise, the parser will resolve it by parsing and calling handlers that are
+ * registered at lowest level.
+ *****************************************************************/
+typedef enum RdbDataType {
+    RDB_DATA_TYPE_STRING=0,
+    RDB_DATA_TYPE_LIST,
+    RDB_DATA_TYPE_SET,
+    RDB_DATA_TYPE_ZSET,
+    RDB_DATA_TYPE_HASH,
+    RDB_DATA_TYPE_MODULE,
+    RDB_DATA_TYPE_STREAM,
+    RDB_DATA_TYPE_MAX
+} RdbDataType;
+
+/* Can be called at any point along parsing (Useful after parsing source rdb version) */
+_LIBRDB_API void RDB_handleByLevel(RdbParser *p, RdbDataType t, RdbHandlersLevel lvl, unsigned int flags);
 
 #ifdef __cplusplus
 }

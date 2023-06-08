@@ -1,11 +1,11 @@
 default: all
 
 LIB_NAME              = rdb
-LIB_DIR               = ../lib
+LIB_DIR               = ../../lib
 LIB_NAME_EXT          = $(LIB_NAME)-ext
 
 # Artifacts:
-TARGET_TEST           = example1
+TARGET_APP           = rdb-convert
 
 #########################################################################################
 SOURCES  = $(notdir $(basename $(wildcard *.c)))
@@ -26,10 +26,11 @@ LIBS+=-lssl -lcrypto
 endif
 
 ######################################### RULES #######################################
-all: $(TARGET_TEST)
+all: $(TARGET_APP)
+	mv $(TARGET_APP) ../../bin
 	@echo "Done.";
 
-$(TARGET_TEST): %: %.c
+$(TARGET_APP): %: %.c
 	$(CC) $(CFLAGS) -o $@ $<  $(DEBUG) $(LIBS)
 
 clean:

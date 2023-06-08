@@ -22,6 +22,11 @@ DEBUG       = -g3 -DDEBUG=1
 LIBS        = -l cmocka -L /usr/lib -L $(LIB_DIR) -l $(LIB_NAME) -l $(LIB_NAME_EXT)
 LIBS_STATIC = -l cmocka -L /usr/lib -L $(LIB_DIR) -l:lib$(LIB_NAME_EXT).a
 
+ifeq ($(BUILD_TLS),yes)
+CFLAGS+=-DUSE_OPENSSL=1
+LIBS+=-lssl -lcrypto
+endif
+
 ######################################### RULES #######################################
 all: $(TARGET_TEST) $(TARGET_TEST_STATIC)
 	@echo "Done.";
@@ -39,6 +44,6 @@ $(TARGET_TEST_STATIC): $(OBJECTS)
 	$(CC) -MM $(CFLAGS) $*.c > $*.d
 
 clean:
-	@rm -rvf $(TARGET_TEST) $(TARGET_TEST_STATIC) ./*.o ./*.d ./log/*.log;
+	@rm -rvf $(TARGET_TEST) $(TARGET_TEST_STATIC) ./tmp/*.* ./*.o ./*.d ./log/*.log;
 
 .PHONY: all clean

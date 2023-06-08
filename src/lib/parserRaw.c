@@ -1,36 +1,20 @@
 #include <assert.h>
 #include <string.h>
-#include "deps/redis/lzf.h"
-/*#include "deps/redis/crc64.h"*/
+#include "../../deps/redis/lzf.h"
+/*#include "../deps/redis/crc64.h"*/
 #include "bulkAlloc.h"
 #include "parser.h"
 #include "defines.h"
-#include "deps/redis/endianconv.h"
-#include "utils.h"
-#include "deps/redis/listpack.h"
+#include "../../deps/redis/endianconv.h"
+#include "../../deps/redis/utils.h"
+#include "../../deps/redis/listpack.h"
 
 #define MAX_STRING_WRITE_CHUNK (1024*63)
 #define DATA_SIZE_UNKNOWN_AHEAD 0
+
 #define RAW_AGG_MAX_NUM_BULKS 96
+#define RAW_AGG_BULK_INDEX_UNINIT  -1
 #define RAW_AGG_FIRST_EXTERN_BUFF_LEN (1024-1) /* minus one for additional '\0' */
-
-struct ParsingElementInfo peiRaw[PE_MAX] = {
-        /* reuse of default elements */
-        [PE_RDB_HEADER]       = {elementRdbHeader, "elementRdbHeader", "Start parsing RDB header"},
-        [PE_NEXT_RDB_TYPE]    = {elementNextRdbType, "elementNextRdbType", "Parsing next RDB type"},
-        [PE_AUX_FIELD]        = {elementAuxField, "elementAuxField", "Parsing auxiliary field" },
-        [PE_SELECT_DB]        = {elementSelectDb, "elementSelectDb", "Parsing select-db"},
-        [PE_RESIZE_DB]        = {elementResizeDb, "elementResizeDb", "Parsing resize-db"},
-        [PE_EXPIRETIME]       = {elementExpireTime, "elementExpireTime", "Parsing expire-time"},
-        [PE_EXPIRETIMEMSEC]   = {elementExpireTimeMsec, "elementExpireTimeMsec", "Parsing expire-time-msec"},
-        [PE_END_OF_FILE]      = {elementEndOfFile, "elementEndOfFile", "End parsing RDB file"},
-
-        /* special raw elements parsing */
-        [PE_NEW_KEY]          = {elementRawNewKey, "elementRawNewKey", "Parsing new raw key-value"},
-        [PE_END_KEY]          = {elementRawEndKey, "elementRawEndKey", "Parsing raw end key"},
-        [PE_STRING]           = {elementRawString, "elementRawString", "Parsing raw string"},
-        [PE_LIST]             = {elementRawList, "elementRawList", "Parsing raw list"},
-};
 
 static inline RdbStatus cbHandleBegin(RdbParser *p, size_t size);
 static inline RdbStatus cbHandleFrag(RdbParser *p, BulkInfo *binfo);
@@ -45,19 +29,22 @@ static RdbStatus aggUpdateWrittenCbFrag(RdbParser *p, size_t bytesWritten);
 /*** init & release ***/
 
 void parserRawInit(RdbParser *p) {
-
     RawContext *ctx = &p->rawCtx;
     ctx->bulkArray = (BulkInfo *) RDB_alloc(p, RAW_AGG_MAX_NUM_BULKS * sizeof(struct BulkInfo));
+    ctx->curBulkIndex = RAW_AGG_BULK_INDEX_UNINIT;
 }
 
 void parserRawRelease(RdbParser *p) {
     RawContext *ctx = &p->rawCtx;
 
-    if (ctx->bulkArray) {
-        for (int i = 0; i <= ctx->curBulkIndex ; ++i)
+    if (!(ctx->bulkArray))
+        return;
+
+    if (ctx->curBulkIndex != RAW_AGG_BULK_INDEX_UNINIT) {
+        for (int i = 0; i <= ctx->curBulkIndex; ++i)
             bulkUnmanagedFree(p, ctx->bulkArray + i);
-        RDB_free(p, ctx->bulkArray);
     }
+    RDB_free(p, ctx->bulkArray);
 }
 
 /*** Parsing Elements ***/
@@ -105,8 +92,8 @@ RdbStatus elementRawList(RdbParser *p) {
 
     enum RAW_LIST_STATES {
         ST_RAW_LIST_HEADER=0, /* Retrieve number of nodes */
-        ST_RAW_LIST_NEXT_NODE_CALL_STR, /* Process next node. Call PE_STRING as sub-element */
-        ST_RAW_LIST_NEXT_NODE_STR_RETURN, /* integ check of the returned string from PE_STRING */
+        ST_RAW_LIST_NEXT_NODE_CALL_STR, /* Process next node. Call PE_RAW_STRING as sub-element */
+        ST_RAW_LIST_NEXT_NODE_STR_RETURN, /* integ check of the returned string from PE_RAW_STRING */
     } ;
 
     ElementRawListCtx *listCtx = &p->elmCtx.rawList;
@@ -136,7 +123,7 @@ RdbStatus elementRawList(RdbParser *p) {
             listCtx->container = QUICKLIST_NODE_CONTAINER_PACKED;
 
             if (listCtx->numNodes == 0)
-                return nextParsingElement(p, PE_END_KEY); /* done */
+                return nextParsingElement(p, PE_RAW_END_KEY); /* done */
 
             if (p->currOpcode == RDB_TYPE_LIST_QUICKLIST_2) {
                 int headerLen = 0;
@@ -150,7 +137,7 @@ RdbStatus elementRawList(RdbParser *p) {
             }
 
             /* call raw string as subelement */
-            return subElementCall(p, PE_STRING, ST_RAW_LIST_NEXT_NODE_STR_RETURN);
+            return subElementCall(p, PE_RAW_STRING, ST_RAW_LIST_NEXT_NODE_STR_RETURN);
         }
 
         case ST_RAW_LIST_NEXT_NODE_STR_RETURN: {
@@ -180,7 +167,7 @@ RdbStatus elementRawList(RdbParser *p) {
             }
 
             if (--listCtx->numNodes == 0)
-                return nextParsingElement(p, PE_END_KEY); /* done */
+                return nextParsingElement(p, PE_RAW_END_KEY); /* done */
 
             return updateElementState(p, ST_RAW_LIST_NEXT_NODE_CALL_STR);
         }
@@ -270,7 +257,7 @@ RdbStatus elementRawString(RdbParser *p) {
                 strCtx->len -= bulkLen;
 
                 if (!(strCtx->len))   /* stop condition */
-                    return nextParsingElement(p, PE_END_KEY);
+                    return nextParsingElement(p, PE_RAW_END_KEY);
 
                 updateElementState(p, ST_RAW_STRING_PASS_CHUNKS);
             }

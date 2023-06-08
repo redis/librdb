@@ -6,6 +6,12 @@ The Parser is implemented in the spirit of SAX parser. It fires off a series of 
 it reads the RDB file from beginning to end, and callbacks to handlers registered on
 selected types of data.
 
+
+The primary objective of this project is to offer an efficient and robust C library for 
+parsing Redis RDB files. It also provides an extension library for parsing to JSON and RESP 
+protocols, enabling consumption by various writers. Additionally, a command-line interface 
+(CLI) is available for utilizing these functionalities.
+
 ## Current status
 The project is currently in its early phase and is considered to be a draft. At present, 
 the parser is only capable of handling string and list data types. We are actively seeking 
@@ -14,17 +20,26 @@ with further development. Community contributions are welcome, yet please note t
 the codebase is still undergoing significant changes and may evolve in the future.
 
 ## Getting Started
+If you just wish to get a basic understanding of the library's functionality, without
+running tests (To see parser internal state printouts, execute the command 
+`export LIBRDB_DEBUG_DATA=1` beforehand):
+
+    % make lib example
+
 To build and run tests, you need to have cmocka unit testing framework installed and then:
 
-    make
+    % make
 
-If you just wish to get a basic understanding of the library's functionality, without
-running tests:
+Run CLI extension of this library and parse RDB file to json (might need 
+`export LD_LIBRARY_PATH=./lib` beforehand):
 
-    make lib 
-    make example
+    % ./bin/rdb-convert ./test/dumps/multiple_lists_strings.rdb json
 
-To see parser internal state printouts, execute the command `export LIBRDB_DEBUG_DATA=1` beforehand.
+Run against Redis server, say, on address 127.0.0.1:6379, and upload RDB file:
+
+    % ./bin/rdb-convert ./test/dumps/single_list.rdb resp -h 127.0.0.1 -p 6379
+
+(For more information and CLI usage, run it without any arguments)
 
 ## Motivation behind this project
 There is a genuine need by the Redis community for a versatile RDB file parser that can 
@@ -106,47 +121,48 @@ Level0. The same goes between Level2 and Level1 correspondingly.
 The **Handlers** represent a set of builtin or user-defined functions that will be called on the
 parsed data. Future plan to support built-in Handlers:
 * Convert RDB to JSON file handlers. (Status: WIP)
-* Convert RDB to RESP protocol handlers. (Status: Todo)
+* Convert RDB to RESP protocol handlers. (Status: WIP)
 * Memory Analyze (Status: Todo)
 
-#### Using multiple sets of Handlers
 It is possible to attach to parser more than one set of handlers at the same level.
 That is, for a given data at a given level, the parser will call each of the handlers that
-registered at that level.   
-
-One reason to do so can be because usually retrieving RDB file is the most time-consuming
-task of the parser, and it can save time by making a single parse yet invoke multiple sets 
-of handlers.
+registered at that level. One reason to do so can be because usually retrieving RDB file 
+is the most time-consuming task of the parser, and it can save time by making a single 
+parse yet invoke multiple sets of handlers.
 
 More common reason is that a handlers can be used also as a Filter to decide whether to
 propagate data to the next set of handlers in-line (Such built-in filters can be 
 found at extension library of this project). Note that for any given level, order of
 calls to handlers will be the opposite to order of their registration to that level.
-It's also possible to mix multiple registrations from level1 and level2, but not level0.
+
+Furthermore, it is also possible to attach multiple handlers at different levels, which is 
+described in the [Advanced](#Advanced) section.
 
 ## Usage
 Following examples avoid error check to keep it concise. Full example can be found in 
-`examples` directory.
+`examples` directory. Note that there are different prefixes for parser functions in the 
+core library vs. extension library ("RDB" vs "RDBX").
 
 - Converting RDB file to JSON file:
 
       RdbParser *parser = RDB_createParserRdb(NULL);
       RDBX_createReaderFile(parser, "dump.rdb");
-      RDBX_createHandlersRdb2Json(parser, encoding, "db.json", RDB_LEVEL_DATA);
+      RDBX_createHandlersToJson(parser, "db.json", NULL);
       RDB_parse(parser); 
-      RDB_deleteParser(parser); /* delete also reader & Handlers */
+      RDB_deleteParser(parser);
 
-- Parsing RDB file to RESP Commands:
+- Parsing RDB file to RESP protocol:
 
       RdbParser *parser = RDB_createParserRdb(NULL);
-      RDBX_createReaderFile(parser, "dump.rdb");
-      RDBX_CreateHandlersRdbRaw2Redis(parser, encoding, sockfd_Redis);
+      RDBX_createReaderFile(parser, rdbfile);
+      RdbxToResp *rdbToResp = RDBX_createHandlersToResp(parser, NULL);
+      RDBX_createRespFileWriter(parser, rdbToResp, "./rdbDump.resp");
       RDB_parse(parser);
       RDB_deleteParser(parser);
 
 - Parsing RDB file with user callbacks:
 
-      RdbRes myHandleNewKey(RdbParser *p, void *userData,  RdbBulk key,...) { 
+      RdbRes myHandleNewKey(RdbParser *parser, void *userData,  RdbBulk key,...) { 
           printf("%s\n", key);
           return RDB_OK;
       } 
@@ -162,8 +178,8 @@ Following examples avoid error check to keep it concise. Full example can be fou
 
       RdbParser *parser = RDB_createParserRdb(NULL);
       RDBX_createReaderFile(parser, "dump.rdb");
-      RDBX_createHandlersRdb2Json(parser, encoding, "redis.json", RDB_LEVEL_DATA);
-      RDBX_createHandlersFilterKey(parser, "id_*", 0, RDB_LEVEL_DATA);
+      RDBX_createHandlersToJson(parser, "redis.json", NULL);
+      RDBX_createHandlersFilterKey(parser, "id_*", 0);
       RDB_parse(parser);
       RDB_deleteParser(parser);
   
@@ -171,7 +187,7 @@ Following examples avoid error check to keep it concise. Full example can be fou
 
       unsigned char rdbContent[] =  {'R', 'E', 'D', 'I', 'S', .... };
       RdbParser *parser = RDB_createParserRdb(NULL);
-      RDBX_createHandlersRdb2Json(parser, encoding, "redis.json", RDB_LEVEL_DATA);
+      RDBX_createHandlersToJson(parser, "redis.json", NULL);
       RDB_parseBuff(parser, rdbContent, sizeof(rdbContent), 1 /*EOF*/);
       RDB_deleteParser(parser);
 
@@ -180,6 +196,7 @@ Whether it is Reader or Handlers, once a new block is created, it is being attac
 parser and the parse will take ownership and will release the blocks either during its own
 destruction, or when newer block replacing old one.
 
+<a name="Advanced"></a>
 ## Advanced
 ### Customized Reader
 The built-in readers should be sufficient for most purposes. However, if they do not meet
@@ -198,20 +215,20 @@ asynchronous operation is complete, so the application can call `RDB_parse()` ag
 async indication for read completion from the customized reader to the application is
 beyond the scope of this library. A conceptual invocation of such flow can be:
 
-      myAsyncReader = RDB_createReaderRdb(p, myAsyncRdFunc, myAsyncRdData, myAsyncRdDeleteFunc);
-      while(RDB_parse(p) == RDB_STATUS_WAIT_MORE_DATA) {
+      myAsyncReader = RDB_createReaderRdb(parser, myAsyncRdFunc, myAsyncRdData, myAsyncRdDeleteFunc);
+      while(RDB_parse(parser) == RDB_STATUS_WAIT_MORE_DATA) {
          my_reader_completed_await(myAsyncReader); 
       }
 
 Another way to work asynchronously with the parser is just feeding the parser with chunks 
 of streamed buffers by using the `RDB_parseBuff()` function:
 
-      int parseRdb2Json(int file_descriptor, const char *fnameOut)
+      int parseRdbToJson(int file_descriptor, const char *fnameOut)
       {
         RdbStatus status;
         const int BUFF_SIZE = 200000;
         RdbParser *parser = RDB_createParserRdb(NULL);
-        RDBX_createHandlersRdb2Json(parser, encoding, fnameOut, RDB_LEVEL_DATA);
+        RDBX_createHandlersToJson(parser, fnameOut, NULL);
         void *buf = malloc(BUFF_SIZE);
         do {                        
             int bytes_read = read(file_descriptor, buf, BUFF_SIZE);
@@ -241,7 +258,7 @@ configured interval, at which point it will automatically pause and return
       size_t intervalBytes = 1048576;  
       RdbParser *parser = RDB_createParserRdb(memAlloc);
       RDBX_createReaderFile(parser, "dump.rdb");
-      RDBX_createHandlersRdb2Json(parser, encoding, "db.json", RDB_LEVEL_DATA);
+      RDBX_createHandlersToJson(parser, "db.json", NULL);
       RDB_setPauseInterval(parser, intervalBytes);
       while (RDB_parse(parser) == RDB_STATUS_PAUSED) {
           /* do something else in between */
@@ -278,7 +295,19 @@ callbacks. This includes the options:
 
 The external allocation options give the opportunity to allocate the data by the parser in
 specific layout, as the application expects. For more information, lookup for 
-structure `RdbBulkAllocType` at [librdb-api.h](api/librdb-api.h).
+`RdbBulkAllocType` at [librdb-api.h](api/librdb-api.h).
+
+### Multiple handlers at different levels
+Some of the more advanced usages might require parsing different data types at different
+levels of the parser. As each level has its own way to handle the data with distinct set
+of callbacks, it is the duty of the application to configure for each RDB object type at
+what level it is needed to get handled by calling `RDB_handleByLevel()`. Otherwise, the
+parser will resolve it by parsing and calling handlers that are registered at lowest level.
+
+As for the common callbacks to all levels (which includes `handleNewRdb`, `handleNewDb`,
+`handleEndRdb`, `handleDbSize` and `handleAuxField`) if registered at different
+levels then all of them will be called, one by one, starting from handlers that are 
+registered at the lowest level.
 
 ## Implementation notes
 The Redis RDB file format consists of a series of opcodes followed by the actual data that
@@ -308,7 +337,7 @@ returns the next item in the queue. Otherwise, if the parser managed to reach a 
 parsing-element state, then all cached data in the pool will be **flushed**. 
 
 The bulk-pool is also known as parsing-element's **cache**. To learn more about it, 
-refer to the comment at the start of the file [bulkAlloc.h](src/bulkAlloc.h).
+refer to the comment at the start of the file [bulkAlloc.h](src/lib/bulkAlloc.h).
 
 ### Parsing-Element states
 Having gained understanding of the importance of bulk-pool rollback and replay for

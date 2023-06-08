@@ -1,23 +1,73 @@
+#include "test_common.h"
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
-#include "test_common.h"
+#include <time.h>
+#include <unistd.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <dirent.h>
 
-char* sanitizeJson(char* str) {
+/* server port to allocate for tests against live Redis */
+int redisPort;
+const char *redisInstallFolder;
+pid_t redis_pid = 0;
+
+void runSystemCmd(const char *cmdFormat, ...) {
+    char cmd[256];
+    va_list args;
+    va_start(args, cmdFormat);
+    vsnprintf(cmd, sizeof(cmd)-1, cmdFormat, args);
+    va_end(args);
+
+    int res = system(cmd);
+    if (res) {
+        printf("\nFailed to run command: %s\n", cmd);
+        assert_true(0);
+    }
+}
+
+void runSystemCmdRetry(int seconds, const char *cmdFormat, ...) {
+    char cmd[256];
+    va_list args;
+    va_start(args, cmdFormat);
+    vsnprintf(cmd, sizeof(cmd)-1, cmdFormat, args);
+    va_end(args);
+    time_t startTime = time(NULL);
+    do {
+        if (system(cmd) == 0) return;
+        usleep(10000);
+    } while (difftime(time(NULL), startTime) < seconds);
+
+    printf("\nFailed to run command: %s\n", cmd);
+    exit(1);
+}
+
+static char* sanitizeData(char* str, char* charsToSkip) {
     int i, j;
     int len = strlen(str);
     char* output = str;
 
+    if (!charsToSkip) charsToSkip = "";
+
     for (i = 0, j = 0; i < len; i++) {
-        if ((str[i] != ' ')&&(str[i] != '\n')) {
-            output[j++] = str[i];
+        int skipChar = 0;
+
+        for (int k = 0; charsToSkip[k] != '\0'; k++) {
+            if (str[i] == charsToSkip[k])
+                skipChar = 1;
         }
+        if (!skipChar)
+            output[j++] = str[i];
     }
+
     output[j] = '\0';
     return output;
 }
 
-void assert_json_file(const char *filename, char *expJson) {
+char *readFile(const char *filename,  size_t *length) {
     FILE* fp;
     char* str;
     size_t size;
@@ -35,140 +85,126 @@ void assert_json_file(const char *filename, char *expJson) {
     str[size] = '\0';
     fclose(fp);
 
-    assert_string_equal( sanitizeJson(str) , sanitizeJson(expJson));
-    free(str);
+    if (length) *length = size;
+
+    return str;
 }
 
-void readFileToBuff(const char* filename, unsigned char** buffer, size_t* length) {
-    long file_size = 0;
-    FILE* file = fopen(filename, "rb");
-    assert_non_null(file);
-    assert_int_equal(fseek(file, 0, SEEK_END), 0);
-    file_size = ftell(file);
-    assert_int_not_equal(file_size, -1);
-    assert_int_equal(fseek(file, 0, SEEK_SET), 0);
-    *buffer = (unsigned char*)malloc(file_size);
-    assert_int_equal(fread(*buffer, 1, file_size, file), file_size);
-    *length = file_size;
-    fclose(file);
+void assert_payload_file(const char *filename, char *expPayload, char *charsToSkip) {
+    char *filedata = readFile(filename, NULL);
+    if (strcmp(sanitizeData(expPayload, charsToSkip), sanitizeData(filedata, charsToSkip)) != 0) {
+        printf("payload file %s not as expected.\n", filename);
+        printf("---- %s ----\n", filename);
+        char *f1 = readFile(filename, NULL);
+        printf ("%s", f1);
+        free(f1);
+        printf("\n---- Expected ----\n");
+        printf("%s", expPayload);
+        printf("\n------------\n");
+        assert_true(0);
+    }
+    free(filedata);
 }
 
-/* Test different use cases to convert given rdb file to json:
- * 1. RDB_parse - parse with RDB reader
- * 2. RDB_parse - set pause-interval to 1 byte
- * 3. RDB_parseBuff - parse buffer. Use buffer of size 1 char
- * 4. RDB_parseBuff - parse a single buffer. set pause-interval to 1 byte
- *
- * All those tests will be wrapped with a loop that will test it each time with a different
- * bulk allocation type (bulkAllocType) this includes allocating from stack, heap, external,
- * or optimized-external allocation mode.
- */
-void testVariousCases(const char *rdbfile,
-                      const char *jsonfile,
-                      char *expJson,
-                      RdbHandlersLevel parseLevel)
-{
+void cleanTmpFolder() {
+    const char *folder_path = "./test/tmp";
 
-    for (int type = 0 ; type <= RDB_BULK_ALLOC_MAX ; ++type) {
-        unsigned char *buffer;
-        size_t bufLen;
-        RdbStatus  status;
-        RdbMemAlloc memAlloc = {xmalloc, xrealloc, xfree, type, {xmalloc, xclone, xfree}};
-        RdbMemAlloc *pMemAlloc = (type != RDB_BULK_ALLOC_MAX) ? &memAlloc : NULL;
+    DIR *dir = opendir(folder_path);
+    assert_true(dir != NULL);
 
-        /* read file to buffer for testing RDB_parseBuff() */
-        readFileToBuff(rdbfile, &buffer, &bufLen);
+    struct dirent *entry;
+    while ((entry = readdir(dir)) != NULL) {
+            if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
+            continue;
 
-        /*** 1. RDB_parse - parse with RDB reader ***/
-        remove(jsonfile);
-        RdbParser *parser = RDB_createParserRdb(pMemAlloc);
-        RDB_setLogLevel(parser, RDB_LOG_ERROR);
-        assert_non_null(RDBX_createReaderFile(parser, rdbfile));
-        assert_non_null(RDBX_createHandlersRdb2Json(parser, RDBX_CONV_JSON_ENC_PLAIN, jsonfile, parseLevel));
-        while ((status = RDB_parse(parser)) == RDB_STATUS_WAIT_MORE_DATA);
-        assert_int_equal(status, RDB_STATUS_OK);
-        RDB_deleteParser(parser);
-        assert_json_file(jsonfile, expJson);
+        char file_path[1024];
+        snprintf(file_path, sizeof(file_path), "%s/%s", folder_path, entry->d_name);
+        assert_true (remove(file_path) != -1);
+    }
 
-        /*** 2. RDB_parse - set pause-interval to 1 byte ***/
-        int looseCounterAssert = 0;
-        long countPauses = 0;
-        size_t lastBytes = 0;
-        remove(jsonfile);
-        parser = RDB_createParserRdb(pMemAlloc);
-        RDB_setLogLevel(parser, RDB_LOG_ERROR);
-        assert_non_null(RDBX_createReaderFile(parser, rdbfile));
-        assert_non_null(RDBX_createHandlersRdb2Json(parser, RDBX_CONV_JSON_ENC_PLAIN, jsonfile, parseLevel));
-        RDB_setPauseInterval(parser, 1 /*bytes*/);
-        while (1) {
-            status = RDB_parse(parser);
-            if (status == RDB_STATUS_WAIT_MORE_DATA) {
-                looseCounterAssert = 1;
-                continue;
-            }
-            if (status == RDB_STATUS_PAUSED) {
-                ++countPauses;
-                continue;
-            }
-            assert_int_equal(status, RDB_STATUS_OK);
-            break;
+    closedir(dir);
+}
+
+/*** setup external Redis Server ***/
+
+int findFreePort(int startPort, int endPort) {
+    int reuse = 1;
+    int port;
+
+    for (port = startPort; port <= endPort; ++port) {
+        int sockfd = socket(AF_INET, SOCK_STREAM, 0);
+        if (sockfd == -1) {
+            perror("Socket creation failed");
+            exit(1);
         }
-        /* If recorded WAIT_MORE_DATA, it will mess a little our countPauses evaluation.
-         * When parser reach WAIT_MORE_DATA together with STATUS_PAUSED, then it
-         * will prefer to return WAIT_MORE_DATA */
-        if (looseCounterAssert)
-            assert_true(countPauses > (((long) bufLen) / 2));
-        else
-            assert_int_equal(countPauses + 1, bufLen);
-        RDB_deleteParser(parser);
-        assert_json_file(jsonfile, expJson);
 
-        /*** 3. RDB_parseBuff - parse buffer. Use buffer of size 1 char ***/
-        remove(jsonfile);
-        parser = RDB_createParserRdb(pMemAlloc);
-        RDB_setLogLevel(parser, RDB_LOG_ERROR);
-        assert_non_null(RDBX_createHandlersRdb2Json(parser, RDBX_CONV_JSON_ENC_PLAIN, jsonfile, parseLevel));
-        parseBuffOneCharEachTime(parser, buffer, bufLen, 1);
-        RDB_deleteParser(parser);
-        assert_json_file(jsonfile, expJson);
-
-        /*** 4. RDB_parseBuff - parse a single buffer. set pause-interval to 1 byte ***/
-        countPauses = 0;
-        remove(jsonfile);
-        parser = RDB_createParserRdb(pMemAlloc);
-        RDB_setLogLevel(parser, RDB_LOG_ERROR);
-        assert_non_null(RDBX_createHandlersRdb2Json(parser, RDBX_CONV_JSON_ENC_PLAIN, jsonfile, parseLevel));
-        RDB_setPauseInterval(parser, 1 /*bytes*/);
-        while (1) {
-            status = RDB_parseBuff(parser, buffer, bufLen, 1);
-            assert_true (lastBytes < RDB_getBytesProcessed(parser));
-            lastBytes = RDB_getBytesProcessed(parser);
-            if (status == RDB_STATUS_PAUSED) {
-                ++countPauses;
-                continue;
-            }
-            assert_int_equal(status, RDB_STATUS_OK);
-            break;
+        /* ensure that Redis can immediately capture it without encountering failures or timeouts */
+        if (setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) == -1) {
+            perror("Setsockopt failed");
+            exit(EXIT_FAILURE);
         }
-        assert_int_equal(countPauses + 1, bufLen);
-        RDB_deleteParser(parser);
-        assert_json_file(jsonfile, expJson);
 
-        free(buffer);
+        struct sockaddr_in addr;
+        addr.sin_family = AF_INET;
+        addr.sin_addr.s_addr = INADDR_ANY;
+        addr.sin_port = htons(port);
+
+        int bindResult = bind(sockfd, (struct sockaddr*)&addr, sizeof(addr));
+        close(sockfd);
+
+        if (bindResult == 0) {
+            return port; /* Found a free port */
+        }
+    }
+
+    assert_true(0); /* No free port found within the range */
+    return -1;
+}
+
+void cleanupRedisServer() {
+    if (redis_pid)
+        kill(redis_pid, SIGTERM);
+}
+
+void setupRedisServer() {
+    int status;
+    pid_t pid = fork();
+    assert_int_not_equal (pid, -1);
+
+    redisPort = findFreePort(6500, 6600);
+
+    if (pid == 0) { /* child */
+        char redisPortStr[10];
+        char fullpath[256];
+
+        printf ("Redis port: %d\n", redisPort);
+
+        snprintf(fullpath, 255, "%s/%s", redisInstallFolder, "redis-server");
+        snprintf(redisPortStr, sizeof(redisPortStr), "%d", redisPort);
+        execl(fullpath, fullpath, "--port", redisPortStr , "--dir", "./test/tmp/", "--logfile", "./redis.log", (char*)NULL);
+
+        /* If execl returns, an error occurred! */
+        perror("execl");
+        exit(1);
+    } else { /* parent */
+        UNUSED(status);
+
+        /* wait to server to become available */
+        runSystemCmdRetry(5, "%s/redis-cli -p %d ping 2>&1 | grep -i pong > /dev/null ", redisInstallFolder, redisPort);
+
+        redis_pid = pid;
+
+        /* Close any subprocess in case of exit due to error flow */
+        atexit(cleanupRedisServer);
     }
 }
 
-void parseBuffOneCharEachTime(RdbParser *p, unsigned char *buff, size_t size, int isEOF) {
-    for (size_t i = 0 ; i < size-1 ; ++i)
-        assert_int_equal(RDB_parseBuff(p, buff + i, 1, 0), RDB_STATUS_WAIT_MORE_DATA);
-
-    if (!isEOF)
-        assert_int_equal(RDB_parseBuff(p, buff + size - 1, 1, 1), RDB_STATUS_WAIT_MORE_DATA);
-    else
-        assert_int_equal(RDB_parseBuff(p, buff + size - 1, 1, 0), RDB_STATUS_OK);
+void teardownRedisServer() {
+    runSystemCmd("%s/redis-cli -p %d shutdown > /dev/null 2>&1", redisInstallFolder, redisPort);
+    wait(NULL);
 }
 
-/*** simulate external malloc ***/
+/*** simulate external malloc with verification ***/
 
 #define MAGIC_VALUE      0xDEADBEE
 
@@ -202,4 +238,104 @@ void *xrealloc(void *ptr, size_t size) {
     assert_non_null(new_ptr);
     *(int *)new_ptr = MAGIC_VALUE;
     return (char *)new_ptr + sizeof(int);
+}
+
+/*** compare json files ***/
+
+static void sanitize_json_line(char* line) {
+    size_t length = strlen(line);
+
+    /* remove \n from end of line, if exist */
+    if (length > 0 && (line[length - 1] == '\n') ) {
+        line[length - 1] = '\0';
+        length--;
+    }
+
+    /* remove trailing spaces */
+    while ((0 < length) && (line[length-1] == ' ')) --length;
+
+    /* remove comma at the end of line, if exist */
+    if (length > 0 && (line[length - 1] == ',') ) {
+        line[length - 1] = '\0';
+        length--;
+    }
+
+    size_t j = 0, i = 0;
+    /* skip leading spaces */
+    while ((i<length) && (line[i] == ' ')) ++i;
+    /* shift the string to the start of line */
+    while (i < length) line[j++] = line[i++];
+    line[j] = '\0';
+}
+
+int compare_json_lines(const void* line1, const void* line2) {
+    return strcmp(*(const char**)line1, *(const char**)line2);
+}
+
+/* sanitize, sort, and compare */
+#define MAX_LINE_LENGTH  4096
+void assert_json_equal(const char* filename1, const char* filename2) {
+    char line1[MAX_LINE_LENGTH];
+    char line2[MAX_LINE_LENGTH];
+    char* lines1[MAX_LINE_LENGTH];
+    char* lines2[MAX_LINE_LENGTH];
+    int lineCount1 = 0;
+    int lineCount2 = 0;
+    int res = -1;
+
+    FILE* file1 = fopen(filename1, "r");
+    assert_non_null(file1);
+
+    FILE* file2 = fopen(filename2, "r");
+    assert_non_null(file2);
+
+    while (fgets(line1, MAX_LINE_LENGTH, file1)) {
+        sanitize_json_line(line1);
+        if (strlen(line1) != 0)
+            lines1[lineCount1++] = strdup(line1);
+    }
+
+    while (fgets(line2, MAX_LINE_LENGTH, file2)) {
+        sanitize_json_line(line2);
+        if (strlen(line2) != 0)
+            lines2[lineCount2++] = strdup(line2);
+    }
+
+    if (lineCount1 != lineCount2) goto end_cmp;
+
+    qsort(lines1, lineCount1, sizeof(char *), compare_json_lines);
+    qsort(lines2, lineCount2, sizeof(char *), compare_json_lines);
+
+    for (int i = 0; i < lineCount1; i++)
+        if (strcmp(lines1[i], lines2[i]) != 0) {
+            printf ("strcmp fail: [%s] [%s]\n", lines1[i], lines2[i]);
+            goto end_cmp;
+        }
+
+    res = 0;
+
+end_cmp:
+    for (int i = 0; i < lineCount1; i++)
+        free(lines1[i]);
+    for (int i = 0; i < lineCount2; i++)
+        free(lines2[i]);
+
+    fclose(file1);
+    fclose(file2);
+
+    if (res == 0) return;
+
+    printf("Json files not equal.\n");
+    printf("---- %s ----\n", filename1);
+    char *f1 = readFile(filename1, NULL);
+    printf ("%s", f1);
+    free(f1);
+
+    printf("\n---- %s ----\n", filename2);
+    char *f2 = readFile(filename2, NULL);
+    printf ("%s", f2);
+    free(f2);
+    printf("\n------------\n");
+
+    assert_true(0);
 }

@@ -3,7 +3,8 @@
 
 #include <stdio.h>
 #include <stdlib.h>
-#include "../api/librdb-api.h"
+#include "defines.h"
+#include "../../api/librdb-api.h"
 
 #define MAX_ERROR_MSG 1024
 #define MAX_APP_BULKS 2
@@ -104,10 +105,18 @@ typedef enum ParsingElementType {
     PE_RESIZE_DB,
     PE_EXPIRETIME,
     PE_EXPIRETIMEMSEC,
+
     PE_NEW_KEY,
     PE_END_KEY,
     PE_STRING,
     PE_LIST,
+
+    /* parsing raw data types */
+    PE_RAW_NEW_KEY,
+    PE_RAW_END_KEY,
+    PE_RAW_STRING,
+    PE_RAW_LIST,
+
     PE_END_OF_FILE,
     PE_MAX
 } ParsingElementType;
@@ -123,8 +132,6 @@ typedef struct ParsingElementInfo {
     const char *description;
 } ParsingElementInfo;
 
-extern ParsingElementInfo peiRaw[PE_MAX];
-
 typedef struct {
     uint64_t numNodes;
 } ElementListCtx;
@@ -132,6 +139,7 @@ typedef struct {
 typedef struct {
     RdbKeyInfo info;
     ParsingElementType valueType;
+    RdbHandlersLevel handleByLevel;
 } ElementKeyCtx;
 
 typedef struct {
@@ -213,7 +221,6 @@ struct RdbParser {
 
     RdbState state;                /* internal state */
     int currOpcode;                    /* current RDB opcode */
-    ParsingElementInfo pei[PE_MAX];
     ParsingElementType parsingElement; /* current PE (parsing element) */
     ParsingSubElement callSubElm;
 
@@ -223,6 +230,7 @@ struct RdbParser {
     int numHandlers[RDB_LEVEL_MAX];
     int totalHandlers;
     RdbHandlers *firstHandlers;
+    RdbHandlersLevel handleTypeObjByLevel[RDB_TYPE_MAX];
 
     /*** configuration ***/
     RdbMemAlloc mem;
@@ -295,6 +303,7 @@ struct RdbHandlers {
 
     union {
         HandlersCommonCallbacks common;
+
         RdbHandlersRawCallbacks rdbRaw;
         RdbHandlersStructCallbacks rdbStruct;
         RdbHandlersDataCallbacks rdbData;

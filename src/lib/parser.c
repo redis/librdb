@@ -7,18 +7,18 @@
 #include <stdarg.h>
 #include <string.h>
 #include <arpa/inet.h>
-#include "deps/redis/crc64.h"
+#include "../../deps/redis/crc64.h"
 #include "bulkAlloc.h"
 #include "parser.h"
 #include "defines.h"
-#include "deps/redis/endianconv.h"
-#include "utils.h"
-#include "deps/redis/listpack.h"
-#include "deps/redis/lzf.h"
+#include "../../deps/redis/endianconv.h"
+#include "../../deps/redis/utils.h"
+#include "../../deps/redis/listpack.h"
+#include "../../deps/redis/lzf.h"
 
 #define DONE_FILL_BULK SIZE_MAX
 
-struct ParsingElementInfo peiStructAndData[PE_MAX] = {
+struct ParsingElementInfo peInfo[PE_MAX] = {
         [PE_RDB_HEADER]       = {elementRdbHeader, "elementRdbHeader", "Start parsing RDB header"},
         [PE_NEXT_RDB_TYPE]    = {elementNextRdbType, "elementNextRdbType", "Parsing next RDB type"},
         [PE_AUX_FIELD]        = {elementAuxField, "elementAuxField", "Parsing auxiliary field" },
@@ -26,10 +26,19 @@ struct ParsingElementInfo peiStructAndData[PE_MAX] = {
         [PE_RESIZE_DB]        = {elementResizeDb, "elementResizeDb", "Parsing resize-db"},
         [PE_EXPIRETIME]       = {elementExpireTime, "elementExpireTime", "Parsing expire-time"},
         [PE_EXPIRETIMEMSEC]   = {elementExpireTimeMsec, "elementExpireTimeMsec", "Parsing expire-time-msec"},
+
+        /* parsing struct/data (RDB_LEVEL_STRUCT/RDB_LEVEL_DATA) */
         [PE_NEW_KEY]          = {elementNewKey, "elementNewKey", "Parsing new key-value"},
         [PE_END_KEY]          = {elementEndKey, "elementEndKey", "Parsing end key"},
         [PE_STRING]           = {elementString, "elementString", "Parsing string"},
         [PE_LIST]             = {elementList, "elementList", "Parsing list"},
+
+        /* parsing raw data (RDB_LEVEL_RAW) */
+        [PE_RAW_NEW_KEY]      = {elementRawNewKey, "elementRawNewKey", "Parsing new raw key-value"},
+        [PE_RAW_END_KEY]      = {elementRawEndKey, "elementRawEndKey", "Parsing raw end key"},
+        [PE_RAW_STRING]       = {elementRawString, "elementRawString", "Parsing raw string"},
+        [PE_RAW_LIST]         = {elementRawList, "elementRawList", "Parsing raw list"},
+
         [PE_END_OF_FILE]      = {elementEndOfFile, "elementEndOfFile", "End parsing RDB file"},
 };
 
@@ -64,6 +73,7 @@ static RdbStatus readRdbWaitMoreDataDbg(RdbParser *p, size_t len, AllocTypeRq ty
 /*** LIB API functions ***/
 
 _LIBRDB_API RdbParser *RDB_createParserRdb(RdbMemAlloc *memAlloc) {
+    RdbParser *p;
 
     /* init default memory allocation */
     RdbMemAlloc mem = {
@@ -75,10 +85,12 @@ _LIBRDB_API RdbParser *RDB_createParserRdb(RdbMemAlloc *memAlloc) {
 
     if (memAlloc) mem = *memAlloc;
 
-    RdbParser *p = mem.malloc(sizeof(RdbParser));
+    if ( (p = mem.malloc(sizeof(RdbParser))) == NULL)
+        return NULL;
+
     memset(p, 0, sizeof(RdbParser) );
 
-    p->state = RDB_STATECONFIGURING;
+    p->state = RDB_STATE_CONFIGURING;
 
     p->callSubElm.callerElm = PE_MAX;
     p->callSubElm.bulkResult.ref = NULL;
@@ -86,6 +98,7 @@ _LIBRDB_API RdbParser *RDB_createParserRdb(RdbMemAlloc *memAlloc) {
     p->mem = mem;
     p->reader = NULL;
     p->cache = NULL;
+    p->errorMsg[0] = '\0';
     p->appCbCtx.numBulks = 0;
     p->loggerCb = loggerCbDefault;
     p->logLevel = RDB_LOG_DBG;
@@ -99,6 +112,10 @@ _LIBRDB_API RdbParser *RDB_createParserRdb(RdbMemAlloc *memAlloc) {
     p->numHandlers[RDB_LEVEL_DATA] = 0;
     p->totalHandlers = 0;
     p->firstHandlers = NULL;
+
+    for (int i = 0 ; i < RDB_TYPE_MAX ; ++i) {
+        p->handleTypeObjByLevel[i] = RDB_LEVEL_MAX;
+    }
 
     p->elmCtx.state = 0;
     p->parsingElement = PE_RDB_HEADER;
@@ -124,6 +141,9 @@ _LIBRDB_API RdbParser *RDB_createParserRdb(RdbMemAlloc *memAlloc) {
     p->bytesToNextPause = SIZE_MAX;
 
     p->checksum = 0;
+    p->rdbversion = 0;
+
+    parserRawInit(p);
 
     return p;
 }
@@ -146,22 +166,22 @@ _LIBRDB_API void RDB_deleteParser(RdbParser *p) {
 }
 
 _LIBRDB_API RdbStatus RDB_parse(RdbParser *p) {
-    if (p->state == RDB_STATECONFIGURING)
+    if (p->state == RDB_STATE_CONFIGURING)
         IF_NOT_OK_RETURN(finalizeConfig(p, 0));
 
     /* nothing special to do after pause */
-    if (p->state == RDB_STATEPAUSED)
-        p->state = RDB_STATERUNNING;
+    if (p->state == RDB_STATE_PAUSED)
+        p->state = RDB_STATE_RUNNING;
 
     return parserMainLoop(p);
 }
 
 _LIBRDB_API RdbStatus RDB_parseBuff(RdbParser *p, unsigned char *buff, size_t size, int isEOF) {
 
-    if (p->state == RDB_STATECONFIGURING)
+    if (p->state == RDB_STATE_CONFIGURING)
         IF_NOT_OK_RETURN(finalizeConfig(p, 1));
 
-    if (p->state != RDB_STATEPAUSED)
+    if (p->state != RDB_STATE_PAUSED)
     {
         /* track buffer consumption in parser context */
         p->parsebuffCtx.start = buff;
@@ -176,7 +196,7 @@ _LIBRDB_API RdbStatus RDB_parseBuff(RdbParser *p, unsigned char *buff, size_t si
             return RDB_STATUS_ERROR;
         }
 
-        p->state = RDB_STATERUNNING;
+        p->state = RDB_STATE_RUNNING;
     }
 
     RdbStatus status = parserMainLoop(p);
@@ -193,7 +213,7 @@ _LIBRDB_API RdbStatus RDB_parseBuff(RdbParser *p, unsigned char *buff, size_t si
 }
 
 _LIBRDB_API RdbReader *RDB_createReaderRdb(RdbParser *p, RdbReaderFunc r, void *readerData, RdbFreeFunc freeReaderData) {
-    assert(p->state == RDB_STATECONFIGURING);
+    assert(p->state == RDB_STATE_CONFIGURING);
 
     /* if previously allocated reader, then release it first */
     releaseReader(p);
@@ -295,8 +315,16 @@ _LIBRDB_API size_t RDB_getBytesProcessed(RdbParser *p) {
     return p->bytesRead;
 }
 
+_LIBRDB_API int RDB_getRdbVersion(RdbParser *p) {
+    return p->rdbversion;
+}
+
 _LIBRDB_API RdbState RDB_getState(RdbParser *p) {
     return p->state;
+}
+
+_LIBRDB_API int RDB_getNumHandlers(RdbParser *p, RdbHandlersLevel lvl) {
+    return p->numHandlers[lvl];
 }
 
 _LIBRDB_API RdbRes RDB_getErrorCode(RdbParser *p) {
@@ -315,9 +343,9 @@ _LIBRDB_API void RDB_reportError(RdbParser *p, RdbRes e, const char *msg, ...) {
     /* RDB_OK & RDB_OK_DONT_PROPAGATE - not a real errors to report */
     assert (e != RDB_OK && e != RDB_OK_DONT_PROPAGATE);
 
-    if (p->state == RDB_STATERUNNING) {
+    if (p->state == RDB_STATE_RUNNING) {
         nchars = snprintf(p->errorMsg, MAX_ERROR_MSG, "[%s::State=%d] ",
-                          p->pei[p->parsingElement].funcname,
+                          peInfo[p->parsingElement].funcname,
                           p->elmCtx.state);
     }
 
@@ -372,6 +400,49 @@ _LIBRDB_API RdbHandlers *RDB_createHandlersData(RdbParser *p,
     return hndl;
 }
 
+_LIBRDB_API void RDB_handleByLevel(RdbParser *p, RdbDataType type, RdbHandlersLevel lvl, unsigned int flags) {
+    UNUSED(flags);
+    switch (type) {
+        case RDB_DATA_TYPE_STRING:
+            p->handleTypeObjByLevel[RDB_TYPE_STRING] = lvl;
+            break;
+        case RDB_DATA_TYPE_LIST:
+            p->handleTypeObjByLevel[RDB_TYPE_LIST] = lvl;
+            p->handleTypeObjByLevel[RDB_TYPE_LIST_ZIPLIST] = lvl;
+            p->handleTypeObjByLevel[RDB_TYPE_LIST_QUICKLIST] = lvl;
+            p->handleTypeObjByLevel[RDB_TYPE_LIST_QUICKLIST_2] = lvl;
+            break;
+        case RDB_DATA_TYPE_SET:
+            p->handleTypeObjByLevel[RDB_TYPE_SET] = lvl;
+            p->handleTypeObjByLevel[RDB_TYPE_SET_INTSET] = lvl;
+            p->handleTypeObjByLevel[RDB_TYPE_SET_LISTPACK] = lvl;
+            break;
+        case RDB_DATA_TYPE_ZSET:
+            p->handleTypeObjByLevel[RDB_TYPE_ZSET] = lvl;
+            p->handleTypeObjByLevel[RDB_TYPE_ZSET_2] = lvl;
+            p->handleTypeObjByLevel[RDB_TYPE_ZSET_ZIPLIST] = lvl;
+            p->handleTypeObjByLevel[RDB_TYPE_ZSET_LISTPACK] = lvl;
+            break;
+        case RDB_DATA_TYPE_HASH:
+            p->handleTypeObjByLevel[RDB_TYPE_HASH] = lvl;
+            p->handleTypeObjByLevel[RDB_TYPE_HASH_ZIPMAP] = lvl;
+            p->handleTypeObjByLevel[RDB_TYPE_HASH_ZIPLIST] = lvl;
+            p->handleTypeObjByLevel[RDB_TYPE_HASH_LISTPACK] = lvl;
+            break;
+        case RDB_DATA_TYPE_MODULE:
+            p->handleTypeObjByLevel[RDB_TYPE_MODULE_2] = lvl;
+            break;
+        case RDB_DATA_TYPE_STREAM:
+            p->handleTypeObjByLevel[RDB_TYPE_STREAM_LISTPACKS] = lvl;
+            p->handleTypeObjByLevel[RDB_TYPE_STREAM_LISTPACKS_2] = lvl;
+            p->handleTypeObjByLevel[RDB_TYPE_STREAM_LISTPACKS_3] = lvl;
+            break;
+        default:
+            assert(0);
+    }
+
+}
+
 /*** various functions ***/
 
 static const char *getStatusString(RdbStatus status) {
@@ -390,17 +461,17 @@ static inline RdbStatus updateStateAfterParse(RdbParser *p, RdbStatus status) {
     switch ( (int)status) {
         case RDB_STATUS_PAUSED:
             rollbackCache(p);
-            p->state = RDB_STATEPAUSED;
+            p->state = RDB_STATE_PAUSED;
             return RDB_STATUS_PAUSED;
 
         case RDB_STATUS_WAIT_MORE_DATA:
             rollbackCache(p);
-            p->state = RDB_STATERUNNING;
+            p->state = RDB_STATE_RUNNING;
             return RDB_STATUS_WAIT_MORE_DATA;
 
         case RDB_STATUS_ERROR:
             printParserState(p);
-            p->state = RDB_STATEERROR;
+            p->state = RDB_STATE_ERROR;
             return RDB_STATUS_ERROR;
 
         case RDB_STATUS_ENDED:
@@ -409,7 +480,7 @@ static inline RdbStatus updateStateAfterParse(RdbParser *p, RdbStatus status) {
 
             /* fall-thru */
         case RDB_STATUS_OK:
-            p->state = RDB_STATEENDED;
+            p->state = RDB_STATE_ENDED;
             RDB_log(p, RDB_LOG_INFO, "Parser done");
             return RDB_STATUS_OK;
 
@@ -423,16 +494,16 @@ static inline RdbStatus updateStateAfterParse(RdbParser *p, RdbStatus status) {
 
 static RdbStatus parserMainLoop(RdbParser *p) {
     RdbStatus status;
-    assert(p->state == RDB_STATERUNNING);
+    assert(p->state == RDB_STATE_RUNNING);
 
     p->bytesToNextPause = (p->pauseInterval == 0) ? SIZE_MAX : p->bytesRead + p->pauseInterval ;
 
     if (unlikely(p->debugData)) {
         while (1) {
-            printf(">>> Parsing element %s [State=%d] => ",
-                   p->pei[p->parsingElement].funcname, p->elmCtx.state);
-            status = p->pei[p->parsingElement].func(p);
-            printf("status=%s\n", getStatusString(status));
+            RDB_log(p, RDB_LOG_DBG, "[State=%d] %-20s ", p->elmCtx.state, peInfo[p->parsingElement].funcname);
+            status = peInfo[p->parsingElement].func(p);
+            RDB_log(p, RDB_LOG_DBG, "Return status=%s (next=%s)\n", getStatusString(status),
+                   peInfo[p->parsingElement].funcname);
             if (status != RDB_STATUS_OK) break;
         }
     } else {
@@ -440,7 +511,7 @@ static RdbStatus parserMainLoop(RdbParser *p) {
          * certain transitions by avoiding passing through the main loop. It can be
          * done by flushing the cache with function bulkPoolFlush(), and then make
          * direct call to next state */
-        while ((status = p->pei[p->parsingElement].func(p)) == RDB_STATUS_OK);
+        while ((status = peInfo[p->parsingElement].func(p)) == RDB_STATUS_OK);
     }
     return updateStateAfterParse(p, status);
 }
@@ -450,15 +521,23 @@ static inline void rollbackCache(RdbParser *p) {
 }
 
 static inline RdbStatus nextParsingElementKeyValue(RdbParser *p,
-                                                   ParsingElementType peKey,
+                                                   ParsingElementType peRawValue,
                                                    ParsingElementType peValue) {
-    p->elmCtx.key.valueType = peValue;
-    return nextParsingElement(p, peKey);
+    p->elmCtx.key.handleByLevel = p->handleTypeObjByLevel[p->currOpcode];
+
+    if (p->handleTypeObjByLevel[p->currOpcode] == RDB_LEVEL_RAW) {
+        p->elmCtx.key.valueType = peRawValue;
+        return nextParsingElement(p, PE_RAW_NEW_KEY);
+    } else {
+        p->elmCtx.key.valueType = peValue;
+        return nextParsingElement(p, PE_NEW_KEY);
+    }
 }
 
 static RdbRes handleNewKeyPrintDbg(RdbParser *p, void *userData, RdbBulk key, RdbKeyInfo *info) {
     UNUSED(p,userData,info);
-    printf("Key=%s, ", key);
+    UNUSED(key);
+    RDB_log(p, RDB_LOG_DBG, "Key=%s, ", key);
     return RDB_OK;
 }
 
@@ -491,9 +570,22 @@ static void chainHandlersAcrossLevels(RdbParser *p) {
     }
 }
 
+static void resolveMultipleLevelsRegistration(RdbParser *p) {
+    /* find the lowest level that handlers are registered */
+    int lvl = (p->numHandlers[0]) ? RDB_LEVEL_RAW :
+            (p->numHandlers[1]) ? RDB_LEVEL_STRUCT :
+            RDB_LEVEL_DATA ;
+
+    for (int i = 0 ; i < RDB_TYPE_MAX ; ++i) {
+        /* check if not configured already by app */
+        if (p->handleTypeObjByLevel[i] == RDB_LEVEL_MAX)
+            p->handleTypeObjByLevel[i] = lvl;
+    }
+}
+
 static RdbStatus finalizeConfig(RdbParser *p, int isParseFromBuff) {
     static int is_crc_init = 0;
-    assert(p->state == RDB_STATECONFIGURING);
+    assert(p->state == RDB_STATE_CONFIGURING);
 
     RDB_log(p, RDB_LOG_INFO, "Finalizing parser configuration");
 
@@ -503,6 +595,7 @@ static RdbStatus finalizeConfig(RdbParser *p, int isParseFromBuff) {
     }
 
     if ((p->debugData = getEnvVar(ENV_VAR_DEBUG_DATA, 0)) != 0) {
+        RDB_setLogLevel(p, RDB_LOG_DBG);
         RdbHandlersDataCallbacks cb = {.handleNewKey = handleNewKeyPrintDbg};
         RDB_createHandlersData(p, &cb, NULL, NULL);
     }
@@ -525,22 +618,18 @@ static RdbStatus finalizeConfig(RdbParser *p, int isParseFromBuff) {
 
     chainHandlersAcrossLevels(p);
 
-    if (p->numHandlers[RDB_LEVEL_RAW]) {
-        memcpy(p->pei, peiRaw, PE_MAX * sizeof(ParsingElementInfo));
-        parserRawInit(p);
-    } else {
-        memcpy(p->pei, peiStructAndData, PE_MAX * sizeof(ParsingElementInfo));
-    }
+    resolveMultipleLevelsRegistration(p);
 
-    p->state = RDB_STATERUNNING;
+    p->state = RDB_STATE_RUNNING;
     RDB_log(p, RDB_LOG_INFO, "Start processing RDB source");
     return RDB_STATUS_OK;
 }
 
 static void printParserState(RdbParser *p) {
+    printf ("Parser error message:%s\n", RDB_getErrorMessage(p));
     printf ("Parser error code:%d\n", RDB_getErrorCode(p));
-    printf ("Parser element func name: %s\n", p->pei[p->parsingElement].funcname);
-    printf ("Parser element func description: %s\n", p->pei[p->parsingElement].funcname);
+    printf ("Parser element func name: %s\n", peInfo[p->parsingElement].funcname);
+    printf ("Parser element func description: %s\n", peInfo[p->parsingElement].funcname);
     printf ("Parser element state:%d\n", p->elmCtx.state);
     bulkPoolPrintDbg(p);
 }
@@ -590,7 +679,6 @@ RdbStatus allocFromCache(RdbParser *p,
         return RDB_STATUS_ERROR;
     }
 
-    ((unsigned char *) (*binfo)->ref)[len] = '\0';
     return RDB_STATUS_OK;
 }
 
@@ -647,7 +735,7 @@ static RdbHandlers *createHandlersCommon(RdbParser *p,
                                          void *userData,
                                          RdbFreeFunc f,
                                          RdbHandlersLevel level) {
-    assert(p->state == RDB_STATECONFIGURING);
+    assert(p->state == RDB_STATE_CONFIGURING);
     /* alloc & register empty handlers in parser */
     RdbHandlers *h = (RdbHandlers *) RDB_alloc(p, sizeof(RdbHandlers));
     memset(h, 0, sizeof(RdbHandlers));
@@ -706,10 +794,15 @@ RdbStatus elementRdbHeader(RdbParser *p) {
     /* read rdb version */
     p->rdbversion = atoi(((char *) binfo->ref) + 5);
     if (p->rdbversion < 1 || p->rdbversion > RDB_VERSION) {
-        RDB_reportError(p, RDB_ERR_WRONG_FILE_VERSION,
+        RDB_reportError(p, RDB_ERR_UNSUPPORTED_RDB_VERSION,
             "Can't handle RDB format version: %d", p->rdbversion);
         return RDB_STATUS_ERROR;
     }
+
+    RDB_log(p, RDB_LOG_INFO, "The parsed RDB file version is: %d", p->rdbversion);
+
+
+    CALL_COMMON_HANDLERS_CB(p, handleNewRdb, p->rdbversion);
 
     RDB_log(p, RDB_LOG_INFO, "rdbversion=%d", p->rdbversion);
 
@@ -764,8 +857,10 @@ RdbStatus elementNewKey(RdbParser *p) {
 
     /*** ENTER SAFE STATE ***/
 
+    p->elmCtx.key.info.opcode = p->currOpcode; /* tell cb what is current opcode */
+
     registerAppBulkForNextCb(p, binfoKey);
-    CALL_COMMON_HANDLERS_CB(p, handleNewKey, binfoKey->ref, &p->elmCtx.key.info);
+    CALL_HANDLERS_CB(p, NOP, p->elmCtx.key.handleByLevel, common.handleNewKey, binfoKey->ref, &p->elmCtx.key.info);
 
     /* reset values for next key */
     p->elmCtx.key.info.expiretime = -1;
@@ -822,15 +917,17 @@ RdbStatus elementNextRdbType(RdbParser *p) {
 
     p->currOpcode = *((unsigned char *)biType->ref);
     switch (p->currOpcode) {
-        case RDB_OPCODE_EXPIRETIME:             return nextParsingElement(p, PE_EXPIRETIME);
-        case RDB_OPCODE_EXPIRETIME_MS:          return nextParsingElement(p, PE_EXPIRETIMEMSEC);
-        case RDB_OPCODE_AUX:                    return nextParsingElement(p, PE_AUX_FIELD);
-        case RDB_OPCODE_SELECTDB:               return nextParsingElement(p, PE_SELECT_DB);
-        case RDB_OPCODE_RESIZEDB:               return nextParsingElement(p, PE_RESIZE_DB);
-        case RDB_TYPE_STRING:                   return nextParsingElementKeyValue(p, PE_NEW_KEY, PE_STRING);
-        case RDB_TYPE_LIST_QUICKLIST:           return nextParsingElementKeyValue(p, PE_NEW_KEY, PE_LIST);
-        case RDB_TYPE_LIST_QUICKLIST_2:         return nextParsingElementKeyValue(p, PE_NEW_KEY, PE_LIST);
-        case RDB_OPCODE_EOF:                    return nextParsingElement(p, PE_END_OF_FILE);
+        case RDB_OPCODE_EXPIRETIME:         return nextParsingElement(p, PE_EXPIRETIME);
+        case RDB_OPCODE_EXPIRETIME_MS:      return nextParsingElement(p, PE_EXPIRETIMEMSEC);
+        case RDB_OPCODE_AUX:                return nextParsingElement(p, PE_AUX_FIELD);
+        case RDB_OPCODE_SELECTDB:           return nextParsingElement(p, PE_SELECT_DB);
+        case RDB_OPCODE_RESIZEDB:           return nextParsingElement(p, PE_RESIZE_DB);
+
+        case RDB_TYPE_STRING:               return nextParsingElementKeyValue(p, PE_RAW_STRING, PE_STRING);
+        case RDB_TYPE_LIST_QUICKLIST:       return nextParsingElementKeyValue(p, PE_RAW_LIST, PE_LIST);
+        case RDB_TYPE_LIST_QUICKLIST_2:     return nextParsingElementKeyValue(p, PE_RAW_LIST, PE_LIST);
+
+        case RDB_OPCODE_EOF:                return nextParsingElement(p, PE_END_OF_FILE);
 
         case RDB_OPCODE_FREQ:
         case RDB_OPCODE_IDLE:
@@ -868,22 +965,23 @@ RdbStatus elementNextRdbType(RdbParser *p) {
 
 RdbStatus elementEndKey(RdbParser *p) {
     /*** ENTER SAFE STATE ***/
-    CALL_COMMON_HANDLERS_CB(p, handleEndKey);
+    CALL_HANDLERS_CB(p, NOP, p->elmCtx.key.handleByLevel, common.handleEndKey);
     return nextParsingElement(p, PE_NEXT_RDB_TYPE);
 }
 
 RdbStatus elementString(RdbParser *p) {
     BulkInfo *binfoStr;
+    RdbHandlersLevel lvl = p->elmCtx.key.handleByLevel;
 
     IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC_APP_BULK, NULL, &binfoStr));
 
     /*** ENTER SAFE STATE ***/
 
     registerAppBulkForNextCb(p, binfoStr);
-    CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_DATA, rdbData.handleStringValue, binfoStr->ref);
-
-    registerAppBulkForNextCb(p, binfoStr);
-    CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_STRUCT, rdbData.handleStringValue, binfoStr->ref);
+    if (lvl == RDB_LEVEL_STRUCT)
+        CALL_HANDLERS_CB(p, NOP, lvl, rdbStruct.handleStringValue, binfoStr->ref);
+    else
+        CALL_HANDLERS_CB(p, NOP, lvl, rdbData.handleStringValue, binfoStr->ref);
 
     return nextParsingElement(p, PE_END_KEY);
 }
@@ -928,11 +1026,14 @@ RdbStatus elementList(RdbParser *p) {
              ***********************************************************************************/
 
             if (container == QUICKLIST_NODE_CONTAINER_PLAIN) {
-                registerAppBulkForNextCb(p, binfoNode);
-                CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_DATA, rdbData.handleListElement, binfoNode->ref);
+                RdbHandlersLevel lvl = p->elmCtx.key.handleByLevel;
 
                 registerAppBulkForNextCb(p, binfoNode);
-                CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_STRUCT, rdbStruct.handlerPlainNode, binfoNode->ref);
+                if (lvl == RDB_LEVEL_STRUCT)
+                    CALL_HANDLERS_CB(p, NOP, lvl, rdbStruct.handlerPlainNode, binfoNode->ref);
+                else
+                    CALL_HANDLERS_CB(p, NOP, lvl, rdbData.handleListElement, binfoNode->ref);
+
                 return RDB_STATUS_OK;
             }
 
@@ -952,12 +1053,13 @@ RdbStatus elementList(RdbParser *p) {
             /* Silently skip empty listpack */
             if (lpLength(lp) == 0) return RDB_STATUS_OK;
 
-            registerAppBulkForNextCb(p, binfoNode);
-            CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_STRUCT, rdbStruct.handlerQListNode, binfoNode->ref);
-
-            /* unpackList makes multiple callbacks. all data in ctx.lp */
-            /* TODO: unpack only if cb handleListElement is registered */
-            IF_NOT_OK_RETURN(unpackList(p, lp));
+            if (p->elmCtx.key.handleByLevel == RDB_LEVEL_STRUCT) {
+                registerAppBulkForNextCb(p, binfoNode);
+                CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_STRUCT, rdbStruct.handlerQListNode, binfoNode->ref);
+            } else {
+                /* unpackList makes multiple callbacks. all data in ctx.lp */
+                IF_NOT_OK_RETURN(unpackList(p, lp));
+            }
 
             /* Update context (context update must being made only from safe state. For sure won't be rollback) */
             --ctx->list.numNodes;
@@ -1217,7 +1319,7 @@ static RdbStatus readRdbFromBuff(RdbParser *p, size_t len, AllocTypeRq type, cha
 
     IF_NOT_OK_RETURN(allocFromCache(p, len, type, refBuf, binfo));
 
-    /* if spItem was already filled (due to parser rollback). Nothing to do. */
+    /* if bulk-info was already filled (due to parser rollback). Nothing to do. */
     if (unlikely((*binfo)->written >= len))
         return RDB_STATUS_OK;
 
