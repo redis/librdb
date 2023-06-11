@@ -10,8 +10,8 @@ struct RdbxRespFileWriter {
 };
 
 /* return 0 for success. 1 Otherwise. */
-int respFileWritev(void *context, const struct iovec *iov, int count, uint64_t bulksBitmask, int endCmd) {
-    UNUSED(bulksBitmask);
+static int respFileWritev(void *context, const struct iovec *iov, int count, int startCmd, int endCmd) {
+    UNUSED(startCmd);
     struct RdbxRespFileWriter *ctx = context;
     ctx->cmdCount += endCmd;
 
@@ -27,12 +27,12 @@ int respFileWritev(void *context, const struct iovec *iov, int count, uint64_t b
 }
 
 /* return 0 for success. 1 Otherwise. */
-int respFileFlush(void *context) {
+static int respFileFlush(void *context) {
     struct RdbxRespFileWriter *ctx = context;
     return (EOF == fflush(ctx->filePtr)) ? 1 : 0;
 }
 
-void respFileWriteDelete(void *context) {
+static void respFileWriteDelete(void *context) {
     struct RdbxRespFileWriter *ctx = context;
     if (ctx != NULL) {
         fflush(ctx->filePtr);

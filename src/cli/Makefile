@@ -5,7 +5,7 @@ LIB_DIR               = ../../lib
 LIB_NAME_EXT          = $(LIB_NAME)-ext
 
 # Artifacts:
-TARGET_APP           = rdb-convert
+TARGET_APP           = rdb-cli
 
 #########################################################################################
 SOURCES  = $(notdir $(basename $(wildcard *.c)))

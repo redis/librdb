@@ -1,5 +1,4 @@
 #include <string.h>
-#include <unistd.h>
 #include "test_common.h"
 
 /* todo: support select db, expiry */

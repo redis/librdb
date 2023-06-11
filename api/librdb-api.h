@@ -108,9 +108,9 @@ typedef enum RdbHandlersLevel {
 
 typedef enum RdbLogLevel {
     RDB_LOG_ERROR,
-    RDB_LOG_WARNNING,
+    RDB_LOG_WARNING,
     RDB_LOG_INFO,
-    RDB_LOG_DBG
+    RDB_LOG_DEBUG
 } RdbLogLevel;
 
 /* for explanation, read "Memory management" section below */
@@ -342,7 +342,7 @@ struct RdbMemAlloc {
      * RDB_BULK_ALLOC_EXTERN_OPT */
     struct {
         void *(*alloc)(size_t size);
-        void *(*clone)(void *ptr, size_t size);
+        void *(*clone)(void *ptr, size_t size); /* prefer refcount than actual copy */
         void (*free)(void *ptr);
     } appBulk;
 };
@@ -377,6 +377,8 @@ void RDB_free(RdbParser *p, void *ptr);
  * on RdbBulk than the one allowed to apply on RdbBulkCopy.
  ****************************************************************/
 _LIBRDB_API  RdbBulkCopy RDB_bulkClone(RdbParser *p, RdbBulk b);
+
+_LIBRDB_API  RdbBulkCopy RDB_bulkCopyClone(RdbParser *p, RdbBulkCopy b, size_t len);
 
 _LIBRDB_API  void RDB_bulkCopyFree(RdbParser *p, RdbBulkCopy b);
 

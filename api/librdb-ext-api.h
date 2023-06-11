@@ -39,11 +39,14 @@ typedef enum {
 
     /* resp writer/loader */
     RDBX_ERR_RESP_WRITE,
+    RDBX_ERR_RESP_READ,
     RDBX_ERR_RESP2TCP_CREATE_SOCKET,
     RDBX_ERR_RESP2TCP_INVALID_ADDRESS,
     RDBX_ERR_RESP2TCP_FAILED_CONNECT,
     RDBX_ERR_RESP2TCP_FAILED_READ,
     RDBX_ERR_RESP2TCP_FAILED_WRITE,
+    RDBX_ERR_RESP2TCP_CONN_CLOSE,
+    RDBX_ERR_RESP2TCP_MAX_RETRIES,
 } RdbxRes;
 
 /****************************************************************
@@ -136,7 +139,7 @@ struct RdbxRespWriter {
     void (*delete)(void *ctx);
 
     /* return 0 on success. Otherwise 1 */
-    int (*writev) (void *ctx, const struct iovec *ioVec, int count, uint64_t bulksBitmask, int endCmd);
+    int (*writev) (void *ctx, const struct iovec *ioVec, int count, int startCmd, int endCmd);
     int (*flush) (void *ctx);
 };
 
@@ -156,11 +159,14 @@ _LIBRDB_API RdbxRespFileWriter *RDBX_createRespFileWriter(RdbParser *p,
  * Create RESP to Redis TCP connection
  *
  * If provided path is NULL then write stdout
+ * Can configure pipeline depth of transmitted RESP commands. Set
+ * to 0 if to use default.
  ****************************************************************/
 _LIBRDB_API RdbxRespToTcpLoader *RDBX_createRespToTcpLoader(RdbParser *p,
                                                           RdbxToResp *rdbToResp,
                                                           const char* hostname,
-                                                          int port);
+                                                          int port,
+                                                          int pipelineDepth);
 
 #ifdef __cplusplus
 }

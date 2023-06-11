@@ -148,6 +148,7 @@ int main(int argc, char *argv[]) {
 
     printf("\n*************** START TESTING *******************\n");
     setenv("LIBRDB_SIM_WAIT_MORE_DATA", "0", 1);
+    RUN_TEST_GROUP(group_test_resp_reader);
     RUN_TEST_GROUP(group_rdb_to_resp);
     RUN_TEST_GROUP(group_main);
     RUN_TEST_GROUP(group_rdb_to_json);
@@ -155,7 +156,7 @@ int main(int argc, char *argv[]) {
     RUN_TEST_GROUP(group_bulk_ops);
     RUN_TEST_GROUP(group_pause);
     RUN_TEST_GROUP(group_rdb_to_loader); /*external*/
-    RUN_TEST_GROUP(group_test_cli); /*external*/
+    RUN_TEST_GROUP(group_test_rdb_cli); /*external*/
 
 
     printf("\n*************** SIMULATING WAIT_MORE_DATA *******************\n");
@@ -166,7 +167,7 @@ int main(int argc, char *argv[]) {
     RUN_TEST_GROUP(group_mem_management);
     RUN_TEST_GROUP(group_bulk_ops);
     RUN_TEST_GROUP(group_rdb_to_loader); /*external*/
-    RUN_TEST_GROUP(group_test_cli); /*external*/
+    RUN_TEST_GROUP(group_test_rdb_cli); /*external*/
 
     printf("\n*************** END TESTING *******************\n");
 

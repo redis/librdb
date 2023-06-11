@@ -340,8 +340,6 @@ inline RdbStatus nextParsingElement(RdbParser *p, ParsingElementType next) {
     return RDB_STATUS_OK;
 }
 
-RdbStatus allocFromCache(RdbParser *p, size_t len, AllocTypeRq type, char *refBuf, BulkInfo **binfo);
-
 /*** sub-element parsing ***/
 RdbStatus subElementCall(RdbParser *p, ParsingElementType next, int returnState);
 RdbStatus subElementReturn(RdbParser *p, BulkInfo *bulkResult);

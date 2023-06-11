@@ -32,14 +32,15 @@ void setupRedisServer();
 void teardownRedisServer();
 
 /* test groups */
-extern int group_rdb_to_loader();
-extern int group_test_cli();
-extern int group_rdb_to_resp();
-extern int group_main(void);
-extern int group_rdb_to_json(void);
-extern int group_mem_management(void);
-extern int group_pause(void);
-extern int group_bulk_ops(void);
+int group_rdb_to_loader();
+int group_test_rdb_cli();
+int group_rdb_to_resp();
+int group_main();
+int group_rdb_to_json();
+int group_mem_management();
+int group_pause();
+int group_bulk_ops();
+int group_test_resp_reader();
 
 /* simulate external malloc */
 void *xmalloc(size_t size);
