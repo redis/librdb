@@ -16,9 +16,9 @@
 void logger(RdbLogLevel l, const char *msg) {
     static char *logLevelStr[] = {
             [RDB_LOG_ERROR]    = "| ERROR |",
-            [RDB_LOG_WARNNING] = "| WARN  |",
+            [RDB_LOG_WARNING]  = "| WARN  |",
             [RDB_LOG_INFO]     = "| INFO  |",
-            [RDB_LOG_DBG]      = "| DEBUG |",
+            [RDB_LOG_DEBUG]    = "| DEBUG |",
     };
     printf("%s %s\n", logLevelStr[l], msg);
 }

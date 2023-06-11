@@ -12,11 +12,11 @@ static int setupTest(void **state) {
 /*
  * Testing CLI RESP against live server:
  * 1. Run RDB to Json (out1.json)
- * 2. Run RDB with rdb-convert against Redis and save DUMP-RDB
+ * 2. Run RDB with rdb-cli against Redis and save DUMP-RDB
  * 3. From DUMP-RDB generate Json (out2.json)
  * 4. assert_json_equal(out1.json, out2.json)
  */
-static void test_cli_resp_common(const char *rdbfile) {
+static void test_rdb_cli_resp_common(const char *rdbfile) {
     RdbParser *parser;
     RdbStatus status;
 
@@ -32,8 +32,8 @@ static void test_cli_resp_common(const char *rdbfile) {
     assert_int_equal(status, RDB_STATUS_OK);
     RDB_deleteParser(parser);
 
-    /* rdb-convert RDB to RESP and stream toward Redis Server */
-    runSystemCmd("./bin/rdb-convert %s resp -h %s -p %d", rdbfile, "127.0.0.1", redisPort);
+    /* rdb-cli RDB to RESP and stream toward Redis Server */
+    runSystemCmd("./bin/rdb-cli %s redis -h %s -p %d", rdbfile, "127.0.0.1", redisPort);
 
     /* DUMP-RDB from Redis */
     runSystemCmd("%s/redis-cli -p %d save > /dev/null", redisInstallFolder, redisPort);
@@ -53,19 +53,19 @@ static void test_cli_resp_common(const char *rdbfile) {
     assert_json_equal(TMP_FOLDER("out1.json"), TMP_FOLDER("out2.json"));
 }
 
-static void test_cli_json(void **state) {
+static void test_rdb_cli_json(void **state) {
     UNUSED(state);
-    runSystemCmd("./bin/rdb-convert ./test/dumps/multiple_lists_strings.rdb json -w -o ./test/tmp/out.json  > /dev/null ");
+    runSystemCmd("./bin/rdb-cli ./test/dumps/multiple_lists_strings.rdb json -w -o ./test/tmp/out.json  > /dev/null ");
     assert_json_equal(DUMP_FOLDER("multiple_lists_strings_data.json"), "./test/tmp/out.json");
 }
 
-static void test_cli_resp_tcp(void **state) {
+static void test_rdb_cli_resp_tcp(void **state) {
     UNUSED(state);
-    test_cli_resp_common(DUMP_FOLDER("multiple_lists_strings.rdb"));
+    test_rdb_cli_resp_common(DUMP_FOLDER("multiple_lists_strings.rdb"));
 }
 
-/*************************** group_test_cli *******************************/
-int group_test_cli(void) {
+/*************************** group_test_rdb_cli *******************************/
+int group_test_rdb_cli(void) {
 
     if (!redisInstallFolder) {
         printf("[  SKIPPED ] (Redis installation folder is not configured)\n");
@@ -73,8 +73,8 @@ int group_test_cli(void) {
     }
 
     const struct CMUnitTest tests[] = {
-            cmocka_unit_test(test_cli_json),
-            cmocka_unit_test_setup(test_cli_resp_tcp, setupTest),
+            cmocka_unit_test(test_rdb_cli_json),
+            cmocka_unit_test_setup(test_rdb_cli_resp_tcp, setupTest),
     };
 
     setupRedisServer();
