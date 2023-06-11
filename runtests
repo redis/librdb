@@ -1,19 +1,17 @@
 #!/bin/bash -e
 
 VALGRIND=0
-REDIS_FOLDER=""
 
 while [[ $# -gt 0 ]]; do
   case $1 in
     -v|--valgrind)
+      shift # past argument
       VALGRIND=1
-      shift ;;
-    -f|--redis-folder)
-      REDIS_FOLDER=" --redis-folder $2 "
-      shift 2 ;;
+      ;;
     *|-h)
-      echo "Usage: $(basename $0) [-v|--valgrind] [-f|--folder REDIS_FOLDER]"
-      exit 1 ;;
+      echo "Usage: $(basename $0) [-v|--valgrind]"
+      exit 1
+      ;;
   esac
 done
 
@@ -26,10 +24,10 @@ if [[ ${VALGRIND} -ne 0 ]]; then
   		--leak-resolution=high \
   		--error-exitcode=1 \
   		--log-file=test/log/valgrind.log \
-  		./test/test_static_lib $REDIS_FOLDER
+  		./test/test_static_lib
       sed -n -e '/SUMMARY:/,$p' ./test/log/valgrind.log
   		echo  -en "\n(Entire log available at: ./test/log/valgrind.log)\n"
 
 else
-  ./test/test_lib $REDIS_FOLDER
+  ./test/test_lib
 fi
