@@ -1,4 +1,4 @@
-#!/bin/bash -e
+#!/bin/bash -ex
 
 VALGRIND=0
 
@@ -22,11 +22,8 @@ if [[ ${VALGRIND} -ne 0 ]]; then
   		--track-origins=yes \
   		--leak-check=full \
   		--leak-resolution=high \
-  		--error-exitcode=1 \
-  		--log-file=test/log/valgrind.log \
+  		--error-exitcode=99 \
   		./test/test_static_lib
-      sed -n -e '/SUMMARY:/,$p' ./test/log/valgrind.log
-  		echo  -en "\n(Entire log available at: ./test/log/valgrind.log)\n"
 
 else
   ./test/test_lib
