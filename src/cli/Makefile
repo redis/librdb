@@ -34,6 +34,6 @@ $(TARGET_APP): %: %.c
 	$(CC) $(CFLAGS) -o $@ $<  $(DEBUG) $(LIBS)
 
 clean:
-	@rm -rvf $(TARGETS) ./*.o;
+	@rm -rvf $(TARGETS) ./*.o ../../bin/$(TARGET_APP)
 
 .PHONY: all clean

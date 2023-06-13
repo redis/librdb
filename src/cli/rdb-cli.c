@@ -10,7 +10,7 @@
 #define UNUSED(x) (void)(x)
 
 FILE* logfile = NULL;
-char* logfilePath = "./rdb-cli.log";
+#define LOG_FILE_PATH_DEF "./rdb-cli.log"
 
 static int getOptArg(int argc, char* argv[], int *at,  char *abbrvOpt, char *opt, char *token, int *flag, char **arg) {
     if ((strcmp(token, abbrvOpt) == 0) || (strcmp(token, opt) == 0)) {
@@ -55,11 +55,12 @@ static void loggerWrap(RdbLogLevel l, const char *msg, ...) {
 static void printUsage() {
     printf("Usage: rdb-cli /path/to/dump.rdb [OPTIONS] <FORMAT {json|resp|redis}> [FORMAT_OPTIONS]\n");
     printf("OPTIONS:\n");
+    printf("\t-k, --filter-key <REGEX>      Filter keys using regular expressions\n");
     printf("\t-l, --log-file <PATH>         Path to the log file (Default: './rdb-cli.log')\n\n");
 
     printf("FORMAT_OPTIONS ('json'):\n");
-    printf("\t-w, --with-aux-values         Include auxiliary values\n\n");
-    printf("\t-o, --output <FILE>           Specify the output file. If not specified, output goes to stdout\n");
+    printf("\t-w, --with-aux-values         Include auxiliary values\n");
+    printf("\t-o, --output <FILE>           Specify the output file. If not specified, output goes to stdout\n\n");
 
     printf("FORMAT_OPTIONS ('resp'):\n");
     printf("\t-r, --support-restore         Use the RESTORE command when possible\n");
@@ -75,7 +76,6 @@ static void printUsage() {
 }
 
 static RdbRes formatJson(RdbParser *parser, char *input, int argc, char **argv) {
-    RdbStatus status;
     char *output = NULL;/*default:stdout*/
     int withAuxValues = 0; /*without*/
 
@@ -103,15 +103,12 @@ static RdbRes formatJson(RdbParser *parser, char *input, int argc, char **argv) 
     if (RDBX_createHandlersToJson(parser, output, &conf) == NULL)
         return RDB_ERR_GENERAL;
 
-    while ((status = RDB_parse(parser)) == RDB_STATUS_WAIT_MORE_DATA);
-
-    return (status != RDB_STATUS_OK) ? RDB_ERR_GENERAL : RDB_OK;
+    return RDB_OK;
 }
 
 static RdbRes formatRedis(RdbParser *parser, char *input, int argc, char **argv) {
     int port = 6379;
     int pipeDepthVal=0;
-    RdbStatus status;
     RdbxToResp *rdbToResp;
     char *dstRdbVersion=NULL;
     char *hostname = "127.0.0.1";
@@ -163,13 +160,10 @@ static RdbRes formatRedis(RdbParser *parser, char *input, int argc, char **argv)
     if (RDBX_createRespToTcpLoader(parser, rdbToResp, hostname, port, pipeDepthVal) == NULL)
         return RDB_ERR_GENERAL;
 
-    while ((status = RDB_parse(parser)) == RDB_STATUS_WAIT_MORE_DATA);
-
-    return (status != RDB_STATUS_OK) ? RDB_ERR_GENERAL : RDB_OK;
+    return RDB_OK;
 }
 
 static RdbRes formatResp(RdbParser *parser, char *input, int argc, char **argv) {
-    RdbStatus status;
     RdbxToResp *rdbToResp;
     char *dstRdbVersion=NULL;
     char *output = NULL;/*default:stdout*/
@@ -204,13 +198,14 @@ static RdbRes formatResp(RdbParser *parser, char *input, int argc, char **argv) 
     if (RDBX_createRespFileWriter(parser, rdbToResp, output) == NULL)
         return RDB_ERR_GENERAL;
 
-    while ((status = RDB_parse(parser)) == RDB_STATUS_WAIT_MORE_DATA);
-
-    return (status != RDB_STATUS_OK) ? RDB_ERR_GENERAL : RDB_OK;
+    return RDB_OK;
 }
 
 int main(int argc, char **argv)
 {
+    RdbStatus status;
+    char *logfilePath = LOG_FILE_PATH_DEF;
+    char *filterKey = NULL;
     int at;
     RdbRes res;
     RdbRes (*formatFunc)(RdbParser *p, char *input, int argc, char **argv) = formatJson;
@@ -226,8 +221,13 @@ int main(int argc, char **argv)
     /* parse common options until FORMAT (json/resp/redis) specified */
     for (at = 2; at < argc; ++at) {
         char *opt = argv[at];
+
         if (getOptArg(argc, argv, &at, "-l", "--log-file", opt, NULL, &logfilePath))
             continue;
+
+        if (getOptArg(argc, argv, &at, "-k", "--filter-key", opt, NULL, &filterKey))
+            continue;
+
         if (strcmp(opt, "json") == 0) { formatFunc = formatJson; break; }
         else if (strcmp(opt, "resp") == 0) { formatFunc = formatResp; break; }
         else if (strcmp(opt, "redis") == 0) { formatFunc = formatRedis; break; }
@@ -256,9 +256,20 @@ int main(int argc, char **argv)
     res = formatFunc(parser, input, argc - at, argv + at);
 
     if (RDB_OK != RDB_getErrorCode(parser))
-        res = RDB_getErrorCode(parser);
+        goto perror;
+
+    if (filterKey)
+        RDBX_createHandlersFilterKey(parser, filterKey, 0);
+
+    while ((status = RDB_parse(parser)) == RDB_STATUS_WAIT_MORE_DATA);
+
+    if (status != RDB_STATUS_OK)
+        goto perror;
 
     RDB_deleteParser(parser);
     fclose(logfile);
     return res;
+
+perror:
+    return RDB_getErrorCode(parser);
 }

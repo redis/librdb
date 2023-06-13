@@ -200,6 +200,7 @@ destruction, or when newer block replacing old one.
 
     Usage: rdb-cli /path/to/dump.rdb [OPTIONS] <FORMAT {json|resp|redis}> [FORMAT_OPTIONS]
     OPTIONS:
+    -k, --filter-key <REGEX>      Filter keys using regular expressions
     -l, --log-file <PATH>         Path to the log file (Default: './rdb-cli.log')
     
     FORMAT_OPTIONS ('json'):
