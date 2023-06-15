@@ -1,8 +1,3 @@
-/*
- * Very naive respToTcpLoader block. It plays RESP against live Redis but does not check responses.
- * Sufficient for a start to extend the tests to be able to run against external redis server.
- * This block can be implemented in various ways, such as, async support, writev, buffering, etc.
- */
 #include "common.h"
 #include <string.h>
 #include <unistd.h>
@@ -17,54 +12,45 @@
 #include <openssl/err.h>
 #endif
 
-#define NUM_PENDING_CMDS_HIGH_THD 200
-#define NUM_PENDING_CMDS_LOW_THD  100
+#define PIPELINE_DEPTH_DEFAULT    200   /* Default Number of pending cmds before waiting for response(s) */
+#define PIPELINE_DEPTH_MAX        1000  /* limit the max value allowed to configure for pipeline depth */
 
-#define NUM_RECORDED_CMDS         400
-#define RECORDED_MAX_SIZE         40
-#define REPLY_BUFF_SIZE           4096
+#define NUM_RECORDED_CMDS         400   /* Number of commands to backlog, in a cyclic array */
+#define RECORDED_DATA_MAX_LEN     40    /* Maximum payload size from any command to record into cyclic array */
 
-#define INITIAL_DELAY_USEC        20
-#define MAX_RETRIES               6
+#define REPLY_BUFF_SIZE           4096  /* reply buffer size */
+
 
 struct RdbxRespToTcpLoader {
 
     struct {
         int num;
-        int highThreshold;
-        int lowThreshold;
-
-        char cmdPrefix[NUM_RECORDED_CMDS][RECORDED_MAX_SIZE];
+        int pipelineDepth;
+        char cmdPrefix[NUM_RECORDED_CMDS][RECORDED_DATA_MAX_LEN];
         int cmdAt;
     } pendingCmds;
 
-    struct {
-        size_t nResponses;
-        size_t nErrors;
-    } protocol;
-
-    size_t sentCmds;
-
+    RespReaderCtx respReader;
     RdbParser *p;
     int fd;
 };
 
-/* return 0 for success. 1 Otherwise. */
+/* Read 'numToRead' replies from the TCP socket.
+ * Return 0 for success, 1 otherwise. */
 static int readReplies(RdbxRespToTcpLoader *ctx, int numToRead) {
     char buff[REPLY_BUFF_SIZE];
-    RespReaderCtx respCtx;
-    readRespInit(&respCtx);
 
-    int retries = 0;
-    int delayUs = INITIAL_DELAY_USEC;
+    RespReaderCtx *respReader = &ctx->respReader;
+    size_t countRepliesBefore = respReader->countReplies;
+    size_t repliesExpected = respReader->countReplies + numToRead;
 
-    while ((int)respCtx.countReplies < numToRead) {
-        int rd = recv(ctx->fd, buff, sizeof(buff), MSG_DONTWAIT);
+    while (respReader->countReplies < repliesExpected) {
+        int rd = recv(ctx->fd, buff, sizeof(buff), 0);
 
         if (rd > 0) {
             /* Data was received, process it */
-            if (RESP_REPLY_ERR == readRespReplies(&respCtx, buff, rd)) {
-                RDB_reportError(ctx->p, (RdbRes) RDBX_ERR_RESP_READ, respCtx.errorMsg);
+            if (RESP_REPLY_ERR == readRespReplies(respReader, buff, rd)) {
+                RDB_reportError(ctx->p, (RdbRes) RDBX_ERR_RESP_READ, respReader->errorMsg);
                 return 1;
             }
 
@@ -72,35 +58,23 @@ static int readReplies(RdbxRespToTcpLoader *ctx, int numToRead) {
             RDB_reportError(ctx->p, (RdbRes) RDBX_ERR_RESP2TCP_CONN_CLOSE, "Connection closed by the remote side");
             return 1;
         } else {
-            /* Error occurred or no data available */
-            if (errno == EWOULDBLOCK || errno == EAGAIN) {
-                /* No data available, retry after delay */
-                if (retries >= MAX_RETRIES) {
-                    RDB_reportError(ctx->p, (RdbRes) RDBX_ERR_RESP2TCP_MAX_RETRIES, "Maximum number of retries reached. Exit.");
-                    return 1;
-                }
-                usleep(delayUs);
-                delayUs *= 2;  /* Double the delay for each retry */
-                retries++;
-            } else {
-                RDB_reportError(ctx->p, (RdbRes) RDBX_ERR_RESP2TCP_FAILED_READ, "Failed to recv() from Redis. Exit.");
-                return 1;
-            }
+            RDB_reportError(ctx->p, (RdbRes) RDBX_ERR_RESP2TCP_FAILED_READ, "Failed to recv() from Redis server. Exit.");
+            return 1;
         }
     }
 
-    ctx->protocol.nResponses += respCtx.countReplies;
-    ctx->pendingCmds.num -= respCtx.countReplies;
+    ctx->pendingCmds.num -= (respReader->countReplies - countRepliesBefore);
     return 0;
 }
 
-static inline void recordNewCmd(RdbxRespToTcpLoader *ctx, const struct iovec *iov, int iovcnt) {
-    int recordCmdEntry = (ctx->sentCmds + ctx->pendingCmds.num) % NUM_RECORDED_CMDS;
+/* For debugging, record the command into the cyclic array before sending it */
+static inline void recordNewCmd(RdbxRespToTcpLoader *ctx, const struct iovec *cmd_iov, int iovcnt) {
+    int recordCmdEntry = (ctx->respReader.countReplies + ctx->pendingCmds.num) % NUM_RECORDED_CMDS;
     char *recordCmdPrefixAt = ctx->pendingCmds.cmdPrefix[recordCmdEntry];
 
-    int copiedBytes = 0, bytesToCopy = RECORDED_MAX_SIZE - 1;
+    int copiedBytes = 0, bytesToCopy = RECORDED_DATA_MAX_LEN - 1;
 
-    const struct iovec* currentIov = iov;
+    const struct iovec* currentIov = cmd_iov;
     for (int i = 0; i < iovcnt && bytesToCopy; ++i) {
         int slice = (currentIov->iov_len >= ((size_t)bytesToCopy)) ? bytesToCopy : (int) currentIov->iov_len;
 
@@ -113,15 +87,15 @@ static inline void recordNewCmd(RdbxRespToTcpLoader *ctx, const struct iovec *io
     recordCmdPrefixAt[copiedBytes] = '\0';
 }
 
-/* return 0 for success. 1 Otherwise. */
+/* Write the vector of data to the TCP socket with writev() sys-call.
+ * Return 0 for success, 1 otherwise. */
 static int tcpLoaderWritev(void *context, const struct iovec *iov, int count, int startCmd, int endCmd) {
     UNUSED(startCmd, endCmd);
 
     RdbxRespToTcpLoader *ctx = context;
 
-    /* read replies if crosses high threshold of number pending commands till reach low threshold */
-    if (unlikely(ctx->pendingCmds.num == ctx->pendingCmds.highThreshold)) {
-        if (readReplies(ctx, ctx->pendingCmds.num - ctx->pendingCmds.lowThreshold))
+    if (unlikely(ctx->pendingCmds.num == ctx->pendingCmds.pipelineDepth)) {
+        if (readReplies(ctx, 1 /* at least one */))
         return 1;
     }
 
@@ -134,12 +108,11 @@ static int tcpLoaderWritev(void *context, const struct iovec *iov, int count, in
     }
 
     ctx->pendingCmds.num += endCmd;
-    ctx->sentCmds += endCmd;
-
     return 0;
 }
 
-/* return 0 for success. 1 Otherwise. */
+/* Flush the pending commands by reading the remaining replies.
+ * Return 0 for success, 1 otherwise. */
 static int tcpLoaderFlush(void *context) {
     RdbxRespToTcpLoader *ctx = context;
     if (ctx->pendingCmds.num)
@@ -147,6 +120,7 @@ static int tcpLoaderFlush(void *context) {
     return 0;
 }
 
+/* Delete the TCP loader context and perform cleanup. */
 static void tcpLoaderDelete(void *context) {
     struct RdbxRespToTcpLoader *ctx = context;
     tcpLoaderFlush(ctx);
@@ -155,6 +129,8 @@ static void tcpLoaderDelete(void *context) {
     RDB_free(ctx->p, ctx);
 }
 
+/* Create and initialize the RdbxRespToTcpLoader context.
+ * Return a pointer to the created context on success, or NULL on failure. */
 _LIBRDB_API RdbxRespToTcpLoader *RDBX_createRespToTcpLoader(RdbParser *p,
                                                             RdbxToResp *rdbToResp,
                                                             const char *hostname,
@@ -162,8 +138,8 @@ _LIBRDB_API RdbxRespToTcpLoader *RDBX_createRespToTcpLoader(RdbParser *p,
                                                             int pipelineDepth) {
     RdbxRespToTcpLoader *ctx;
 
-    if (pipelineDepth <= 0 || pipelineDepth>NUM_PENDING_CMDS_HIGH_THD)
-        pipelineDepth = NUM_PENDING_CMDS_HIGH_THD;
+    if (pipelineDepth <= 0 || pipelineDepth>PIPELINE_DEPTH_MAX)
+        pipelineDepth = PIPELINE_DEPTH_DEFAULT;
 
     int sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (sockfd == -1) {
@@ -199,9 +175,8 @@ _LIBRDB_API RdbxRespToTcpLoader *RDBX_createRespToTcpLoader(RdbParser *p,
     ctx->p = p;
     ctx->fd = sockfd;
     ctx->pendingCmds.num = 0;
-    ctx->pendingCmds.highThreshold = pipelineDepth;
-    ctx->pendingCmds.lowThreshold = (pipelineDepth/2);
-    ctx->sentCmds = 0;
+    ctx->pendingCmds.pipelineDepth = pipelineDepth;
+    readRespInit(&ctx->respReader);
 
     /* Attach this writer to rdbToResp */
     RdbxRespWriter inst = {ctx, tcpLoaderDelete, tcpLoaderWritev, tcpLoaderFlush};

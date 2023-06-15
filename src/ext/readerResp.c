@@ -139,12 +139,18 @@ static RespRes readRespReplyError(RespReaderCtx *ctx, RespReplyBuff *buffInfo) {
 
 static RespRes readRespReplyBulk(RespReaderCtx *ctx, RespReplyBuff *buffInfo) {
     UNUSED(buffInfo);
+
+    /* Currently there are no commands, which sent by respToTcpLoader.c, that will cause to
+     * get back bulk replies. Might change in the future */
     snprintf(ctx->errorMsg,sizeof(ctx->errorMsg),"Unexpected bulk reply");
     return RESP_REPLY_ERR;
 }
 
 static RespRes readRespReplyAggregate(RespReaderCtx *ctx, RespReplyBuff *buffInfo) {
     UNUSED(buffInfo);
+
+    /* Currently there are no commands, which sent by respToTcpLoader.c, that will cause to
+     * get back aggregated replies. Might change in the future */
     snprintf(ctx->errorMsg,sizeof(ctx->errorMsg),"Unexpected aggregate reply");
     return RESP_REPLY_ERR;
 }
