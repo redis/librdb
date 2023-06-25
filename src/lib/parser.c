@@ -101,7 +101,7 @@ _LIBRDB_API RdbParser *RDB_createParserRdb(RdbMemAlloc *memAlloc) {
     p->errorMsg[0] = '\0';
     p->appCbCtx.numBulks = 0;
     p->loggerCb = loggerCbDefault;
-    p->logLevel = RDB_LOG_DBG;
+    p->logLevel = RDB_LOG_DEBUG;
     p->maxRawLen = SIZE_MAX;
     p->errorCode = RDB_OK;
     p->handlers[RDB_LEVEL_RAW] = NULL;
@@ -500,9 +500,9 @@ static RdbStatus parserMainLoop(RdbParser *p) {
 
     if (unlikely(p->debugData)) {
         while (1) {
-            RDB_log(p, RDB_LOG_DBG, "[State=%d] %-20s ", p->elmCtx.state, peInfo[p->parsingElement].funcname);
+            RDB_log(p, RDB_LOG_DEBUG, "[State=%d] %-20s ", p->elmCtx.state, peInfo[p->parsingElement].funcname);
             status = peInfo[p->parsingElement].func(p);
-            RDB_log(p, RDB_LOG_DBG, "Return status=%s (next=%s)\n", getStatusString(status),
+            RDB_log(p, RDB_LOG_DEBUG, "Return status=%s (next=%s)\n", getStatusString(status),
                    peInfo[p->parsingElement].funcname);
             if (status != RDB_STATUS_OK) break;
         }
@@ -537,7 +537,7 @@ static inline RdbStatus nextParsingElementKeyValue(RdbParser *p,
 static RdbRes handleNewKeyPrintDbg(RdbParser *p, void *userData, RdbBulk key, RdbKeyInfo *info) {
     UNUSED(p,userData,info);
     UNUSED(key);
-    RDB_log(p, RDB_LOG_DBG, "Key=%s, ", key);
+    RDB_log(p, RDB_LOG_DEBUG, "Key=%s, ", key);
     return RDB_OK;
 }
 
@@ -595,7 +595,7 @@ static RdbStatus finalizeConfig(RdbParser *p, int isParseFromBuff) {
     }
 
     if ((p->debugData = getEnvVar(ENV_VAR_DEBUG_DATA, 0)) != 0) {
-        RDB_setLogLevel(p, RDB_LOG_DBG);
+        RDB_setLogLevel(p, RDB_LOG_DEBUG);
         RdbHandlersDataCallbacks cb = {.handleNewKey = handleNewKeyPrintDbg};
         RDB_createHandlersData(p, &cb, NULL, NULL);
     }
@@ -637,9 +637,9 @@ static void printParserState(RdbParser *p) {
 static void loggerCbDefault(RdbLogLevel l, const char *msg) {
     static char *logLevelStr[] = {
             [RDB_LOG_ERROR]    = ":: ERROR ::",
-            [RDB_LOG_WARNNING] = ":: WARN  ::",
+            [RDB_LOG_WARNING]  = ":: WARN  ::",
             [RDB_LOG_INFO]     = ":: INFO  ::",
-            [RDB_LOG_DBG]      = ":: DEBUG ::",
+            [RDB_LOG_DEBUG]    = ":: DEBUG ::",
     };
     printf("%s %s\n", logLevelStr[l], msg);
 }
@@ -660,7 +660,7 @@ static void releaseHandlers(RdbParser *p, RdbHandlers *h) {
     }
 }
 
-RdbStatus allocFromCache(RdbParser *p,
+static RdbStatus allocFromCache(RdbParser *p,
                          size_t len,
                          AllocTypeRq type,
                          char *refBuf,
@@ -1088,7 +1088,7 @@ RdbStatus elementEndOfFile(RdbParser *p) {
         if (!p->ignoreChecksum) {
             memrev64ifbe(&cksum);
             if (cksum == 0) {
-                RDB_log(p, RDB_LOG_WARNNING, "RDB file was saved with checksum disabled: no check performed.");
+                RDB_log(p, RDB_LOG_WARNING, "RDB file was saved with checksum disabled: no check performed.");
             } else if (cksum != evaluated) {
                 RDB_reportError(p, RDB_ERR_CHECKSUM_FAILURE, "Wrong RDB checksum checksum=%lx, evaluated=%lx",
                                (unsigned long long) cksum,
@@ -1305,7 +1305,7 @@ not_ok:
         /* verify reader reported an error. Otherwise set such one */
         if (p->errorCode == RDB_OK) {
             p->errorCode = RDB_ERR_FAILED_READ_RDB_FILE;
-            RDB_log(p, RDB_LOG_WARNNING, "Reader returned error indication but didn't RDB_reportError()");
+            RDB_log(p, RDB_LOG_WARNING, "Reader returned error indication but didn't RDB_reportError()");
         }
     } else {
         /* reader can return only ok, wait-more-data or error */

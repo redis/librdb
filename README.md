@@ -33,11 +33,11 @@ To build and run tests, you need to have cmocka unit testing framework installed
 Run CLI extension of this library and parse RDB file to json (might need 
 `export LD_LIBRARY_PATH=./lib` beforehand):
 
-    % ./bin/rdb-convert ./test/dumps/multiple_lists_strings.rdb json
+    % ./bin/rdb-cli ./test/dumps/multiple_lists_strings.rdb json
 
 Run against Redis server, say, on address 127.0.0.1:6379, and upload RDB file:
 
-    % ./bin/rdb-convert ./test/dumps/single_list.rdb resp -h 127.0.0.1 -p 6379
+    % ./bin/rdb-cli ./test/dumps/single_list.rdb redis -h 127.0.0.1 -p 6379
 
 (For more information and CLI usage, run it without any arguments)
 
@@ -195,6 +195,29 @@ core library vs. extension library ("RDB" vs "RDBX").
 Whether it is Reader or Handlers, once a new block is created, it is being attached to the
 parser and the parse will take ownership and will release the blocks either during its own
 destruction, or when newer block replacing old one.
+
+### rdb-cli usage
+
+    Usage: rdb-cli /path/to/dump.rdb [OPTIONS] <FORMAT {json|resp|redis}> [FORMAT_OPTIONS]
+    OPTIONS:
+    -k, --filter-key <REGEX>      Filter keys using regular expressions
+    -l, --log-file <PATH>         Path to the log file (Default: './rdb-cli.log')
+    
+    FORMAT_OPTIONS ('json'):
+    -w, --with-aux-values         Include auxiliary values
+    -o, --output <FILE>           Specify the output file. If not specified, output goes to stdout
+    
+    FORMAT_OPTIONS ('resp'):
+    -r, --support-restore         Use the RESTORE command when possible
+    -t, --target-redis-ver <VER>  Specify the target Redis version
+    -o, --output <FILE>           Specify the output file. If not specified, output goes to stdout
+    
+    FORMAT_OPTIONS ('redis'):
+    -r, --support-restore         Use the RESTORE command when possible
+    -t, --target-redis-ver <VER>  Specify the target Redis version
+    -h, --hostname <HOSTNAME>     Specify the server hostname (default: 127.0.0.1)
+    -p, --port <PORT>             Specify the server port (default: 6379)
+    -l, --pipeline-depth <value>  Number of pending commands before blocking for responses
 
 <a name="Advanced"></a>
 ## Advanced

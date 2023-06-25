@@ -5,7 +5,7 @@ LIB_DIR               = ../../lib
 LIB_NAME_EXT          = $(LIB_NAME)-ext
 
 # Artifacts:
-TARGET_APP           = rdb-convert
+TARGET_APP           = rdb-cli
 
 #########################################################################################
 SOURCES  = $(notdir $(basename $(wildcard *.c)))
@@ -34,6 +34,6 @@ $(TARGET_APP): %: %.c
 	$(CC) $(CFLAGS) -o $@ $<  $(DEBUG) $(LIBS)
 
 clean:
-	@rm -rvf $(TARGETS) ./*.o;
+	@rm -rvf $(TARGETS) ./*.o ../../bin/$(TARGET_APP)
 
 .PHONY: all clean

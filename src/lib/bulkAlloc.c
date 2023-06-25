@@ -72,6 +72,25 @@ _LIBRDB_API void RDB_bulkCopyFree(RdbParser *p, RdbBulkCopy b) {
     }
 }
 
+_LIBRDB_API  RdbBulkCopy RDB_bulkCopyClone(RdbParser *p, RdbBulkCopy b, size_t len) {
+
+    /* copy of RdbBulk (BulkCopy) must be alloccated either heap or externally  */
+    switch (p->mem.bulkAllocType) {
+        case RDB_BULK_ALLOC_STACK:
+        case RDB_BULK_ALLOC_HEAP:
+            return (RdbBulkCopy) bulkHeapIncrRef( (RdbBulk) b);
+
+        case RDB_BULK_ALLOC_EXTERN:
+        case RDB_BULK_ALLOC_EXTERN_OPT:
+            return (RdbBulkCopy) p->mem.appBulk.clone( (void *) b, len + 1 /* add termination */ );
+
+        default:
+            RDB_reportError(p, RDB_ERR_INVALID_BULK_ALLOC_TYPE,
+                            "RDB_bulkCopyClone(): Invalid bulk allocation type: %d", p->mem.bulkAllocType);
+            return NULL;
+    }
+}
+
 /*** BulkPool ***/
 
 BulkPool *bulkPoolInit(RdbMemAlloc *mem) {
