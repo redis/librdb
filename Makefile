@@ -18,6 +18,7 @@ lib:
 	$(MAKE) -C examples -f Makefile all
 
 clean:
+	$(MAKE) -C deps -f Makefile clean
 	$(MAKE) -C src/lib -f Makefile clean
 	$(MAKE) -C src/ext -f Makefile clean
 	$(MAKE) -C src/cli -f Makefile clean

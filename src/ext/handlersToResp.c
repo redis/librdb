@@ -2,7 +2,7 @@
 #include <assert.h>
 #include "common.h"
 #include "../../deps/redis/crc64.h"
-#include "../../deps/redis/utils.h"
+#include "../../deps/redis/util.h"
 #include "../../deps/redis/endianconv.h"
 #include <sys/uio.h>
 

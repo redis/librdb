@@ -107,137 +107,137 @@
 NO_SANITIZE("alignment")
 size_t
 lzf_compress (const void *const in_data, size_t in_len,
-              void *out_data, size_t out_len
+	      void *out_data, size_t out_len
 #if LZF_STATE_ARG
-        , LZF_STATE htab
+              , LZF_STATE htab
 #endif
-)
+              )
 {
 #if !LZF_STATE_ARG
-    LZF_STATE htab;
+  LZF_STATE htab;
 #endif
-    const u8 *ip = (const u8 *)in_data;
-    u8 *op = (u8 *)out_data;
-    const u8 *in_end  = ip + in_len;
-    u8 *out_end = op + out_len;
-    const u8 *ref;
+  const u8 *ip = (const u8 *)in_data;
+        u8 *op = (u8 *)out_data;
+  const u8 *in_end  = ip + in_len;
+        u8 *out_end = op + out_len;
+  const u8 *ref;
 
-    /* off requires a type wide enough to hold a general pointer difference.
-     * ISO C doesn't have that (size_t might not be enough and ptrdiff_t only
-     * works for differences within a single object). We also assume that no
-     * no bit pattern traps. Since the only platform that is both non-POSIX
-     * and fails to support both assumptions is windows 64 bit, we make a
-     * special workaround for it.
-     */
+  /* off requires a type wide enough to hold a general pointer difference.
+   * ISO C doesn't have that (size_t might not be enough and ptrdiff_t only
+   * works for differences within a single object). We also assume that no
+   * no bit pattern traps. Since the only platform that is both non-POSIX
+   * and fails to support both assumptions is windows 64 bit, we make a
+   * special workaround for it.
+   */
 #if defined (WIN32) && defined (_M_X64)
-    unsigned _int64 off; /* workaround for missing POSIX compliance */
+  unsigned _int64 off; /* workaround for missing POSIX compliance */
 #else
-    size_t off;
+  size_t off;
 #endif
-    unsigned int hval;
-    int lit;
+  unsigned int hval;
+  int lit;
 
-    if (!in_len || !out_len)
-        return 0;
+  if (!in_len || !out_len)
+    return 0;
 
 #if INIT_HTAB
-    memset (htab, 0, sizeof (htab));
+  memset (htab, 0, sizeof (htab));
 #endif
 
-    lit = 0; op++; /* start run */
+  lit = 0; op++; /* start run */
 
-    hval = FRST (ip);
-    while (ip < in_end - 2)
+  hval = FRST (ip);
+  while (ip < in_end - 2)
     {
-        LZF_HSLOT *hslot;
+      LZF_HSLOT *hslot;
 
-        hval = NEXT (hval, ip);
-        hslot = htab + IDX (hval);
-        ref = *hslot ? (*hslot + LZF_HSLOT_BIAS) : NULL; /* avoid applying zero offset to null pointer */
-        *hslot = ip - LZF_HSLOT_BIAS;
+      hval = NEXT (hval, ip);
+      hslot = htab + IDX (hval);
+      ref = *hslot ? (*hslot + LZF_HSLOT_BIAS) : NULL; /* avoid applying zero offset to null pointer */
+      *hslot = ip - LZF_HSLOT_BIAS;
 
-        if (1
-            #if INIT_HTAB
-            && ref < ip /* the next test will actually take care of this, but this is faster */
-            #endif
-            && (off = ip - ref - 1) < MAX_OFF
-            && ref > (u8 *)in_data
-            && ref[2] == ip[2]
-            #if STRICT_ALIGN
-            && ((ref[1] << 8) | ref[0]) == ((ip[1] << 8) | ip[0])
-            #else
-            && *(u16 *)ref == *(u16 *)ip
+      if (1
+#if INIT_HTAB
+          && ref < ip /* the next test will actually take care of this, but this is faster */
 #endif
-                )
+          && (off = ip - ref - 1) < MAX_OFF
+          && ref > (u8 *)in_data
+          && ref[2] == ip[2]
+#if STRICT_ALIGN
+          && ((ref[1] << 8) | ref[0]) == ((ip[1] << 8) | ip[0])
+#else
+          && *(u16 *)ref == *(u16 *)ip
+#endif
+        )
         {
-            /* match found at *ref++ */
-            unsigned int len = 2;
-            size_t maxlen = in_end - ip - len;
-            maxlen = maxlen > MAX_REF ? MAX_REF : maxlen;
+          /* match found at *ref++ */
+          unsigned int len = 2;
+          size_t maxlen = in_end - ip - len;
+          maxlen = maxlen > MAX_REF ? MAX_REF : maxlen;
 
-            if (expect_false (op + 3 + 1 >= out_end)) /* first a faster conservative test */
-                if (op - !lit + 3 + 1 >= out_end) /* second the exact but rare test */
-                    return 0;
+          if (expect_false (op + 3 + 1 >= out_end)) /* first a faster conservative test */
+            if (op - !lit + 3 + 1 >= out_end) /* second the exact but rare test */
+              return 0;
 
-            op [- lit - 1] = lit - 1; /* stop run */
-            op -= !lit; /* undo run if length is zero */
+          op [- lit - 1] = lit - 1; /* stop run */
+          op -= !lit; /* undo run if length is zero */
 
-            for (;;)
+          for (;;)
             {
-                if (expect_true (maxlen > 16))
+              if (expect_true (maxlen > 16))
                 {
-                    len++; if (ref [len] != ip [len]) break;
-                    len++; if (ref [len] != ip [len]) break;
-                    len++; if (ref [len] != ip [len]) break;
-                    len++; if (ref [len] != ip [len]) break;
+                  len++; if (ref [len] != ip [len]) break;
+                  len++; if (ref [len] != ip [len]) break;
+                  len++; if (ref [len] != ip [len]) break;
+                  len++; if (ref [len] != ip [len]) break;
 
-                    len++; if (ref [len] != ip [len]) break;
-                    len++; if (ref [len] != ip [len]) break;
-                    len++; if (ref [len] != ip [len]) break;
-                    len++; if (ref [len] != ip [len]) break;
+                  len++; if (ref [len] != ip [len]) break;
+                  len++; if (ref [len] != ip [len]) break;
+                  len++; if (ref [len] != ip [len]) break;
+                  len++; if (ref [len] != ip [len]) break;
 
-                    len++; if (ref [len] != ip [len]) break;
-                    len++; if (ref [len] != ip [len]) break;
-                    len++; if (ref [len] != ip [len]) break;
-                    len++; if (ref [len] != ip [len]) break;
+                  len++; if (ref [len] != ip [len]) break;
+                  len++; if (ref [len] != ip [len]) break;
+                  len++; if (ref [len] != ip [len]) break;
+                  len++; if (ref [len] != ip [len]) break;
 
-                    len++; if (ref [len] != ip [len]) break;
-                    len++; if (ref [len] != ip [len]) break;
-                    len++; if (ref [len] != ip [len]) break;
-                    len++; if (ref [len] != ip [len]) break;
+                  len++; if (ref [len] != ip [len]) break;
+                  len++; if (ref [len] != ip [len]) break;
+                  len++; if (ref [len] != ip [len]) break;
+                  len++; if (ref [len] != ip [len]) break;
                 }
 
-                do
-                    len++;
-                while (len < maxlen && ref[len] == ip[len]);
+              do
+                len++;
+              while (len < maxlen && ref[len] == ip[len]);
 
-                break;
+              break;
             }
 
-            len -= 2; /* len is now #octets - 1 */
-            ip++;
+          len -= 2; /* len is now #octets - 1 */
+          ip++;
 
-            if (len < 7)
+          if (len < 7)
             {
-                *op++ = (off >> 8) + (len << 5);
+              *op++ = (off >> 8) + (len << 5);
             }
-            else
+          else
             {
-                *op++ = (off >> 8) + (  7 << 5);
-                *op++ = len - 7;
+              *op++ = (off >> 8) + (  7 << 5);
+              *op++ = len - 7;
             }
 
-            *op++ = off;
+          *op++ = off;
 
-            lit = 0; op++; /* start run */
+          lit = 0; op++; /* start run */
 
-            ip += len + 1;
+          ip += len + 1;
 
-            if (expect_false (ip >= in_end - 2))
-                break;
+          if (expect_false (ip >= in_end - 2))
+            break;
 
 #if ULTRA_FAST || VERY_FAST
-            --ip;
+          --ip;
 # if VERY_FAST && !ULTRA_FAST
           --ip;
 # endif
@@ -253,50 +253,50 @@ lzf_compress (const void *const in_data, size_t in_len,
           ip++;
 # endif
 #else
-            ip -= len + 1;
+          ip -= len + 1;
 
-            do
+          do
             {
-                hval = NEXT (hval, ip);
-                htab[IDX (hval)] = ip - LZF_HSLOT_BIAS;
-                ip++;
+              hval = NEXT (hval, ip);
+              htab[IDX (hval)] = ip - LZF_HSLOT_BIAS;
+              ip++;
             }
-            while (len--);
+          while (len--);
 #endif
         }
-        else
+      else
         {
-            /* one more literal byte we must copy */
-            if (expect_false (op >= out_end))
-                return 0;
+          /* one more literal byte we must copy */
+          if (expect_false (op >= out_end))
+            return 0;
 
-            lit++; *op++ = *ip++;
+          lit++; *op++ = *ip++;
 
-            if (expect_false (lit == MAX_LIT))
+          if (expect_false (lit == MAX_LIT))
             {
-                op [- lit - 1] = lit - 1; /* stop run */
-                lit = 0; op++; /* start run */
+              op [- lit - 1] = lit - 1; /* stop run */
+              lit = 0; op++; /* start run */
             }
         }
     }
 
-    if (op + 3 > out_end) /* at most 3 bytes can be missing here */
-        return 0;
+  if (op + 3 > out_end) /* at most 3 bytes can be missing here */
+    return 0;
 
-    while (ip < in_end)
+  while (ip < in_end)
     {
-        lit++; *op++ = *ip++;
+      lit++; *op++ = *ip++;
 
-        if (expect_false (lit == MAX_LIT))
+      if (expect_false (lit == MAX_LIT))
         {
-            op [- lit - 1] = lit - 1; /* stop run */
-            lit = 0; op++; /* start run */
+          op [- lit - 1] = lit - 1; /* stop run */
+          lit = 0; op++; /* start run */
         }
     }
 
-    op [- lit - 1] = lit - 1; /* end run */
-    op -= !lit; /* undo run if length is zero */
+  op [- lit - 1] = lit - 1; /* end run */
+  op -= !lit; /* undo run if length is zero */
 
-    return op - (u8 *)out_data;
+  return op - (u8 *)out_data;
 }
 

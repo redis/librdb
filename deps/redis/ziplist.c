@@ -189,7 +189,7 @@ void f(){}
 #include <stdint.h>
 #include <limits.h>
 //#include "zmalloc.h"
-#include "rpUtils.h"
+//#include "rpUtils.h"
 #include "ziplist.h"
 //#include "config.h"
 #include "rpEndianConv.h"
