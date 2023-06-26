@@ -1,7 +1,7 @@
 #include <string.h>
 #include "test_common.h"
 
-/* todo: support select db, expiry */
+/* TODO: support select db, expiry */
 
 static void testRdbToRespCommon(const char *rdbfile,
                                 char *expResp,
