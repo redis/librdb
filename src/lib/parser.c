@@ -1030,7 +1030,7 @@ RdbStatus elementList(RdbParser *p) {
 
                 registerAppBulkForNextCb(p, binfoNode);
                 if (lvl == RDB_LEVEL_STRUCT)
-                    CALL_HANDLERS_CB(p, NOP, lvl, rdbStruct.handlerPlainNode, binfoNode->ref);
+                    CALL_HANDLERS_CB(p, NOP, lvl, rdbStruct.handlePlainNode, binfoNode->ref);
                 else
                     CALL_HANDLERS_CB(p, NOP, lvl, rdbData.handleListElement, binfoNode->ref);
 
@@ -1055,7 +1055,7 @@ RdbStatus elementList(RdbParser *p) {
 
             if (p->elmCtx.key.handleByLevel == RDB_LEVEL_STRUCT) {
                 registerAppBulkForNextCb(p, binfoNode);
-                CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_STRUCT, rdbStruct.handlerQListNode, binfoNode->ref);
+                CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_STRUCT, rdbStruct.handleQListNode, binfoNode->ref);
             } else {
                 /* unpackList makes multiple callbacks. all data in ctx.lp */
                 IF_NOT_OK_RETURN(unpackList(p, lp));

@@ -352,8 +352,8 @@ RdbxToJson *RDBX_createHandlersToJson(RdbParser *p, const char *filename, RdbxTo
         RDB_createHandlersData(p, &callbacks.dataCb, ctx, deleteRdbToJsonCtx);
     } else  if (ctx->conf.level == RDB_LEVEL_STRUCT) {
         callbacks.structCb.handleStringValue = handlingString;
-        callbacks.structCb.handlerQListNode = handlingQListNode;
-        callbacks.structCb.handlerPlainNode = handlingList;
+        callbacks.structCb.handleQListNode = handlingQListNode;
+        callbacks.structCb.handlePlainNode = handlingList;
         RDB_createHandlersStruct(p, &callbacks.structCb, ctx, deleteRdbToJsonCtx);
     } else if (ctx->conf.level == RDB_LEVEL_RAW) {
         callbacks.rawCb.handleFrag = handlingFrag;

@@ -14,7 +14,6 @@ extern "C" {
 /****************************************************************
  * Incomplete structures for compiler checks but opaque access
  ****************************************************************/
-
 typedef char *RdbBulk;
 typedef char *RdbBulkCopy;
 
@@ -22,6 +21,7 @@ typedef struct RdbReader RdbReader;
 typedef struct RdbParser RdbParser;
 typedef struct RdbHandlers RdbHandlers;
 typedef struct RdbMemAlloc RdbMemAlloc;
+typedef struct rax rax;  /* redis DS */
 
 /****************************************************************
  * Enums & Typedefs
@@ -135,6 +135,25 @@ typedef void (*RdbFreeFunc) (RdbParser *p, void *obj);
 typedef void (*RdbLoggerCB) (RdbLogLevel l, const char *msg);
 
 /****************************************************************
+ * Redis Enums & Typedefs (See Redis repo for info about these DS)
+ ****************************************************************/
+#ifndef LINK_LIBRDB_WITH_REDIS
+
+typedef struct streamID {
+    uint64_t ms;
+    uint64_t seq;
+} streamID;
+
+typedef struct streamCG {
+    streamID last_id;
+    long long entries_read;
+    rax *pel;
+    rax *consumers;
+} streamCG;
+
+#endif
+
+/****************************************************************
  * Handlers callbacks struct
  ****************************************************************/
 
@@ -155,26 +174,42 @@ typedef struct RdbHandlersRawCallbacks {
     RdbRes (*handleBegin)(RdbParser *p, void *userData, size_t size);
     RdbRes (*handleFrag)(RdbParser *p, void *userData, RdbBulk frag);
     RdbRes (*handleEnd)(RdbParser *p, void *userData);
-//    RdbRes (*handleBeginModuleAux)(RdbParser *p, void *userData, RdbBulk name, int encver, int when);
+
+    /*** TODO: RdbHandlersRawCallbacks: handleBeginModuleAux ***/
+    RdbRes (*handleBeginModuleAux)(RdbParser *p, void *userData, RdbBulk name, int encver, int when);
+
 } RdbHandlersRawCallbacks;
 
 typedef struct RdbHandlersStructCallbacks {
     HANDLERS_COMMON_CALLBACKS
     RdbRes (*handleStringValue)(RdbParser *p, void *userData, RdbBulk str);
-    RdbRes (*handlerQListNode)(RdbParser *p, void *userData, RdbBulk listNode);
-    RdbRes (*handlerPlainNode)(RdbParser *p, void *userData, RdbBulk node);
-    /* ... TBD ... */
+    RdbRes (*handleQListNode)(RdbParser *p, void *userData, RdbBulk listNode);
+    RdbRes (*handlePlainNode)(RdbParser *p, void *userData, RdbBulk node);
+
+    /*** TODO: RdbHandlersStructCallbacks: handlerHashListPack, handleSet, handleZsetListPack, handleFunction, handleStreamListPack, handleStreamMetadata, handleStreamCgroup ***/
+    RdbRes (*handlerHashListPack)(RdbParser *p, void *userData, RdbBulk hash);
+    RdbRes (*handleSet)(RdbParser *p, void *userData, RdbBulk intSet);
+    RdbRes (*handleZsetListPack)(RdbParser *p, void *userData, RdbBulk zset);
+    RdbRes (*handleFunction)(RdbParser *p, void *userData, RdbBulk func);
+    RdbRes (*handleStreamListPack)(RdbParser *p, void *userData, RdbBulk nodekey, RdbBulk listpack);
+    RdbRes (*handleStreamMetadata)(RdbParser *p, void *userData, uint64_t len, uint64_t entriesAdded, streamID *firstID, streamID *lastID, streamID *maxDeletedEntryID);
+    RdbRes (*handleStreamCgroup)(RdbParser *p, void *userData, streamCG *cgroup); /* when succeeds, 'cgroup' belongs to the calee  */
+
 } RdbHandlersStructCallbacks;
 
 typedef struct RdbHandlersDataCallbacks {
     HANDLERS_COMMON_CALLBACKS
     RdbRes (*handleStringValue)(RdbParser *p, void *userData, RdbBulk str);
     RdbRes (*handleListElement)(RdbParser *p, void *userData, RdbBulk str);
-//    RdbRes (*handleSetElement)(RdbParser *p, void *userData, RdbBulk str, unsigned long sizeHint);
-//    RdbRes (*handleZsetElement)(RdbParser *p, void *userData, RdbBulk str, double score, unsigned long sizeHint);
-//    RdbRes (*handleHashElement)(RdbParser *p, void *userData, RdbBulk field, RdbBulk value, unsigned long sizeHint);
-//    RdbRes (*handleModuleDatatype)(RdbParser *p, void *userData, RdbBulk value);
-    /* ... TBD ... */
+
+    /*** TODO: RdbHandlersDataCallbacks: handleHashElement, handleSetElement, handleZsetElement, handleStreamElement, handleStreamMetadata, handleStreamCgroup  ***/
+    RdbRes (*handleHashElement)(RdbParser *p, void *userData, RdbBulk field, RdbBulk elm, uint64_t totalNumElm);
+    RdbRes (*handleSetElement)(RdbParser *p, void *userData, RdbBulk elm, uint64_t totalNumElm);
+    RdbRes (*handleZsetElement)(RdbParser *p, void *userData, RdbBulk elm, double score, uint64_t totalNumElm);
+    RdbRes (*handleStreamElement)(RdbParser *p, void *userData, streamID *id, RdbBulk field, RdbBulk value, uint64_t totalNumElm);
+    RdbRes (*handleStreamMetadata)(RdbParser *p, void *userData, uint64_t len, uint64_t entriesAdded, streamID *firstID, streamID *lastID, streamID *maxDeletedEntryID);
+    RdbRes (*handleStreamCgroup)(RdbParser *p, void *userData, streamCG *cgroup); /* when succeeds, 'cgroup' belongs to the calee  */
+
 } RdbHandlersDataCallbacks;
 
 /****************************************************************
@@ -391,9 +426,9 @@ int RDB_isRefBulk(RdbParser *p, RdbBulk b);
  * Some of the more advanced configuration might require parsing different data
  * types at different levels of the parser.
  *
- * The callbacks that are common to all levels and not related to current key
- * parsing (lookup HANDLERS_COMMON_CALLBACKS), if registered at different levels
- * then all of them will be called, one by one, starting from level 0.
+ * The callbacks that are common to all levels (lookup HANDLERS_COMMON_CALLBACKS),
+ * if registered at different levels then all of them will be called, one by one,
+ * starting from level 0.
  *
  * As for the callbacks of RDB object types, each level has its own way to
  * handle the data with distinct set of callbacks interfaces. In case of multiple
