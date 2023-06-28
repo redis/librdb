@@ -124,34 +124,34 @@ typedef enum RdbBulkAllocType {
 
 typedef struct RdbKeyInfo {
     long long expiretime;
-    uint64_t lru_idle;
-    int lfu_freq;
+    uint64_t lru_idle; /* TODO: support lru_idle */
+    int lfu_freq; /* TODO: support lfu_freq */
     int opcode;
 } RdbKeyInfo;
+
+typedef struct RdbStreamID {
+    uint64_t ms;
+    uint64_t seq;
+} RdbStreamID;
+
+typedef struct RdbStreamMeta {
+    uint64_t length;        /* Current number of elements inside this stream. */
+    uint64_t entriesAdded; /* All time count of elements added. */
+    RdbStreamID *firstID;
+    RdbStreamID *lastID;
+    RdbStreamID *maxDeletedEntryID;
+} RdbStreamMeta;
+
+typedef struct RdbStreamPendingEntry {
+    RdbBulk consumerName;
+    long long deliveryTime;
+    uint64_t deliveryCount;
+} RdbStreamPendingEntry;
 
 /* misc function pointer typedefs */
 typedef RdbStatus (*RdbReaderFunc) (RdbParser *p, void *readerData, void *buf, size_t len);
 typedef void (*RdbFreeFunc) (RdbParser *p, void *obj);
 typedef void (*RdbLoggerCB) (RdbLogLevel l, const char *msg);
-
-/****************************************************************
- * Redis Enums & Typedefs (See Redis repo for info about these DS)
- ****************************************************************/
-#ifndef LINK_LIBRDB_WITH_REDIS
-
-typedef struct streamID {
-    uint64_t ms;
-    uint64_t seq;
-} streamID;
-
-typedef struct streamCG {
-    streamID last_id;
-    long long entries_read;
-    rax *pel;
-    rax *consumers;
-} streamCG;
-
-#endif
 
 /****************************************************************
  * Handlers callbacks struct
@@ -186,14 +186,15 @@ typedef struct RdbHandlersStructCallbacks {
     RdbRes (*handleQListNode)(RdbParser *p, void *userData, RdbBulk listNode);
     RdbRes (*handlePlainNode)(RdbParser *p, void *userData, RdbBulk node);
 
-    /*** TODO: RdbHandlersStructCallbacks: handlerHashListPack, handleSet, handleZsetListPack, handleFunction, handleStreamListPack, handleStreamMetadata, handleStreamCgroup ***/
+    /*** TODO: RdbHandlersStructCallbacks: handlerHashListPack, handleSetIntset, handleZsetListPack, handleFunction ***/
     RdbRes (*handlerHashListPack)(RdbParser *p, void *userData, RdbBulk hash);
-    RdbRes (*handleSet)(RdbParser *p, void *userData, RdbBulk intSet);
+    RdbRes (*handleSetIntset)(RdbParser *p, void *userData, RdbBulk intSet);
+    RdbRes (*handleSetListPack)(RdbParser *p, void *userData, RdbBulk listpack);
+    RdbRes (*handleSetZip)(RdbParser *p, void *userData, RdbBulk listpack);
     RdbRes (*handleZsetListPack)(RdbParser *p, void *userData, RdbBulk zset);
     RdbRes (*handleFunction)(RdbParser *p, void *userData, RdbBulk func);
+    /*** TODO: RdbHandlersStructCallbacks: handleStreamListPack ***/
     RdbRes (*handleStreamListPack)(RdbParser *p, void *userData, RdbBulk nodekey, RdbBulk listpack);
-    RdbRes (*handleStreamMetadata)(RdbParser *p, void *userData, uint64_t len, uint64_t entriesAdded, streamID *firstID, streamID *lastID, streamID *maxDeletedEntryID);
-    RdbRes (*handleStreamCgroup)(RdbParser *p, void *userData, streamCG *cgroup); /* when succeeds, 'cgroup' belongs to the calee  */
 
 } RdbHandlersStructCallbacks;
 
@@ -202,14 +203,15 @@ typedef struct RdbHandlersDataCallbacks {
     RdbRes (*handleStringValue)(RdbParser *p, void *userData, RdbBulk str);
     RdbRes (*handleListElement)(RdbParser *p, void *userData, RdbBulk str);
 
-    /*** TODO: RdbHandlersDataCallbacks: handleHashElement, handleSetElement, handleZsetElement, handleStreamElement, handleStreamMetadata, handleStreamCgroup  ***/
+    /*** TODO: RdbHandlersDataCallbacks: handleHashElement, handleSetElement, handleZsetElement ***/
     RdbRes (*handleHashElement)(RdbParser *p, void *userData, RdbBulk field, RdbBulk elm, uint64_t totalNumElm);
     RdbRes (*handleSetElement)(RdbParser *p, void *userData, RdbBulk elm, uint64_t totalNumElm);
     RdbRes (*handleZsetElement)(RdbParser *p, void *userData, RdbBulk elm, double score, uint64_t totalNumElm);
-    RdbRes (*handleStreamElement)(RdbParser *p, void *userData, streamID *id, RdbBulk field, RdbBulk value, uint64_t totalNumElm);
-    RdbRes (*handleStreamMetadata)(RdbParser *p, void *userData, uint64_t len, uint64_t entriesAdded, streamID *firstID, streamID *lastID, streamID *maxDeletedEntryID);
-    RdbRes (*handleStreamCgroup)(RdbParser *p, void *userData, streamCG *cgroup); /* when succeeds, 'cgroup' belongs to the calee  */
-
+    /*** TODO: RdbHandlersDataCallbacks: handleStreamNewGroup, handleStreamMetadata, handleStreamElement, handleStreamConsumerPendingEntry ***/
+    RdbRes (*handleStreamNewGroup)(RdbParser *p, void *userData, RdbBulk grpName, RdbStreamID lastId);
+    RdbRes (*handleStreamMetadata)(RdbParser *p, void *userData, RdbStreamMeta *meta);
+    RdbRes (*handleStreamElement)(RdbParser *p, void *userData, RdbStreamID *id, RdbBulk field, RdbBulk value, uint64_t totalNumElm);
+    RdbRes (*handleStreamConsumerPendingEntry)(RdbParser *p, void *userData, RdbBulk groupName, RdbStreamPendingEntry *pendingEntry);
 } RdbHandlersDataCallbacks;
 
 /****************************************************************
