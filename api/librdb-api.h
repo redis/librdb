@@ -222,7 +222,7 @@ typedef struct RdbHandlersDataCallbacks {
     RdbRes (*handleStreamElement)(RdbParser *p, void *userData, RdbStreamID *id, RdbBulk field, RdbBulk value, uint64_t totalNumElm);
 
     RdbRes (*handleStreamNewCGroup)(RdbParser *p, void *userData, RdbBulk grpName, RdbStreamGroupMeta *meta);
-    RdbRes (*handleStreamCGroupPendingEntry)(RdbParser *p, void *userData, RdbBulk consName, RdbStreamPendingEntry *pendingEntry);
+    RdbRes (*handleStreamCGroupPendingEntry)(RdbParser *p, void *userData, RdbStreamPendingEntry *pendingEntry);
 
     RdbRes (*handleStreamNewConsumer)(RdbParser *p, void *userData, RdbBulk consName, RdbStreamConsumerMeta *meta);
     RdbRes (*handleStreamConsumerPendingEntry)(RdbParser *p, void *userData, RdbStreamPendingEntry *pendingEntry);
