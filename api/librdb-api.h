@@ -453,6 +453,18 @@ typedef enum RdbDataType {
 /* Can be called at any point along parsing (Useful after parsing source rdb version) */
 _LIBRDB_API void RDB_handleByLevel(RdbParser *p, RdbDataType t, RdbHandlersLevel lvl, unsigned int flags);
 
+/*****************************************************************
+ * LIBRDB Versioning
+ *
+ * Follows the semantic semver versioning convention
+ *****************************************************************/
+
+#define RDB_MAJOR_VERSION 255
+#define RDB_MINOR_VERSION 255
+#define RDB_PATCH_VERSION 255
+
+_LIBRDB_API const char* RDB_getLibVersion(int* major, int* minor, int* patch);
+
 #ifdef __cplusplus
 }
 #endif
