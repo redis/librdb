@@ -143,7 +143,6 @@ typedef struct RdbStreamMeta {
 } RdbStreamMeta;
 
 typedef struct RdbStreamPendingEntry {
-    RdbBulk consumerName;
     long long deliveryTime;
     uint64_t deliveryCount;
 } RdbStreamPendingEntry;
@@ -193,7 +192,7 @@ typedef struct RdbHandlersStructCallbacks {
     RdbRes (*handleSetZip)(RdbParser *p, void *userData, RdbBulk listpack);
     RdbRes (*handleZsetListPack)(RdbParser *p, void *userData, RdbBulk zset);
     RdbRes (*handleFunction)(RdbParser *p, void *userData, RdbBulk func);
-    /*** TODO: RdbHandlersStructCallbacks: handleStreamListPack ***/
+    /*** TODO: RdbHandlersStructCallbacks: stream stuff ... ***/
     RdbRes (*handleStreamListPack)(RdbParser *p, void *userData, RdbBulk nodekey, RdbBulk listpack);
 
 } RdbHandlersStructCallbacks;
@@ -207,11 +206,13 @@ typedef struct RdbHandlersDataCallbacks {
     RdbRes (*handleHashElement)(RdbParser *p, void *userData, RdbBulk field, RdbBulk elm, uint64_t totalNumElm);
     RdbRes (*handleSetElement)(RdbParser *p, void *userData, RdbBulk elm, uint64_t totalNumElm);
     RdbRes (*handleZsetElement)(RdbParser *p, void *userData, RdbBulk elm, double score, uint64_t totalNumElm);
-    /*** TODO: RdbHandlersDataCallbacks: handleStreamNewGroup, handleStreamMetadata, handleStreamElement, handleStreamConsumerPendingEntry ***/
-    RdbRes (*handleStreamNewGroup)(RdbParser *p, void *userData, RdbBulk grpName, RdbStreamID lastId);
+    /*** TODO: RdbHandlersDataCallbacks: stream stuff ... ***/
     RdbRes (*handleStreamMetadata)(RdbParser *p, void *userData, RdbStreamMeta *meta);
     RdbRes (*handleStreamElement)(RdbParser *p, void *userData, RdbStreamID *id, RdbBulk field, RdbBulk value, uint64_t totalNumElm);
-    RdbRes (*handleStreamConsumerPendingEntry)(RdbParser *p, void *userData, RdbBulk groupName, RdbStreamPendingEntry *pendingEntry);
+    RdbRes (*handleStreamNewCGroup)(RdbParser *p, void *userData, RdbBulk grpName, RdbStreamID lastId);
+    RdbRes (*handleStreamCGroupPendingEntry)(RdbParser *p, void *userData, RdbBulk grpName, RdbBulk consName, RdbStreamPendingEntry *pendingEntry);
+    RdbRes (*handleStreamNewConsumer)(RdbParser *p, void *userData, RdbBulk consName, long long activeTime, long long seenTime);
+    RdbRes (*handleStreamConsumerPendingEntry)(RdbParser *p, void *userData, RdbBulk consName, RdbStreamPendingEntry *pendingEntry);
 } RdbHandlersDataCallbacks;
 
 /****************************************************************
