@@ -1,5 +1,5 @@
 /*
-     * Copyright (c) 2000-2008 Marc Alexander Lehmann <schmorp@schmorp.de>
+ * Copyright (c) 2000-2008 Marc Alexander Lehmann <schmorp@schmorp.de>
  *
  * Redistribution and use in source and binary forms, with or without modifica-
  * tion, are permitted provided that the following conditions are met:

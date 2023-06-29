@@ -1,7 +1,7 @@
 #include <assert.h>
 #include <string.h>
 #include <stdio.h>
-#include "../../deps/redis/utils.h"
+#include "../../deps/redis/util.h"
 #include "bulkAlloc.h"
 
 #define STACK_SIZE 100000

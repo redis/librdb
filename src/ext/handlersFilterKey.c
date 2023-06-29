@@ -105,8 +105,8 @@ RdbxFilterKey *RDBX_createHandlersFilterKey(RdbParser *p,
 
     if (RDB_getNumHandlers(p, RDB_LEVEL_STRUCT)>0) {
         callbacks.structCb.handleStringValue = filterHandlingString;
-        callbacks.structCb.handlerQListNode = filterHandlingQListNode;
-        callbacks.structCb.handlerPlainNode = filterHandlingList;
+        callbacks.structCb.handleQListNode = filterHandlingQListNode;
+        callbacks.structCb.handlePlainNode = filterHandlingList;
         RDB_createHandlersStruct(p, &callbacks.structCb, ctx, deleteFilterKeyCtx);
     }
 

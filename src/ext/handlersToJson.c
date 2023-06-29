@@ -51,7 +51,7 @@ static void outputPlainEscaping(RdbxToJson *ctx, char *p, size_t len) {
             case '\t': ouput_fprintf(ctx, "\\t"); break;
             case '\b': ouput_fprintf(ctx, "\\b"); break;
             default:
-                // todo: formalize rdb2json supported outputs
+                /* TODO: formalize rdb2json supported outputs */
                 //ouput_fprintf(ctx, (*p >= 0 && *p <= 0x1f) ? "\\u%04x" : "%c",*p);
                 ouput_fprintf(ctx, (isprint(*p)) ? "%c" : "\\x%02x", (unsigned char)*p);
         }
@@ -112,7 +112,7 @@ static RdbxToJson *initRdbToJsonCtx(RdbParser *p, const char *filename, RdbxToJs
 
     switch(ctx->conf.encoding) {
         case RDBX_CONV_JSON_ENC_PLAIN: ctx->encfunc = outputPlainEscaping; break;
-        case RDBX_CONV_JSON_ENC_BASE64: /* todo: support base64 */
+        case RDBX_CONV_JSON_ENC_BASE64: /* TODO: support base64 */
         default: assert(0); break;
     }
 
@@ -352,8 +352,8 @@ RdbxToJson *RDBX_createHandlersToJson(RdbParser *p, const char *filename, RdbxTo
         RDB_createHandlersData(p, &callbacks.dataCb, ctx, deleteRdbToJsonCtx);
     } else  if (ctx->conf.level == RDB_LEVEL_STRUCT) {
         callbacks.structCb.handleStringValue = handlingString;
-        callbacks.structCb.handlerQListNode = handlingQListNode;
-        callbacks.structCb.handlerPlainNode = handlingList;
+        callbacks.structCb.handleQListNode = handlingQListNode;
+        callbacks.structCb.handlePlainNode = handlingList;
         RDB_createHandlersStruct(p, &callbacks.structCb, ctx, deleteRdbToJsonCtx);
     } else if (ctx->conf.level == RDB_LEVEL_RAW) {
         callbacks.rawCb.handleFrag = handlingFrag;

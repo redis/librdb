@@ -2,7 +2,7 @@
 #include <assert.h>
 #include "common.h"
 #include "../../deps/redis/crc64.h"
-#include "../../deps/redis/utils.h"
+#include "../../deps/redis/util.h"
 #include "../../deps/redis/endianconv.h"
 #include <sys/uio.h>
 
@@ -173,8 +173,8 @@ static RdbRes toRespHandlingNewRdb(RdbParser *p, void *userData, int rdbVersion)
     return RDB_OK;
 }
 
-/* todo: support option rdb2resp del key before write */
-/* todo: support expiry */
+/* TODO: support option rdb2resp del key before write */
+/* TODO: support expiry */
 static RdbRes toRespHandlingNewKey(RdbParser *p, void *userData, RdbBulk key, RdbKeyInfo *info) {
     UNUSED(info);
     RdbxToResp *ctx = userData;

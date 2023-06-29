@@ -134,8 +134,8 @@ static void test_struct_handlers_callbacks_bulk_ops (void **state) {
                 .handleAuxField = handle_aux_field,
                 .handleNewKey = handle_new_key,
                 .handleStringValue = handle_string_value,
-                .handlerPlainNode = handle_list_element,
-                .handlerQListNode = handle_list_element,
+                .handlePlainNode = handle_list_element,
+                .handleQListNode = handle_list_element,
 
         };
 

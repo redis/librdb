@@ -12,7 +12,7 @@
 #include "parser.h"
 #include "defines.h"
 #include "../../deps/redis/endianconv.h"
-#include "../../deps/redis/utils.h"
+#include "../../deps/redis/util.h"
 #include "../../deps/redis/listpack.h"
 #include "../../deps/redis/lzf.h"
 
@@ -441,6 +441,19 @@ _LIBRDB_API void RDB_handleByLevel(RdbParser *p, RdbDataType type, RdbHandlersLe
             assert(0);
     }
 
+}
+
+_LIBRDB_API const char *RDB_getLibVersion(int *major, int *minor, int *patch) {
+    static int initialized = 0;
+    static char versionString[50];
+
+    if (major) *major = RDB_MAJOR_VERSION;
+    if (minor) *minor = RDB_MINOR_VERSION;
+    if (patch) *patch = RDB_PATCH_VERSION;
+    if (!initialized) sprintf(versionString, "%d.%d.%d", *major, *minor, *patch);
+    initialized = 1;
+
+    return versionString;
 }
 
 /*** various functions ***/
@@ -1030,7 +1043,7 @@ RdbStatus elementList(RdbParser *p) {
 
                 registerAppBulkForNextCb(p, binfoNode);
                 if (lvl == RDB_LEVEL_STRUCT)
-                    CALL_HANDLERS_CB(p, NOP, lvl, rdbStruct.handlerPlainNode, binfoNode->ref);
+                    CALL_HANDLERS_CB(p, NOP, lvl, rdbStruct.handlePlainNode, binfoNode->ref);
                 else
                     CALL_HANDLERS_CB(p, NOP, lvl, rdbData.handleListElement, binfoNode->ref);
 
@@ -1055,7 +1068,7 @@ RdbStatus elementList(RdbParser *p) {
 
             if (p->elmCtx.key.handleByLevel == RDB_LEVEL_STRUCT) {
                 registerAppBulkForNextCb(p, binfoNode);
-                CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_STRUCT, rdbStruct.handlerQListNode, binfoNode->ref);
+                CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_STRUCT, rdbStruct.handleQListNode, binfoNode->ref);
             } else {
                 /* unpackList makes multiple callbacks. all data in ctx.lp */
                 IF_NOT_OK_RETURN(unpackList(p, lp));

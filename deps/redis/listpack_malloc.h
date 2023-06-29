@@ -1,8 +1,7 @@
-/* See endianconv.c top comments for more information
+/* Listpack -- A lists of strings serialization format
+ * https://github.com/antirez/listpack
  *
- * ----------------------------------------------------------------------------
- *
- * Copyright (c) 2011-2012, Salvatore Sanfilippo <antirez at gmail dot com>
+ * Copyright (c) 2017, Salvatore Sanfilippo <antirez at gmail dot com>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -30,49 +29,22 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef __ENDIANCONV_H
-#define __ENDIANCONV_H
+/* Allocator selection.
+ *
+ * This file is used in order to change the Rax allocator at compile time.
+ * Just define the following defines to what you want to use. Also add
+ * the include of your alternate allocator if needed (not needed in order
+ * to use the default libc allocator). */
 
-//#include "config.h"
-#include <stdint.h>
-
-void memrev16(void *p);
-void memrev32(void *p);
-void memrev64(void *p);
-uint16_t intrev16(uint16_t v);
-uint32_t intrev32(uint32_t v);
-uint64_t intrev64(uint64_t v);
-
-/* variants of the function doing the actual conversion only if the target
- * host is big endian */
-#if (BYTE_ORDER == LITTLE_ENDIAN)
-#define memrev16ifbe(p) ((void)(0))
-#define memrev32ifbe(p) ((void)(0))
-#define memrev64ifbe(p) ((void)(0))
-#define intrev16ifbe(v) (v)
-#define intrev32ifbe(v) (v)
-#define intrev64ifbe(v) (v)
-#else
-#define memrev16ifbe(p) memrev16(p)
-#define memrev32ifbe(p) memrev32(p)
-#define memrev64ifbe(p) memrev64(p)
-#define intrev16ifbe(v) intrev16(v)
-#define intrev32ifbe(v) intrev32(v)
-#define intrev64ifbe(v) intrev64(v)
-#endif
-
-/* The functions htonu64() and ntohu64() convert the specified value to
- * network byte ordering and back. In big endian systems they are no-ops. */
-#if (BYTE_ORDER == BIG_ENDIAN)
-#define htonu64(v) (v)
-#define ntohu64(v) (v)
-#else
-#define htonu64(v) intrev64(v)
-#define ntohu64(v) intrev64(v)
-#endif
-
-#ifdef REDIS_TEST
-int endianconvTest(int argc, char *argv[], int flags);
-#endif
-
+#ifndef LISTPACK_ALLOC_H
+#define LISTPACK_ALLOC_H
+//#include "zmalloc.h"
+#include "malloc.h"
+/* We use zmalloc_usable/zrealloc_usable instead of zmalloc/zrealloc
+ * to ensure the safe invocation of 'zmalloc_usable_size().
+ * See comment in zmalloc_usable_size(). */
+#define lp_malloc(sz) malloc(sz)
+#define lp_realloc(ptr,sz) realloc(ptr,sz)
+#define lp_free free
+#define lp_malloc_size malloc_usable_size
 #endif

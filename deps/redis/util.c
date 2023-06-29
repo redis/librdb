@@ -3,7 +3,7 @@
 #include <string.h>
 #include <limits.h>
 #include <errno.h>
-#include "utils.h"
+#include "util.h"
 
 /* Return the number of digits of 'v' when converted to string in radix 10.
  * See ll2string() for more information. */
@@ -45,7 +45,7 @@ int ull2string(char *dst, size_t dstlen, unsigned long long value) {
 
     /* Check length. */
     uint32_t length = digits10(value);
-    if (length >= dstlen) goto err;;
+    if (length >= dstlen) return 0;
 
     /* Null term. */
     uint32_t next = length - 1;
@@ -66,12 +66,8 @@ int ull2string(char *dst, size_t dstlen, unsigned long long value) {
         dst[next] = digits[i + 1];
         dst[next - 1] = digits[i];
     }
+
     return length;
-    err:
-    /* force add Null termination */
-    if (dstlen > 0)
-        dst[0] = '\0';
-    return 0;
 }
 
 /* Convert a long long into a string. Returns the number of
@@ -90,7 +86,7 @@ int ll2string(char *dst, size_t dstlen, long long svalue) {
             value = ((unsigned long long) LLONG_MAX)+1;
         }
         if (dstlen < 2)
-            goto err;
+            return 0;
         negative = 1;
         dst[0] = '-';
         dst++;
@@ -103,12 +99,6 @@ int ll2string(char *dst, size_t dstlen, long long svalue) {
     int length = ull2string(dst, dstlen, value);
     if (length == 0) return 0;
     return length + negative;
-
-    err:
-    /* force add Null termination */
-    if (dstlen > 0)
-        dst[0] = '\0';
-    return 0;
 }
 
 unsigned int getEnvVar(const char* varName, unsigned int defaultVal) {
