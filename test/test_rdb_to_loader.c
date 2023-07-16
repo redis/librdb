@@ -32,7 +32,7 @@ static void test_rdb_to_loader_common(const char *rdbfile, int pipelineDepth) {
 
     /* test one time without RESTORE, Playing against old version.
      * and one time with RESTORE, Playing against new version. */
-    for (int i = 1 ; i < 2 ; ++i) {
+    for (int i = 0 ; i < 2 ; ++i) {
 
         int targetRdbVer = (i==0) ? 1 : 100; /* old-target (not RESTORE) VS. new-target (RESTORE) */
 

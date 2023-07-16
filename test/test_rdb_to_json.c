@@ -217,6 +217,7 @@ int group_rdb_to_json(void) {
 
         cmocka_unit_test(test_r2j_single_ziplist_data),
         cmocka_unit_test(test_r2j_single_ziplist_struct),
+        cmocka_unit_test(test_r2j_single_ziplist_raw),
     };
     return cmocka_run_group_tests(tests, NULL, NULL);
 }
