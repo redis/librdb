@@ -138,7 +138,7 @@ static void test_r2r_single_list_exact_match(void **state) {
     memset(&r2rConf, 0, sizeof(r2rConf));
     r2rConf.supportRestore = 1;
     r2rConf.restore.dstRdbVersion = 6;
-    testRdbToRespCommon(DUMP_FOLDER("single_list.rdb"), &r2rConf, expResp, 0, 1);
+    testRdbToRespCommon(DUMP_FOLDER("quicklist2_v11.rdb"), &r2rConf, expResp, 0, 1);
 }
 
 static void test_r2r_quicklist(void **state) {
@@ -180,7 +180,7 @@ static void test_r2r_single_list_restore(void **state) {
     memset(&r2rConf, 0, sizeof(r2rConf));
     r2rConf.supportRestore = 1;
     r2rConf.restore.dstRdbVersion = 11;
-    testRdbToRespCommon(DUMP_FOLDER("single_list.rdb"), &r2rConf, (char *) restorePrefix, 1, 1);
+    testRdbToRespCommon(DUMP_FOLDER("quicklist2_v11.rdb"), &r2rConf, (char *) restorePrefix, 1, 1);
 }
 
 static void test_r2r_multiple_lists_and_strings(void **state) {

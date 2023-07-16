@@ -37,7 +37,7 @@ Run CLI extension of this library and parse RDB file to json (might need
 
 Run CLI extension to generate RESP commands
 
-    % ./bin/rdb-cli ./test/dumps/single_list.rdb resp
+    % ./bin/rdb-cli ./test/dumps/multiple_lists_strings.rdb resp
     *3
     $5
     RPUSH
@@ -46,7 +46,7 @@ Run CLI extension to generate RESP commands
 
 Run against Redis server, say, on address 127.0.0.1:6379, and upload RDB file:
 
-    % ./bin/rdb-cli ./test/dumps/single_list.rdb redis -h 127.0.0.1 -p 6379
+    % ./bin/rdb-cli ./test/dumps/multiple_lists_strings.rdb redis -h 127.0.0.1 -p 6379
 
 (rdb-cli usage available [here](#rdb-cli usage).)
 

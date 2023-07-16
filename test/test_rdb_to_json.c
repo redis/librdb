@@ -145,18 +145,18 @@ static void test_r2j_quicklist_raw(void **state) {
 
 static void test_r2j_single_list_data(void **state) {
     UNUSED(state);
-    testRdbToJsonCommon(DUMP_FOLDER("single_list.rdb"), DUMP_FOLDER("single_list_data.json"), RDB_LEVEL_DATA);
+    testRdbToJsonCommon(DUMP_FOLDER("quicklist2_v11.rdb"), DUMP_FOLDER("single_list_data.json"), RDB_LEVEL_DATA);
 }
 
 static void test_r2j_single_list_struct(void **state) {
     UNUSED(state);
 
-    testRdbToJsonCommon(DUMP_FOLDER("single_list.rdb"), DUMP_FOLDER("single_list_struct.json"), RDB_LEVEL_STRUCT);
+    testRdbToJsonCommon(DUMP_FOLDER("quicklist2_v11.rdb"), DUMP_FOLDER("single_list_struct.json"), RDB_LEVEL_STRUCT);
 }
 
 static void test_r2j_single_list_raw (void **state) {
     UNUSED(state);
-    testRdbToJsonCommon(DUMP_FOLDER("single_list.rdb"), DUMP_FOLDER("single_list_raw.json"), RDB_LEVEL_RAW);
+    testRdbToJsonCommon(DUMP_FOLDER("quicklist2_v11.rdb"), DUMP_FOLDER("single_list_raw.json"), RDB_LEVEL_RAW);
 }
 
 static void test_r2j_multiple_lists_and_strings_data (void **state) {

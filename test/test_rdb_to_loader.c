@@ -93,7 +93,7 @@ static void test_rdb_to_loader_single_string(void **state) {
 
 static void test_rdb_to_loader_single_list(void **state) {
     UNUSED(state);
-    test_rdb_to_loader_common(DUMP_FOLDER("single_list.rdb"), 0 /*pipelineDepth default*/);
+    test_rdb_to_loader_common(DUMP_FOLDER("quicklist2_v11.rdb"), 0 /*pipelineDepth default*/);
 }
 
 static void test_rdb_to_loader_multiple_lists_strings(void **state) {
