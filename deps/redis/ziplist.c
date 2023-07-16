@@ -1,5 +1,3 @@
-void f(){}
-#if 0
 /* The ziplist is a specially encoded dually linked list that is designed
  * to be very memory efficient. It stores both strings and integer values,
  * where integers are encoded as actual integers instead of a series of
@@ -188,11 +186,10 @@ void f(){}
 #include <string.h>
 #include <stdint.h>
 #include <limits.h>
-//#include "zmalloc.h"
-//#include "rpUtils.h"
+#include "util.h"
 #include "ziplist.h"
 //#include "config.h"
-#include "rpEndianConv.h"
+#include "endianconv.h"
 //#include "redisassert.h"
 
 #define ZIP_END 255         /* Special "end of ziplist" entry. */
@@ -523,10 +520,11 @@ int zipPrevLenByteDiff(unsigned char *p, unsigned int len) {
 /* Check if string pointed to by 'entry' can be encoded as an integer.
  * Stores the integer value in 'v' and its encoding in 'encoding'. */
 int zipTryEncoding(unsigned char *entry, unsigned int entrylen, long long *v, unsigned char *encoding) {
-    long long value;
+    int64_t value;
 
     if (entrylen >= 32 || entrylen == 0) return 0;
-    if (string2ll((char*)entry,entrylen,&value)) {
+
+    if (lpStringToInt64((char*)entry,entrylen,&value)) {
         /* Great, the string can be encoded. Check what's the smallest
          * of our encoding types that can hold this value. */
         if (value >= 0 && value <= 12) {
@@ -714,7 +712,7 @@ static inline void zipAssertValidEntry(unsigned char* zl, size_t zlbytes, unsign
 /* Create a new empty ziplist. */
 unsigned char *ziplistNew(void) {
     unsigned int bytes = ZIPLIST_HEADER_SIZE+ZIPLIST_END_SIZE;
-    unsigned char *zl = zmalloc(bytes);
+    unsigned char *zl = malloc(bytes);
     ZIPLIST_BYTES(zl) = intrev32ifbe(bytes);
     ZIPLIST_TAIL_OFFSET(zl) = intrev32ifbe(ZIPLIST_HEADER_SIZE);
     ZIPLIST_LENGTH(zl) = 0;
@@ -725,7 +723,7 @@ unsigned char *ziplistNew(void) {
 /* Resize the ziplist. */
 unsigned char *ziplistResize(unsigned char *zl, size_t len) {
     assert(len < UINT32_MAX);
-    zl = zrealloc(zl,len);
+    zl = realloc(zl,len);
     ZIPLIST_BYTES(zl) = intrev32ifbe(len);
     zl[len-1] = ZIP_END;
     return zl;
@@ -1093,7 +1091,7 @@ unsigned char *ziplistMerge(unsigned char **first, unsigned char **second) {
     size_t second_offset = intrev32ifbe(ZIPLIST_TAIL_OFFSET(*second));
 
     /* Extend target to new zlbytes then append or prepend source. */
-    target = zrealloc(target, zlbytes);
+    target = realloc(target, zlbytes);
     if (append) {
         /* append == appending to target */
         /* Copy source after target (copying over original [END]):
@@ -1132,11 +1130,11 @@ unsigned char *ziplistMerge(unsigned char **first, unsigned char **second) {
 
     /* Now free and NULL out what we didn't realloc */
     if (append) {
-        zfree(*second);
+        free(*second);
         *second = NULL;
         *first = target;
     } else {
-        zfree(*first);
+        free(*first);
         *first = NULL;
         *second = target;
     }
@@ -1608,7 +1606,7 @@ void ziplistRandomPairs(unsigned char *zl, unsigned int count, ziplistEntry *key
         unsigned int index;
         unsigned int order;
     } rand_pick;
-    rand_pick *picks = zmalloc(sizeof(rand_pick)*count);
+    rand_pick *picks = malloc(sizeof(rand_pick)*count);
     unsigned int total_size = ziplistLen(zl)/2;
 
     /* Avoid div by zero on corrupt ziplist */
@@ -1641,7 +1639,7 @@ void ziplistRandomPairs(unsigned char *zl, unsigned int count, ziplistEntry *key
         p = ziplistNext(zl, p);
     }
 
-    zfree(picks);
+    free(picks);
 }
 
 /* Randomly select count of key value pairs and store into 'keys' and
@@ -1688,4 +1686,3 @@ unsigned int ziplistRandomPairsUnique(unsigned char *zl, unsigned int count, zip
     }
     return picked;
 }
-#endif

@@ -10,6 +10,7 @@
 #define MAX_APP_BULKS 2
 #define NOP /*no-op*/
 #define IF_NOT_OK_RETURN(cmd) do {RdbStatus s; s = cmd; if (unlikely(s!=RDB_STATUS_OK)) return s;} while (0)
+#define IF_NOT_OK_GOTO(cmd, go_to) do {RdbStatus s; s = cmd; if (unlikely(s!=RDB_STATUS_OK)) goto go_to;} while (0)
 
 /* parser internal status value. Not exposed at to the caller.
  * Saves us another stopping condition in main loop. */
@@ -91,6 +92,7 @@ typedef enum {
 typedef enum {
     /* Allocate for internal use of the parser */
     UNMNG_RQ_ALLOC,
+    UNMNG_RQ_ALLOC_REF,
     /* Allocate RdbBulk in order to pass it to app callbacks */
     UNMNG_RQ_ALLOC_APP_BULK,
     UNMNG_RQ_ALLOC_APP_BULK_REF,
@@ -110,12 +112,14 @@ typedef enum ParsingElementType {
     PE_END_KEY,
     PE_STRING,
     PE_LIST,
+    PE_ZIPLIST,
 
     /* parsing raw data types */
     PE_RAW_NEW_KEY,
     PE_RAW_END_KEY,
     PE_RAW_STRING,
     PE_RAW_LIST,
+    PE_RAW_ZIPLIST,
 
     PE_END_OF_FILE,
     PE_MAX
@@ -372,10 +376,12 @@ RdbStatus elementExpireTimeMsec(RdbParser *p);
 /*** Struct/Data Parsing Elements ***/
 RdbStatus elementString(RdbParser *p);
 RdbStatus elementList(RdbParser *p);
+RdbStatus elementZipList(RdbParser *p);
 /*** Raw Parsing Elements ***/
 RdbStatus elementRawNewKey(RdbParser *p);
 RdbStatus elementRawEndKey(RdbParser *p);
 RdbStatus elementRawList(RdbParser *p);
 RdbStatus elementRawString(RdbParser *p);
+RdbStatus elementRawZipList(RdbParser *p);
 
 #endif /*LIBRDB_PARSER_H*/

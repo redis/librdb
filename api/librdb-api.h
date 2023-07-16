@@ -21,7 +21,6 @@ typedef struct RdbReader RdbReader;
 typedef struct RdbParser RdbParser;
 typedef struct RdbHandlers RdbHandlers;
 typedef struct RdbMemAlloc RdbMemAlloc;
-typedef struct rax rax;  /* redis DS */
 
 /****************************************************************
  * Enums & Typedefs
@@ -64,6 +63,8 @@ typedef enum RdbRes {
     RDB_ERR_QUICK_LIST_INTEG_CHECK,
     RDB_ERR_STRING_INVALID_STATE,
     RDB_ERR_QUICK_LIST_INVALID_STATE,
+    RDB_ERR_ZIP_LIST_INVALID_STATE,
+    RDB_ERR_ZIP_LIST_INTEG_CHECK,
     RDB_ERR_INVALID_BULK_ALLOC_TYPE,
     RDB_ERR_INVALID_BULK_CLONE_REQUEST,
     RDB_ERR_INVALID_BULK_LENGTH_REQUEST,
@@ -288,7 +289,7 @@ _LIBRDB_API RdbHandlers *RDB_createHandlersData(RdbParser *p,
  * Handlers as Filters. Use this function only from inside Handlers callbacks.
  * As reference, see implementation of RDBX_createHandlersFilterKey
  ****************************************************************/
- _LIBRDB_API void RDB_dontPropagate(RdbParser *p);
+_LIBRDB_API void RDB_dontPropagate(RdbParser *p);
 
 /****************************************************************
  * Parser setters & getters

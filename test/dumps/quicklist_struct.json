@@ -1,0 +1,7 @@
+"redis-ver":"4.0.9",
+"redis-bits":"64",
+"ctime":"1629882015",
+"used-mem":"496256",
+"aof-preamble":"0",
+"list":["\t\x00\x00\x00\x01\x00\x07\x01\xff"],
+"x":"7"

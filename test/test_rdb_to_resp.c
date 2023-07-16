@@ -1,11 +1,53 @@
 #include <string.h>
+#include <malloc.h>
 #include "test_common.h"
+
+/* This group of tests only partially check the RESP protocol output of
+ * the parser by comparing the prefix of the output rather than maintaining
+ * hardcoded and non-readable payload in the test. It is sufficient because test
+ * "test_rdb_to_loader" will parse RESP commands output as well, apply them to
+ * a live Redis server, and ensure that the reconstructed database matches the
+ * source RDB file.
+ *
+ * Note that checking the prefix of whether it is starting of RESTORE command
+ * is important here because test "test_rdb_to_loader" can get the same result,
+ * either by applying RESTORE or plain Redis RESP commands.
+ */
 
 /* TODO: support select db, expiry */
 
+unsigned char restorePrefix[] = {
+        0x2a, 0x34, 0x0d, 0x0a,  // *, 4, \r, \n
+        0x24, 0x37, 0x0d, 0x0a,  // $, 7, \r, \n
+        0x52, 0x45, 0x53, 0x54,  // R, E, S, T
+        0x4f, 0x52, 0x45, 0x0d,  // O, R, E, \r
+        0x0a, 0x24               // \n, $,
+};
+
+void assert_resp_file(const char *filename, char *resp, int isPrefix, int expMatch) {
+    char *filedata = readFile(filename, NULL);
+    int result = (isPrefix) ? strncmp(filedata, resp, strlen(resp)) : strcmp(filedata, resp);
+
+    if ( ((result != 0) && (expMatch)) || ((result == 0) && (!expMatch)) ) {
+        printf("Expected payload %s %s %s match.\n",
+               (isPrefix) ? "prefix" : "file",
+               filename,
+               (expMatch) ? "" : "not to");
+        printf("---- %s ----\n", filename);
+        printf ("%s", filedata);
+        printf("\n---- Expected %s ----\n", (isPrefix) ? "prefix" : "file");
+        printf("%s", resp);
+        printf("\n------------\n");
+        assert_true(0);
+    }
+    free(filedata);
+}
+
 static void testRdbToRespCommon(const char *rdbfile,
+                                RdbxToRespConf *conf,
                                 char *expResp,
-                                RdbxToRespConf *conf)
+                                int isPrefix,
+                                int expMatch)
 {
     static int outputs = 0;
     static char respfile[50];
@@ -23,10 +65,10 @@ static void testRdbToRespCommon(const char *rdbfile,
 
     /* verify number of commands counted */
     RDB_deleteParser(p);
-    assert_payload_file(respfile, expResp, NULL);
+    assert_resp_file(respfile, expResp, isPrefix, expMatch);
 }
 
-static void test_r2r_single_string(void **state) {
+static void test_r2r_single_string_exact_match(void **state) {
     UNUSED(state);
     unsigned char expRespData[] = "*3\r\n$3\r\nSET\r\n$3\r\nxxx\r\n$3\r\n111\r\n";
     RdbxToRespConf r2rConf;
@@ -35,24 +77,24 @@ static void test_r2r_single_string(void **state) {
     /* Won't use RESTORE command because target RDB ver. < source RDB ver. */
     r2rConf.supportRestore = 1;
     r2rConf.restore.dstRdbVersion = 10;
-    testRdbToRespCommon(DUMP_FOLDER("single_key.rdb"), (char *) expRespData, &r2rConf);
+    testRdbToRespCommon(DUMP_FOLDER("single_key.rdb"), &r2rConf, (char *) expRespData, 0, 1);
 
     /* Avoid RESTORE command because corresponding RDB ver. of given Redis ver. < source RDB ver. */
     r2rConf.supportRestore = 1;
     r2rConf.restore.dstRdbVersion = 0;
     r2rConf.restore.dstRedisVersion = "7.0";   /* resolved to rdb version 10 */
-    testRdbToRespCommon(DUMP_FOLDER("single_key.rdb"), (char *) expRespData, &r2rConf);
+    testRdbToRespCommon(DUMP_FOLDER("single_key.rdb"), &r2rConf, (char *) expRespData, 0, 1);
 
     /* Configure not to use RESTORE command */
     r2rConf.supportRestore = 0;
-    testRdbToRespCommon(DUMP_FOLDER("single_key.rdb"), (char *) expRespData, &r2rConf);
+    testRdbToRespCommon(DUMP_FOLDER("single_key.rdb"), &r2rConf, (char *) expRespData, 0, 1);
 
     /* Default configuration avoid RESTORE */
     r2rConf.supportRestore = 0;
-    testRdbToRespCommon(DUMP_FOLDER("single_key.rdb"), (char *) expRespData, NULL);
+    testRdbToRespCommon(DUMP_FOLDER("single_key.rdb"), NULL, (char *) expRespData, 0, 1);
 }
 
-static void test_r2r_single_string_restore(void **state) {
+static void test_r2r_single_string_exact_match_restore_exact_match(void **state) {
     UNUSED(state);
     RdbxToRespConf r2rConf;
     unsigned char expRespRestore[] = {
@@ -75,16 +117,16 @@ static void test_r2r_single_string_restore(void **state) {
     memset(&r2rConf, 0, sizeof(r2rConf));
     r2rConf.supportRestore = 1;
     r2rConf.restore.dstRdbVersion = 11;
-    testRdbToRespCommon(DUMP_FOLDER("single_key.rdb"), (char *) expRespRestore, &r2rConf);
+    testRdbToRespCommon(DUMP_FOLDER("single_key.rdb"), &r2rConf, (char *) expRespRestore, 0, 1);
 
     /* Use RESTORE command because corresponding RDB ver. of given Redis ver. == source RDB ver. */
     r2rConf.supportRestore = 1;
     r2rConf.restore.dstRdbVersion = 0;
     r2rConf.restore.dstRedisVersion = "7.2";
-    testRdbToRespCommon(DUMP_FOLDER("single_key.rdb"), (char *) expRespRestore, &r2rConf);
+    testRdbToRespCommon(DUMP_FOLDER("single_key.rdb"), &r2rConf, (char *) expRespRestore, 0, 1);
 }
 
-static void test_r2r_single_list(void **state) {
+static void test_r2r_single_list_exact_match(void **state) {
     UNUSED(state);
     RdbxToRespConf r2rConf;
 
@@ -96,70 +138,76 @@ static void test_r2r_single_list(void **state) {
     memset(&r2rConf, 0, sizeof(r2rConf));
     r2rConf.supportRestore = 1;
     r2rConf.restore.dstRdbVersion = 6;
-    testRdbToRespCommon(DUMP_FOLDER("single_list.rdb"), expResp, &r2rConf);
+    testRdbToRespCommon(DUMP_FOLDER("single_list.rdb"), &r2rConf, expResp, 0, 1);
+}
+
+static void test_r2r_quicklist(void **state) {
+    UNUSED(state);
+    RdbxToRespConf r2rConf;
+
+    memset(&r2rConf, 0, sizeof(r2rConf));
+    r2rConf.supportRestore = 1;
+
+    /* expect not use RESTORE */
+    r2rConf.restore.dstRdbVersion = 1;
+    testRdbToRespCommon(DUMP_FOLDER("quicklist.rdb"), &r2rConf, (char*)restorePrefix, 1, 0);
+
+    /* expect use RESTORE */
+    r2rConf.restore.dstRdbVersion = 100;
+    testRdbToRespCommon(DUMP_FOLDER("quicklist.rdb"), &r2rConf, (char*)restorePrefix, 1, 1);
+}
+
+static void test_r2r_single_ziplist(void **state) {
+    UNUSED(state);
+    RdbxToRespConf r2rConf;
+
+    memset(&r2rConf, 0, sizeof(r2rConf));
+    r2rConf.supportRestore = 1;
+
+    /* expect not use RESTORE */
+    r2rConf.restore.dstRdbVersion = 1;
+    testRdbToRespCommon(DUMP_FOLDER("single_ziplist_v3.rdb"), &r2rConf, (char*)restorePrefix, 1, 0);
+
+    /* expect use RESTORE */
+    r2rConf.restore.dstRdbVersion = 100;
+    testRdbToRespCommon(DUMP_FOLDER("single_ziplist_v3.rdb"), &r2rConf, (char*)restorePrefix, 1, 1);
 }
 
 static void test_r2r_single_list_restore(void **state) {
     UNUSED(state);
     RdbxToRespConf r2rConf;
-
-    unsigned char expRespRestore[] = {
-            0x2A, 0x34, 0x0D, 0x0A,  // '*', '4', '\r', '\n'
-            0x24, 0x37, 0x0D, 0x0A,  // '$', '7', '\r', '\n'
-            0x52, 0x45, 0x53, 0x54,  // 'R', 'E', 'S', 'T'
-            0x4F, 0x52, 0x45, 0x0D,  // 'O', 'R', 'E', '\r'
-            0x0A, 0x24, 0x36, 0x0D,  // '\n', '$', '6', '\r'
-            0x0A, 0x6D, 0x79, 0x6C,  // '\n', 'm', 'y', 'l'
-            0x69, 0x73, 0x74, 0x0D,  // 'i', 's', 't', '\r'
-            0x0A, 0x24, 0x31, 0x0D,  // '\n', '$', '1', '\r'
-            0x0A, 0x30, 0x0D, 0x0A,  // '\n', '0', '\r', '\n'
-            0x24, 0x33, 0x39, 0x0D,  // '$', '3', '9', '\r'
-            0x0A, 0x12, 0x01, 0x02,  // '\n', '\x12', '\x01', '\x02'
-            0x19, 0x19, 0x00, 0x00,  // '\x19', '\x19', '\x00', '\x00'
-            0x00, 0x03, 0x00, 0x84,  // '\x00', '\x03', '\x00', '\x84'
-            0x76, 0x61, 0x6C, 0x33,  // 'v', 'a', 'l', '3'
-            0x05, 0x84, 0x76, 0x61,  // '\x05', '\x84', 'v', 'a'
-            0x6C, 0x32, 0x05, 0x84,  // 'l', '2', '\x05', '\x84'
-            0x76, 0x61, 0x6C, 0x31,  // 'v', 'a', 'l', '1'
-            0x05, 0xFF, 0x0B, 0x00,  // '\x05', '\xFF', '\x0B', '\x00'
-            0xB1, 0x54, 0x39, 0xA7,  // '\xB1', 'T', '9', '\xA7'
-            0x2D, 0xE4, 0xCA, 0xCA,  // '\x2D', '\xE4', '\xCA', '\xCA'
-            0x27, 0x0D, 0x0A };      // '\x27', '\r', '\n'
-
     /* Use RESTORE command because target RDB ver. == source RDB ver. */
     memset(&r2rConf, 0, sizeof(r2rConf));
     r2rConf.supportRestore = 1;
     r2rConf.restore.dstRdbVersion = 11;
-    testRdbToRespCommon(DUMP_FOLDER("single_list.rdb"), (char *) expRespRestore, &r2rConf);
+    testRdbToRespCommon(DUMP_FOLDER("single_list.rdb"), &r2rConf, (char *) restorePrefix, 1, 1);
 }
 
 static void test_r2r_multiple_lists_and_strings(void **state) {
     UNUSED(state);
     RdbxToRespConf r2rConf;
 
-    char expResp[] = "*3\r\n$3\r\nSET\r\n$7\r\nstring2\r\n$9\r\nHi there!\r\n"
-                     "*3\r\n$5\r\nRPUSH\r\n$7\r\nmylist1\r\n$2\r\nv1\r\n"
-                     "*3\r\n$5\r\nRPUSH\r\n$7\r\nmylist3\r\n$2\r\nv3\r\n"
-                     "*3\r\n$5\r\nRPUSH\r\n$7\r\nmylist3\r\n$2\r\nv2\r\n"
-                     "*3\r\n$5\r\nRPUSH\r\n$7\r\nmylist3\r\n$2\r\nv1\r\n"
-                     "*3\r\n$3\r\nSET\r\n$14\r\nlzf_compressed\r\n$118\r\ncccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\r\n"
-                     "*3\r\n$3\r\nSET\r\n$7\r\nstring1\r\n$4\r\nblaa\r\n"
-                     "*3\r\n$5\r\nRPUSH\r\n$7\r\nmylist2\r\n$2\r\nv2\r\n"
-                     "*3\r\n$5\r\nRPUSH\r\n$7\r\nmylist2\r\n$2\r\nv1\r\n";
-
     /* Won't use RESTORE command because target RDB ver. < source RDB ver. */
     memset(&r2rConf, 0, sizeof(r2rConf));
     r2rConf.supportRestore = 1;
     r2rConf.restore.dstRdbVersion = 6;
-    testRdbToRespCommon(DUMP_FOLDER("multiple_lists_strings.rdb"), expResp, &r2rConf);
+    testRdbToRespCommon(DUMP_FOLDER("multiple_lists_strings.rdb"), &r2rConf, (char *)restorePrefix, 1, 0);
 }
+
 /*************************** group_rdb_to_resp *******************************/
 int group_rdb_to_resp(void) {
     const struct CMUnitTest tests[] = {
-            cmocka_unit_test(test_r2r_single_string_restore),
-            cmocka_unit_test(test_r2r_single_string),
+            /* string */
+            cmocka_unit_test(test_r2r_single_string_exact_match),
+            cmocka_unit_test(test_r2r_single_string_exact_match_restore_exact_match),
+            /* list */
+            cmocka_unit_test(test_r2r_single_list_exact_match),
             cmocka_unit_test(test_r2r_single_list_restore),
-            cmocka_unit_test(test_r2r_single_list),
+            /* quicklist */
+            cmocka_unit_test(test_r2r_quicklist),
+            /* ziplist */
+            cmocka_unit_test(test_r2r_single_ziplist),
+            /* list & strings */
             cmocka_unit_test(test_r2r_multiple_lists_and_strings),
     };
     return cmocka_run_group_tests(tests, NULL, NULL);

@@ -177,7 +177,7 @@ void setupRedisServer() {
         char redisPortStr[10];
         char fullpath[256];
 
-        printf ("Redis port: %d\n", redisPort);
+        printf ("Found free port to run Redis: %d\n", redisPort);
 
         snprintf(fullpath, 255, "%s/%s", redisInstallFolder, "redis-server");
         snprintf(redisPortStr, sizeof(redisPortStr), "%d", redisPort);

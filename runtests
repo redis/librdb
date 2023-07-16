@@ -1,4 +1,4 @@
-#!/bin/bash -e
+#!/bin/bash -ex
 
 VALGRIND=0
 REDIS_FOLDER=""
@@ -26,9 +26,11 @@ if [[ ${VALGRIND} -ne 0 ]]; then
   		--leak-resolution=high \
   		--error-exitcode=1 \
   		--log-file=test/log/valgrind.log \
-  		./test/test_static_lib $REDIS_FOLDER
-      sed -n -e '/SUMMARY:/,$p' ./test/log/valgrind.log
+  		./test/test_static_lib $REDIS_FOLDER && exit 0
+
+      sed -n -e '/SUMMARY:/,$p' ./test/log/valgrind.log | tail -n 20
   		echo  -en "\n(Entire log available at: ./test/log/valgrind.log)\n"
+  		exit 1
 
 else
   ./test/test_lib $REDIS_FOLDER

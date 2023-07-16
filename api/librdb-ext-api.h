@@ -74,8 +74,8 @@ typedef struct RdbxToJsonConf {
 } RdbxToJsonConf;
 
 _LIBRDB_API RdbxToJson *RDBX_createHandlersToJson(RdbParser *p,
-                                                const char *filename,
-                                                RdbxToJsonConf *c);
+                                                  const char *filename,
+                                                  RdbxToJsonConf *c);
 
 /****************************************************************
  * Create Filter Handlers
@@ -163,10 +163,10 @@ _LIBRDB_API RdbxRespFileWriter *RDBX_createRespFileWriter(RdbParser *p,
  * to 0 if to use default.
  ****************************************************************/
 _LIBRDB_API RdbxRespToTcpLoader *RDBX_createRespToTcpLoader(RdbParser *p,
-                                                          RdbxToResp *rdbToResp,
-                                                          const char* hostname,
-                                                          int port,
-                                                          int pipelineDepth);
+                                                            RdbxToResp *rdbToResp,
+                                                            const char* hostname,
+                                                            int port,
+                                                            int pipelineDepth);
 
 #ifdef __cplusplus
 }
