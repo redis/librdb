@@ -32,9 +32,9 @@ static void test_rdb_to_loader_common(const char *rdbfile, int pipelineDepth) {
 
     /* test one time without RESTORE, Playing against old version.
      * and one time with RESTORE, Playing against new version. */
-    for (int i = 0 ; i < 2 ; ++i) {
+    for (int isRestore = 0 ; isRestore <= 1 ; ++isRestore) {
 
-        int targetRdbVer = (i==0) ? 1 : 100; /* old-target (not RESTORE) VS. new-target (RESTORE) */
+        int targetRdbVer = (isRestore == 0) ? 1 : 100; /* old-target (not RESTORE) VS. new-target (RESTORE) */
 
         runSystemCmd("%s/redis-cli -p %d flushall > /dev/null", redisInstallFolder, redisPort);
 
@@ -106,6 +106,11 @@ static void test_rdb_to_loader_multiple_lists_strings_pipeline_depth_1(void **st
     test_rdb_to_loader_common(DUMP_FOLDER("multiple_lists_strings.rdb"), 1 /*pipelineDepth*/);
 }
 
+static void test_rdb_to_loader_plain_list(void **state) {
+    UNUSED(state);
+    test_rdb_to_loader_common(DUMP_FOLDER("plain_list_v6.rdb"), 1 /*pipelineDepth*/);
+}
+
 static void test_rdb_to_loader_quicklist(void **state) {
     UNUSED(state);
     test_rdb_to_loader_common(DUMP_FOLDER("quicklist.rdb"), 1 /*pipelineDepth*/);
@@ -129,6 +134,7 @@ int group_rdb_to_loader() {
             cmocka_unit_test_setup(test_rdb_to_loader_single_string, setupTest),
             cmocka_unit_test_setup(test_rdb_to_loader_multiple_lists_strings, setupTest),
             cmocka_unit_test_setup(test_rdb_to_loader_multiple_lists_strings_pipeline_depth_1, setupTest),
+            cmocka_unit_test_setup(test_rdb_to_loader_plain_list, setupTest),
             cmocka_unit_test_setup(test_rdb_to_loader_quicklist, setupTest),
             cmocka_unit_test_setup(test_rdb_to_loader_single_ziplist, setupTest),
     };

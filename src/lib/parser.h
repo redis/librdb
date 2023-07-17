@@ -112,6 +112,7 @@ typedef enum ParsingElementType {
     PE_END_KEY,
     PE_STRING,
     PE_LIST,
+    PE_QUICKLIST,
     PE_ZIPLIST,
 
     /* parsing raw data types */
@@ -119,6 +120,7 @@ typedef enum ParsingElementType {
     PE_RAW_END_KEY,
     PE_RAW_STRING,
     PE_RAW_LIST,
+    PE_RAW_QUICKLIST,
     PE_RAW_ZIPLIST,
 
     PE_END_OF_FILE,
@@ -376,11 +378,13 @@ RdbStatus elementExpireTimeMsec(RdbParser *p);
 /*** Struct/Data Parsing Elements ***/
 RdbStatus elementString(RdbParser *p);
 RdbStatus elementList(RdbParser *p);
+RdbStatus elementQuickList(RdbParser *p);
 RdbStatus elementZipList(RdbParser *p);
 /*** Raw Parsing Elements ***/
 RdbStatus elementRawNewKey(RdbParser *p);
 RdbStatus elementRawEndKey(RdbParser *p);
 RdbStatus elementRawList(RdbParser *p);
+RdbStatus elementRawQuickList(RdbParser *p);
 RdbStatus elementRawString(RdbParser *p);
 RdbStatus elementRawZipList(RdbParser *p);
 

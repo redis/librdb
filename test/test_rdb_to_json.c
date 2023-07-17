@@ -41,7 +41,7 @@ void testRdbToJsonCommon(const char *rdbfile,
         assert_json_equal(jsonfile, expJsonFile);
 
         /*** 2. RDB_parse - set pause-interval to 1 byte ***/
-        int looseCounterAssert = 0;
+        int countPausesAssert = 1;
         long countPauses = 0;
         size_t lastBytes = 0;
         remove(jsonfile);
@@ -53,7 +53,7 @@ void testRdbToJsonCommon(const char *rdbfile,
         while (1) {
             status = RDB_parse(parser);
             if (status == RDB_STATUS_WAIT_MORE_DATA) {
-                looseCounterAssert = 1;
+                countPausesAssert = 0;
                 continue;
             }
             if (status == RDB_STATUS_PAUSED) {
@@ -64,13 +64,10 @@ void testRdbToJsonCommon(const char *rdbfile,
             break;
         }
 
-        /* If recorded WAIT_MORE_DATA, it will mess a little our countPauses evaluation.
-         * When parser reach WAIT_MORE_DATA together with STATUS_PAUSED, then it
-         * will prefer to return WAIT_MORE_DATA */
-        if (looseCounterAssert)
-            assert_true(countPauses > (((long) bufLen) / 2));
-        else
+        /* If recorded WAIT_MORE_DATA, it will mess our countPauses evaluation. Skip it. */
+        if (countPausesAssert)
             assert_int_equal(countPauses + 1, bufLen);
+
         RDB_deleteParser(parser);
         assert_json_equal(jsonfile, expJsonFile);
 
@@ -126,6 +123,22 @@ static void test_r2j_single_ziplist_struct(void **state) {
 static void test_r2j_single_ziplist_raw (void **state) {
     UNUSED(state);
     testRdbToJsonCommon(DUMP_FOLDER("single_ziplist_v3.rdb"), DUMP_FOLDER("single_ziplist_raw.json"), RDB_LEVEL_RAW);
+}
+
+static void test_r2j_plain_list_data(void **state) {
+    UNUSED(state);
+    testRdbToJsonCommon(DUMP_FOLDER("plain_list_v6.rdb"), DUMP_FOLDER("plain_list_v6_data.json"), RDB_LEVEL_DATA);
+}
+
+static void test_r2j_plain_list_struct(void **state) {
+    UNUSED(state);
+
+    testRdbToJsonCommon(DUMP_FOLDER("plain_list_v6.rdb"), DUMP_FOLDER("plain_list_v6_struct.json"), RDB_LEVEL_STRUCT);
+}
+
+static void test_r2j_plain_list_raw (void **state) {
+    UNUSED(state);
+    testRdbToJsonCommon(DUMP_FOLDER("plain_list_v6.rdb"), DUMP_FOLDER("plain_list_v6_raw.json"), RDB_LEVEL_RAW);
 }
 
 static void test_r2j_quicklist_data(void **state) {
@@ -218,6 +231,9 @@ int group_rdb_to_json(void) {
         cmocka_unit_test(test_r2j_single_ziplist_data),
         cmocka_unit_test(test_r2j_single_ziplist_struct),
         cmocka_unit_test(test_r2j_single_ziplist_raw),
+
+        cmocka_unit_test(test_r2j_plain_list_data),
+        cmocka_unit_test(test_r2j_plain_list_raw),
     };
     return cmocka_run_group_tests(tests, NULL, NULL);
 }

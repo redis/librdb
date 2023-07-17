@@ -16,14 +16,6 @@
 
 /* TODO: support select db, expiry */
 
-unsigned char restorePrefix[] = {
-        0x2a, 0x34, 0x0d, 0x0a,  // *, 4, \r, \n
-        0x24, 0x37, 0x0d, 0x0a,  // $, 7, \r, \n
-        0x52, 0x45, 0x53, 0x54,  // R, E, S, T
-        0x4f, 0x52, 0x45, 0x0d,  // O, R, E, \r
-        0x0a, 0x24               // \n, $,
-};
-
 void assert_resp_file(const char *filename, char *resp, int isPrefix, int expMatch) {
     char *filedata = readFile(filename, NULL);
     int result = (isPrefix) ? strncmp(filedata, resp, strlen(resp)) : strcmp(filedata, resp);
@@ -66,6 +58,30 @@ static void testRdbToRespCommon(const char *rdbfile,
     /* verify number of commands counted */
     RDB_deleteParser(p);
     assert_resp_file(respfile, expResp, isPrefix, expMatch);
+}
+
+static void runWithAndWithoutRestore(const char *rdbfile) {
+    RdbxToRespConf r2rConf;
+
+    unsigned char restorePrefix[] = {
+            0x2a, 0x34, 0x0d, 0x0a,  // *, 4, \r, \n
+            0x24, 0x37, 0x0d, 0x0a,  // $, 7, \r, \n
+            0x52, 0x45, 0x53, 0x54,  // R, E, S, T
+            0x4f, 0x52, 0x45, 0x0d,  // O, R, E, \r
+            0x0a, 0x24,              // \n, $,
+            0x00                     // end of string
+    };
+
+    memset(&r2rConf, 0, sizeof(r2rConf));
+    r2rConf.supportRestore = 1;
+
+    /* expect not use RESTORE */
+    r2rConf.restore.dstRdbVersion = 1;
+    testRdbToRespCommon(rdbfile, &r2rConf, (char*)restorePrefix, 1, 0);
+
+    /* expect use RESTORE */
+    r2rConf.restore.dstRdbVersion = 100;
+    testRdbToRespCommon(rdbfile, &r2rConf, (char*)restorePrefix, 1, 1);
 }
 
 static void test_r2r_single_string_exact_match(void **state) {
@@ -141,57 +157,29 @@ static void test_r2r_single_list_exact_match(void **state) {
     testRdbToRespCommon(DUMP_FOLDER("quicklist2_v11.rdb"), &r2rConf, expResp, 0, 1);
 }
 
+static void test_r2r_plainlist(void **state) {
+    UNUSED(state);
+    runWithAndWithoutRestore(DUMP_FOLDER("plain_list_v6.rdb"));
+}
+
 static void test_r2r_quicklist(void **state) {
     UNUSED(state);
-    RdbxToRespConf r2rConf;
-
-    memset(&r2rConf, 0, sizeof(r2rConf));
-    r2rConf.supportRestore = 1;
-
-    /* expect not use RESTORE */
-    r2rConf.restore.dstRdbVersion = 1;
-    testRdbToRespCommon(DUMP_FOLDER("quicklist.rdb"), &r2rConf, (char*)restorePrefix, 1, 0);
-
-    /* expect use RESTORE */
-    r2rConf.restore.dstRdbVersion = 100;
-    testRdbToRespCommon(DUMP_FOLDER("quicklist.rdb"), &r2rConf, (char*)restorePrefix, 1, 1);
+    runWithAndWithoutRestore(DUMP_FOLDER("quicklist.rdb"));
 }
 
 static void test_r2r_single_ziplist(void **state) {
     UNUSED(state);
-    RdbxToRespConf r2rConf;
-
-    memset(&r2rConf, 0, sizeof(r2rConf));
-    r2rConf.supportRestore = 1;
-
-    /* expect not use RESTORE */
-    r2rConf.restore.dstRdbVersion = 1;
-    testRdbToRespCommon(DUMP_FOLDER("single_ziplist_v3.rdb"), &r2rConf, (char*)restorePrefix, 1, 0);
-
-    /* expect use RESTORE */
-    r2rConf.restore.dstRdbVersion = 100;
-    testRdbToRespCommon(DUMP_FOLDER("single_ziplist_v3.rdb"), &r2rConf, (char*)restorePrefix, 1, 1);
+    runWithAndWithoutRestore(DUMP_FOLDER("single_ziplist_v3.rdb"));
 }
 
 static void test_r2r_single_list_restore(void **state) {
     UNUSED(state);
-    RdbxToRespConf r2rConf;
-    /* Use RESTORE command because target RDB ver. == source RDB ver. */
-    memset(&r2rConf, 0, sizeof(r2rConf));
-    r2rConf.supportRestore = 1;
-    r2rConf.restore.dstRdbVersion = 11;
-    testRdbToRespCommon(DUMP_FOLDER("quicklist2_v11.rdb"), &r2rConf, (char *) restorePrefix, 1, 1);
+    runWithAndWithoutRestore(DUMP_FOLDER("quicklist2_v11.rdb"));
 }
 
 static void test_r2r_multiple_lists_and_strings(void **state) {
     UNUSED(state);
-    RdbxToRespConf r2rConf;
-
-    /* Won't use RESTORE command because target RDB ver. < source RDB ver. */
-    memset(&r2rConf, 0, sizeof(r2rConf));
-    r2rConf.supportRestore = 1;
-    r2rConf.restore.dstRdbVersion = 6;
-    testRdbToRespCommon(DUMP_FOLDER("multiple_lists_strings.rdb"), &r2rConf, (char *)restorePrefix, 1, 0);
+    runWithAndWithoutRestore(DUMP_FOLDER("multiple_lists_strings.rdb"));
 }
 
 /*************************** group_rdb_to_resp *******************************/
@@ -203,6 +191,8 @@ int group_rdb_to_resp(void) {
             /* list */
             cmocka_unit_test(test_r2r_single_list_exact_match),
             cmocka_unit_test(test_r2r_single_list_restore),
+            /* plain list */
+            cmocka_unit_test(test_r2r_plainlist),
             /* quicklist */
             cmocka_unit_test(test_r2r_quicklist),
             /* ziplist */

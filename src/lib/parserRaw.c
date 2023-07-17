@@ -129,6 +129,61 @@ RdbStatus elementRawEndKey(RdbParser *p) {
 }
 
 RdbStatus elementRawList(RdbParser *p) {
+    enum RAW_LIST_STATES {
+        ST_RAW_LIST_HEADER=0, /* Retrieve number of nodes */
+        ST_RAW_LIST_NEXT_NODE_CALL_STR, /* Process next node. Call PE_RAW_STRING as sub-element */
+        ST_RAW_LIST_NEXT_NODE_STR_RETURN, /* integ check of the returned string from PE_RAW_STRING */
+    } ;
+
+    ElementRawListCtx *listCtx = &p->elmCtx.rawList;
+    RawContext *rawCtx = &p->rawCtx;
+
+    switch (p->elmCtx.state) {
+
+        case ST_RAW_LIST_HEADER: {
+            int headerLen = 0;
+
+            aggMakeRoom(p, 10); /* worse case 9 bytes for len */
+
+            IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &listCtx->numNodes,
+                (unsigned char *) rawCtx->at, &headerLen));
+
+            /*** ENTER SAFE STATE ***/
+
+            IF_NOT_OK_RETURN(cbHandleBegin(p, DATA_SIZE_UNKNOWN_AHEAD));
+            IF_NOT_OK_RETURN(aggUpdateWrittenCbFrag(p, headerLen));
+
+        }
+
+        updateElementState(p, ST_RAW_LIST_NEXT_NODE_CALL_STR); /* fall-thru */
+
+        case ST_RAW_LIST_NEXT_NODE_CALL_STR:
+            return subElementCall(p, PE_RAW_STRING, ST_RAW_LIST_NEXT_NODE_STR_RETURN);
+
+        case ST_RAW_LIST_NEXT_NODE_STR_RETURN: {
+
+            /*** ENTER SAFE STATE (no rdb read)***/
+
+            size_t len;
+            unsigned char *encodedNode;
+
+            /* return from sub-element string parsing */
+            subElementCallEnd(p, (char **) &encodedNode, &len);
+
+            if (--listCtx->numNodes == 0)
+                return nextParsingElement(p, PE_RAW_END_KEY); /* done */
+
+            return updateElementState(p, ST_RAW_LIST_NEXT_NODE_CALL_STR);
+        }
+
+        default:
+            RDB_reportError(p, RDB_ERR_PLAIN_LIST_INVALID_STATE,
+                            "elementRawList() : invalid parsing element state: %d", p->elmCtx.state);
+            return RDB_STATUS_ERROR;
+    }
+}
+
+RdbStatus elementRawQuickList(RdbParser *p) {
 
     enum RAW_LIST_STATES {
         ST_RAW_LIST_HEADER=0, /* Retrieve number of nodes */
@@ -200,7 +255,7 @@ RdbStatus elementRawList(RdbParser *p) {
 
                 if (!ret) {
                     RDB_reportError(p, RDB_ERR_QUICK_LIST_INTEG_CHECK,
-                                   "elementRawList(1): Quicklist integrity check failed");
+                                   "elementRawQuickList(1): Quicklist integrity check failed");
                     return RDB_STATUS_ERROR;
                 }
             }
@@ -213,7 +268,7 @@ RdbStatus elementRawList(RdbParser *p) {
 
         default:
             RDB_reportError(p, RDB_ERR_QUICK_LIST_INVALID_STATE,
-                           "elementRawList() : invalid parsing element state: %d", p->elmCtx.state);
+                           "elementRawQuickList() : invalid parsing element state: %d", p->elmCtx.state);
             return RDB_STATUS_ERROR;
     }
 }

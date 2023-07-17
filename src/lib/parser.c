@@ -33,13 +33,15 @@ struct ParsingElementInfo peInfo[PE_MAX] = {
         [PE_END_KEY]          = {elementEndKey, "elementEndKey", "Parsing end key"},
         [PE_STRING]           = {elementString, "elementString", "Parsing string"},
         [PE_LIST]             = {elementList, "elementList", "Parsing list"},
+        [PE_QUICKLIST]        = {elementQuickList, "elementQuickList", "Parsing list"},
         [PE_ZIPLIST]          = {elementZipList, "elementZipList", "Parsing ZipList"},
 
         /* parsing raw data (RDB_LEVEL_RAW) */
         [PE_RAW_NEW_KEY]      = {elementRawNewKey, "elementRawNewKey", "Parsing new raw key-value"},
         [PE_RAW_END_KEY]      = {elementRawEndKey, "elementRawEndKey", "Parsing raw end key"},
         [PE_RAW_STRING]       = {elementRawString, "elementRawString", "Parsing raw string"},
-        [PE_RAW_LIST]         = {elementRawList, "elementRawList", "Parsing raw list"},
+        [PE_RAW_LIST]         = {elementRawList, "elementRawList", "Parsing raw list (legacy)"},
+        [PE_RAW_QUICKLIST]    = {elementRawQuickList, "elementRawQuickList", "Parsing raw list"},
         [PE_RAW_ZIPLIST]      = {elementRawZipList, "elementRawZipList", "Parsing raw ZipList"},
 
         [PE_END_OF_FILE]      = {elementEndOfFile, "elementEndOfFile", "End parsing RDB file"},
@@ -952,8 +954,9 @@ RdbStatus elementNextRdbType(RdbParser *p) {
         case RDB_OPCODE_RESIZEDB:           return nextParsingElement(p, PE_RESIZE_DB);
 
         case RDB_TYPE_STRING:               return nextParsingElementKeyValue(p, PE_RAW_STRING, PE_STRING);
-        case RDB_TYPE_LIST_QUICKLIST:       return nextParsingElementKeyValue(p, PE_RAW_LIST, PE_LIST);
-        case RDB_TYPE_LIST_QUICKLIST_2:     return nextParsingElementKeyValue(p, PE_RAW_LIST, PE_LIST);
+        case RDB_TYPE_LIST:                 return nextParsingElementKeyValue(p, PE_RAW_LIST, PE_LIST);
+        case RDB_TYPE_LIST_QUICKLIST:       return nextParsingElementKeyValue(p, PE_RAW_QUICKLIST, PE_QUICKLIST);
+        case RDB_TYPE_LIST_QUICKLIST_2:     return nextParsingElementKeyValue(p, PE_RAW_QUICKLIST, PE_QUICKLIST);
 
         case RDB_TYPE_LIST_ZIPLIST:         return nextParsingElementKeyValue(p, PE_RAW_ZIPLIST, PE_ZIPLIST);
         case RDB_OPCODE_EOF:                return nextParsingElement(p, PE_END_OF_FILE);
@@ -965,7 +968,6 @@ RdbStatus elementNextRdbType(RdbParser *p) {
         case RDB_OPCODE_MODULE_AUX:
         case RDB_OPCODE_FUNCTION:
         case RDB_OPCODE_FUNCTION2:
-        case RDB_TYPE_LIST:
         case RDB_TYPE_SET:
         case RDB_TYPE_ZSET:
         case RDB_TYPE_HASH:
@@ -1020,6 +1022,36 @@ RdbStatus elementList(RdbParser *p) {
         ST_LIST_HEADER=0, /*  Retrieve number of nodes */
         ST_LIST_NEXT_NODE /* Process next node and callback to app (Iterative) */
     } ;
+    switch (ctx->state) {
+        case ST_LIST_HEADER:
+            IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &(ctx->list.numNodes), NULL, NULL));
+
+            /*** ENTER SAFE STATE ***/
+
+            updateElementState(p, ST_LIST_NEXT_NODE); /* fall-thru */
+
+        case ST_LIST_NEXT_NODE: {
+            BulkInfo *binfoNode;
+            IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC_APP_BULK, NULL, &binfoNode));
+
+            registerAppBulkForNextCb(p, binfoNode);
+            CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_DATA, rdbData.handleListElement, binfoNode->ref);
+
+            return (--ctx->list.numNodes) ? updateElementState(p, ST_LIST_NEXT_NODE) : nextParsingElement(p, PE_END_KEY);
+        }
+        default:
+            RDB_reportError(p, RDB_ERR_PLAIN_LIST_INVALID_STATE,
+                            "elementList() : invalid parsing element state: %d", ctx->state);
+            return RDB_STATUS_ERROR;
+    }
+}
+
+RdbStatus elementQuickList(RdbParser *p) {
+    ElementCtx *ctx = &p->elmCtx;
+    enum LIST_STATES {
+        ST_LIST_HEADER=0, /*  Retrieve number of nodes */
+        ST_LIST_NEXT_NODE /* Process next node and callback to app (Iterative) */
+    } ;
 
     switch (ctx->state) {
         case ST_LIST_HEADER:
@@ -1039,7 +1071,7 @@ RdbStatus elementList(RdbParser *p) {
                 if (container != QUICKLIST_NODE_CONTAINER_PACKED &&
                     container != QUICKLIST_NODE_CONTAINER_PLAIN) {
                     RDB_reportError(p, RDB_ERR_QUICK_LIST_INTEG_CHECK,
-                                    "elementList(1): Quicklist integrity check failed");
+                                    "elementQuickList(1): Quicklist integrity check failed");
                     return RDB_STATUS_ERROR;
                 }
             }
@@ -1068,7 +1100,7 @@ RdbStatus elementList(RdbParser *p) {
                 if (p->currOpcode == RDB_TYPE_LIST_QUICKLIST_2) {
                     if (!lpValidateIntegrity(lp, binfoNode->len, p->deepIntegCheck, NULL, NULL)) {
                         RDB_reportError(p, RDB_ERR_QUICK_LIST_INTEG_CHECK,
-                                        "elementList(2): Quicklist integrity check failed");
+                                        "elementQuickList(2): Quicklist integrity check failed");
                         return RDB_STATUS_ERROR;
                     }
                     IF_NOT_OK_RETURN(listpackCallback(p, binfoNode));
@@ -1096,7 +1128,7 @@ RdbStatus elementList(RdbParser *p) {
 
         default:
             RDB_reportError(p, RDB_ERR_QUICK_LIST_INVALID_STATE,
-                            "elementList() : invalid parsing element state: %d", ctx->state);
+                            "elementQuickList() : invalid parsing element state: %d", ctx->state);
             return RDB_STATUS_ERROR;
     }
 }
