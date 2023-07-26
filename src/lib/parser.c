@@ -864,7 +864,7 @@ static RdbStatus listZipListItem(RdbParser *p, BulkInfo *ziplistBulk) {
         }
 
         if (unlikely(p->errorCode != RDB_OK)) {
-            return p->errorCode;
+            return RDB_STATUS_ERROR;
         }
     }
 
