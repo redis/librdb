@@ -288,6 +288,11 @@ int bulkPoolIsNewNextAllocDbg(RdbParser *p) {
     return (pool->writeIdx == pool->readIdx) ? 1 : 0;
 }
 
+void bulkPoolAssertFlushedDbg(RdbParser *p) {
+    BulkPool *pool = p->cache;
+    assert(pool->writeIdx == 0);
+}
+
 static inline BulkInfo *bulkPoolEnqueue(BulkPool *pool) {
     pool->writeIdx += 1;
     if (unlikely(pool->writeIdx == pool->queueSize)) {

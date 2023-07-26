@@ -169,7 +169,7 @@ static void test_r2r_quicklist(void **state) {
 
 static void test_r2r_single_ziplist(void **state) {
     UNUSED(state);
-    runWithAndWithoutRestore(DUMP_FOLDER("single_ziplist_v3.rdb"));
+    runWithAndWithoutRestore(DUMP_FOLDER("ziplist_v3.rdb"));
 }
 
 static void test_r2r_single_list_restore(void **state) {

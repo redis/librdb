@@ -3,5 +3,5 @@
 "ctime":"1629882015",
 "used-mem":"496256",
 "aof-preamble":"0",
-"list":["\t\x00\x00\x00\x01\x00\x07\x01\xff"],
+"list":["\r\x00\x00\x00\n\x00\x00\x00\x01\x00\x00\xf8\xff"],
 "x":"7"

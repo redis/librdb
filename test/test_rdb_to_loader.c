@@ -118,7 +118,7 @@ static void test_rdb_to_loader_quicklist(void **state) {
 
 static void test_rdb_to_loader_single_ziplist(void **state) {
     UNUSED(state);
-    test_rdb_to_loader_common(DUMP_FOLDER("single_ziplist_v3.rdb"), 1 /*pipelineDepth*/);
+    test_rdb_to_loader_common(DUMP_FOLDER("ziplist_v3.rdb"), 1 /*pipelineDepth*/);
 }
 
 /*************************** group_rdb_to_loader *******************************/

@@ -47,8 +47,18 @@ static RdbRes filterHandlingList(RdbParser *p, void *userData, RdbBulk str) {
 
 /*** Handling struct ***/
 
-static RdbRes filterHandlingQListNode(RdbParser *p, void *userData, RdbBulk listNode) {
+static RdbRes filterHandlingListLP(RdbParser *p, void *userData, RdbBulk listNode) {
     UNUSED(p, listNode);
+    return ((RdbxFilterKey *) userData)->cbReturnValue;
+}
+
+static RdbRes filterHandlingListZL(RdbParser *p, void *userData, RdbBulk listNode) {
+    UNUSED(p, listNode);
+    return ((RdbxFilterKey *) userData)->cbReturnValue;
+}
+
+static RdbRes filterHandlingListNode(RdbParser *p, void *userData, RdbBulk str) {
+    UNUSED(p, str);
     return ((RdbxFilterKey *) userData)->cbReturnValue;
 }
 
@@ -105,8 +115,9 @@ RdbxFilterKey *RDBX_createHandlersFilterKey(RdbParser *p,
 
     if (RDB_getNumHandlers(p, RDB_LEVEL_STRUCT)>0) {
         callbacks.structCb.handleStringValue = filterHandlingString;
-        callbacks.structCb.handleQListNode = filterHandlingQListNode;
-        callbacks.structCb.handlePlainNode = filterHandlingList;
+        callbacks.structCb.handleListLP = filterHandlingListLP;
+        callbacks.structCb.handleListZL = filterHandlingListZL;
+        callbacks.structCb.handleListNode = filterHandlingListNode;
         RDB_createHandlersStruct(p, &callbacks.structCb, ctx, deleteFilterKeyCtx);
     }
 

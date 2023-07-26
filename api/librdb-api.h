@@ -61,11 +61,11 @@ typedef enum RdbRes {
     RDB_ERR_NOT_SUPPORTED_RDB_ENCODING_TYPE,
     RDB_ERR_UNKNOWN_RDB_ENCODING_TYPE,
     RDB_ERR_QUICK_LIST_INTEG_CHECK,
+    RDB_ERR_ZIP_LIST_INTEG_CHECK,
     RDB_ERR_STRING_INVALID_STATE,
     RDB_ERR_PLAIN_LIST_INVALID_STATE,
     RDB_ERR_QUICK_LIST_INVALID_STATE,
     RDB_ERR_ZIP_LIST_INVALID_STATE,
-    RDB_ERR_ZIP_LIST_INTEG_CHECK,
     RDB_ERR_INVALID_BULK_ALLOC_TYPE,
     RDB_ERR_INVALID_BULK_CLONE_REQUEST,
     RDB_ERR_INVALID_BULK_LENGTH_REQUEST,
@@ -193,8 +193,9 @@ typedef struct RdbHandlersRawCallbacks {
 typedef struct RdbHandlersStructCallbacks {
     HANDLERS_COMMON_CALLBACKS
     RdbRes (*handleStringValue)(RdbParser *p, void *userData, RdbBulk str);
-    RdbRes (*handleQListNode)(RdbParser *p, void *userData, RdbBulk listNode);
-    RdbRes (*handlePlainNode)(RdbParser *p, void *userData, RdbBulk node);
+    RdbRes (*handleListLP)(RdbParser *p, void *userData, RdbBulk listPack);
+    RdbRes (*handleListZL)(RdbParser *p, void *userData, RdbBulk ziplist);
+    RdbRes (*handleListNode)(RdbParser *p, void *userData, RdbBulk node);
 
     /*** TODO: RdbHandlersStructCallbacks: handlerHashListPack, handleSetIntset, handleZsetListPack, handleFunction ***/
     RdbRes (*handlerHashListPack)(RdbParser *p, void *userData, RdbBulk hash);

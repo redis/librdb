@@ -321,6 +321,7 @@ struct RdbHandlers {
 /* before each handler's callback with RdbBulk, need to register its corresponding
  * BulkInfo (See comment at struct AppCallbackCtx) */
 inline void registerAppBulkForNextCb(RdbParser *p, BulkInfo *binfo) {
+    assert(p->appCbCtx.numBulks < MAX_APP_BULKS);
     p->appCbCtx.bulks[p->appCbCtx.numBulks++] = binfo;
 }
 

@@ -111,18 +111,18 @@ void testRdbToJsonCommon(const char *rdbfile,
 
 static void test_r2j_single_ziplist_data(void **state) {
     UNUSED(state);
-    testRdbToJsonCommon(DUMP_FOLDER("single_ziplist_v3.rdb"), DUMP_FOLDER("single_ziplist_data.json"), RDB_LEVEL_DATA);
+    testRdbToJsonCommon(DUMP_FOLDER("ziplist_v3.rdb"), DUMP_FOLDER("ziplist_data.json"), RDB_LEVEL_DATA);
 }
 
 static void test_r2j_single_ziplist_struct(void **state) {
     UNUSED(state);
 
-    testRdbToJsonCommon(DUMP_FOLDER("single_ziplist_v3.rdb"), DUMP_FOLDER("single_ziplist_struct.json"), RDB_LEVEL_STRUCT);
+    testRdbToJsonCommon(DUMP_FOLDER("ziplist_v3.rdb"), DUMP_FOLDER("ziplist_struct.json"), RDB_LEVEL_STRUCT);
 }
 
 static void test_r2j_single_ziplist_raw (void **state) {
     UNUSED(state);
-    testRdbToJsonCommon(DUMP_FOLDER("single_ziplist_v3.rdb"), DUMP_FOLDER("single_ziplist_raw.json"), RDB_LEVEL_RAW);
+    testRdbToJsonCommon(DUMP_FOLDER("ziplist_v3.rdb"), DUMP_FOLDER("ziplist_raw.json"), RDB_LEVEL_RAW);
 }
 
 static void test_r2j_plain_list_data(void **state) {
