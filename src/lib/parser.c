@@ -34,7 +34,7 @@ struct ParsingElementInfo peInfo[PE_MAX] = {
         [PE_STRING]           = {elementString, "elementString", "Parsing string"},
         [PE_LIST]             = {elementList, "elementList", "Parsing list"},
         [PE_QUICKLIST]        = {elementQuickList, "elementQuickList", "Parsing list"},
-        [PE_ZIPLIST]          = {elementZipList, "elementZipList", "Parsing ZipList"},
+        [PE_ZIPLIST]          = {elementZiplist, "elementZiplist", "Parsing Ziplist"},
 
         /* parsing raw data (RDB_LEVEL_RAW) */
         [PE_RAW_NEW_KEY]      = {elementRawNewKey, "elementRawNewKey", "Parsing new raw key-value"},
@@ -42,7 +42,7 @@ struct ParsingElementInfo peInfo[PE_MAX] = {
         [PE_RAW_STRING]       = {elementRawString, "elementRawString", "Parsing raw string"},
         [PE_RAW_LIST]         = {elementRawList, "elementRawList", "Parsing raw list (legacy)"},
         [PE_RAW_QUICKLIST]    = {elementRawQuickList, "elementRawQuickList", "Parsing raw list"},
-        [PE_RAW_ZIPLIST]      = {elementRawZipList, "elementRawZipList", "Parsing raw ZipList"},
+        [PE_RAW_ZIPLIST]      = {elementRawZiplist, "elementRawZiplist", "Parsing raw Ziplist"},
 
         [PE_END_OF_FILE]      = {elementEndOfFile, "elementEndOfFile", "End parsing RDB file"},
 };
@@ -839,19 +839,19 @@ static RdbStatus listListpackItem(RdbParser *p, BulkInfo *lpInfo) {
 }
 
 /* return either RDB_STATUS_OK or RDB_STATUS_ERROR */
-static RdbStatus listZipListItem(RdbParser *p, BulkInfo *ziplistBulk) {
+static RdbStatus listZiplistItem(RdbParser *p, BulkInfo *ziplistBulk) {
     int ret;
 
     if (p->elmCtx.key.handleByLevel == RDB_LEVEL_STRUCT) {
         ret = ziplistValidateIntegrity(ziplistBulk->ref, ziplistBulk->len, p->deepIntegCheck, NULL, NULL);
 
         if (unlikely(!ret)) {
-            RDB_reportError(p, RDB_ERR_ZIP_LIST_INTEG_CHECK, "elementZipList(): ZipList integrity check failed");
+            RDB_reportError(p, RDB_ERR_ZIP_LIST_INTEG_CHECK, "elementZiplist(): Ziplist integrity check failed");
             return RDB_STATUS_ERROR;
         }
 
         registerAppBulkForNextCb(p, ziplistBulk);
-        CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_STRUCT, rdbStruct.handleListLP, ziplistBulk->ref);
+        CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_STRUCT, rdbStruct.handleListZL, ziplistBulk->ref);
 
     } else {
         /* If handleByLevel == RDB_LEVEL_DATA */
@@ -859,7 +859,7 @@ static RdbStatus listZipListItem(RdbParser *p, BulkInfo *ziplistBulk) {
         ret = ziplistValidateIntegrity(ziplistBulk->ref, ziplistBulk->len, p->deepIntegCheck, ziplistItemCallback, p);
 
         if (unlikely(!ret)) {
-            RDB_reportError(p, RDB_ERR_ZIP_LIST_INTEG_CHECK, "elementZipList(): ZipList integrity check failed");
+            RDB_reportError(p, RDB_ERR_ZIP_LIST_INTEG_CHECK, "elementZiplist(): Ziplist integrity check failed");
             return RDB_STATUS_ERROR;
         }
 
@@ -1192,7 +1192,7 @@ RdbStatus elementQuickList(RdbParser *p) {
                     }
                     IF_NOT_OK_RETURN(listListpackItem(p, binfoNode));
                 } else {
-                    listZipListItem(p, binfoNode);
+                    listZiplistItem(p, binfoNode);
                 }
             }
 
@@ -1206,14 +1206,14 @@ RdbStatus elementQuickList(RdbParser *p) {
     }
 }
 
-RdbStatus elementZipList(RdbParser *p) {
+RdbStatus elementZiplist(RdbParser *p) {
     BulkInfo *ziplistBulk;
 
     IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC_APP_BULK, NULL, &ziplistBulk));
 
     /*** ENTER SAFE STATE ***/
 
-    return listZipListItem(p, ziplistBulk);
+    return listZiplistItem(p, ziplistBulk);
 }
 
 RdbStatus elementEndOfFile(RdbParser *p) {

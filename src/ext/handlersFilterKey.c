@@ -47,18 +47,18 @@ static RdbRes filterHandlingList(RdbParser *p, void *userData, RdbBulk str) {
 
 /*** Handling struct ***/
 
-static RdbRes filterHandlingListLP(RdbParser *p, void *userData, RdbBulk listNode) {
-    UNUSED(p, listNode);
+static RdbRes filterHandlingListLP(RdbParser *p, void *userData, RdbBulk listLP) {
+    UNUSED(p, listLP);
     return ((RdbxFilterKey *) userData)->cbReturnValue;
 }
 
-static RdbRes filterHandlingListZL(RdbParser *p, void *userData, RdbBulk listNode) {
-    UNUSED(p, listNode);
+static RdbRes filterHandlingListZL(RdbParser *p, void *userData, RdbBulk listZL) {
+    UNUSED(p, listZL);
     return ((RdbxFilterKey *) userData)->cbReturnValue;
 }
 
-static RdbRes filterHandlingListNode(RdbParser *p, void *userData, RdbBulk str) {
-    UNUSED(p, str);
+static RdbRes filterHandlingListNode(RdbParser *p, void *userData, RdbBulk listNode) {
+    UNUSED(p, listNode);
     return ((RdbxFilterKey *) userData)->cbReturnValue;
 }
 

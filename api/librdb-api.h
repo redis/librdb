@@ -193,19 +193,19 @@ typedef struct RdbHandlersRawCallbacks {
 typedef struct RdbHandlersStructCallbacks {
     HANDLERS_COMMON_CALLBACKS
     RdbRes (*handleStringValue)(RdbParser *p, void *userData, RdbBulk str);
-    RdbRes (*handleListLP)(RdbParser *p, void *userData, RdbBulk listPack);
-    RdbRes (*handleListZL)(RdbParser *p, void *userData, RdbBulk ziplist);
+    RdbRes (*handleListLP)(RdbParser *p, void *userData, RdbBulk listLP);
+    RdbRes (*handleListZL)(RdbParser *p, void *userData, RdbBulk listZL);
     RdbRes (*handleListNode)(RdbParser *p, void *userData, RdbBulk node);
 
     /*** TODO: RdbHandlersStructCallbacks: handlerHashListPack, handleSetIntset, handleZsetListPack, handleFunction ***/
-    RdbRes (*handlerHashListPack)(RdbParser *p, void *userData, RdbBulk hash);
+    RdbRes (*handlerHashLP)(RdbParser *p, void *userData, RdbBulk hashLp);
     RdbRes (*handleSetIntset)(RdbParser *p, void *userData, RdbBulk intSet);
-    RdbRes (*handleSetListPack)(RdbParser *p, void *userData, RdbBulk listpack);
-    RdbRes (*handleSetZip)(RdbParser *p, void *userData, RdbBulk listpack);
-    RdbRes (*handleZsetListPack)(RdbParser *p, void *userData, RdbBulk zset);
+    RdbRes (*handleSetLP)(RdbParser *p, void *userData, RdbBulk setLP);
+    RdbRes (*handleSetZL)(RdbParser *p, void *userData, RdbBulk setZL);
+    RdbRes (*handleZsetLP)(RdbParser *p, void *userData, RdbBulk zsetLP);
     RdbRes (*handleFunction)(RdbParser *p, void *userData, RdbBulk func);
     /*** TODO: RdbHandlersStructCallbacks: stream stuff ... ***/
-    RdbRes (*handleStreamListPack)(RdbParser *p, void *userData, RdbBulk nodekey, RdbBulk listpack);
+    RdbRes (*handleStreamLP)(RdbParser *p, void *userData, RdbBulk nodekey, RdbBulk streamLP);
 
 } RdbHandlersStructCallbacks;
 

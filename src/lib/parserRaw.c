@@ -425,7 +425,7 @@ RdbStatus elementRawString(RdbParser *p) {
     }
 }
 
-RdbStatus elementRawZipList(RdbParser *p) {
+RdbStatus elementRawZiplist(RdbParser *p) {
     enum RAW_LIST_STATES {
         ST_RAW_ZIPLIST_START=0,
         ST_RAW_ZIPLIST_CALL_STR, /* Call PE_RAW_STRING as sub-element */
@@ -450,7 +450,7 @@ RdbStatus elementRawZipList(RdbParser *p) {
             subElementCallEnd(p, (char **) &encodedNode, &len);
 
             if (!ziplistValidateIntegrity(((unsigned char*)encodedNode), len, p->deepIntegCheck, NULL, NULL)) {
-                RDB_reportError(p, RDB_ERR_ZIP_LIST_INTEG_CHECK, "elementRawZipList() : ziplist integrity check failed");
+                RDB_reportError(p, RDB_ERR_ZIP_LIST_INTEG_CHECK, "elementRawZiplist() : ziplist integrity check failed");
                 return RDB_STATUS_ERROR;
             }
 
@@ -459,7 +459,7 @@ RdbStatus elementRawZipList(RdbParser *p) {
 
         default:
             RDB_reportError(p, RDB_ERR_ZIP_LIST_INVALID_STATE,
-                            "elementRawZipList() : invalid parsing element state: %d", p->elmCtx.state);
+                            "elementRawZiplist() : invalid parsing element state: %d", p->elmCtx.state);
             return RDB_STATUS_ERROR;
 
     }

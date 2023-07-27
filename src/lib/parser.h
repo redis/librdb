@@ -380,13 +380,13 @@ RdbStatus elementExpireTimeMsec(RdbParser *p);
 RdbStatus elementString(RdbParser *p);
 RdbStatus elementList(RdbParser *p);
 RdbStatus elementQuickList(RdbParser *p);
-RdbStatus elementZipList(RdbParser *p);
+RdbStatus elementZiplist(RdbParser *p);
 /*** Raw Parsing Elements ***/
 RdbStatus elementRawNewKey(RdbParser *p);
 RdbStatus elementRawEndKey(RdbParser *p);
 RdbStatus elementRawList(RdbParser *p);
 RdbStatus elementRawQuickList(RdbParser *p);
 RdbStatus elementRawString(RdbParser *p);
-RdbStatus elementRawZipList(RdbParser *p);
+RdbStatus elementRawZiplist(RdbParser *p);
 
 #endif /*LIBRDB_PARSER_H*/
