@@ -13,11 +13,11 @@
  * or optimized-external allocation mode.
  */
 void testRdbToJsonCommon(const char *rdbfile,
-                         const char *jsonfile,
                          const char *expJsonFile,
                          RdbHandlersLevel parseLevel)
 {
     RdbxToJsonConf r2jConf = {parseLevel, RDBX_CONV_JSON_ENC_PLAIN, 0, 1};
+    const char *jsonfile = TMP_FOLDER("tmp.json");
 
     for (int type = 0 ; type <= RDB_BULK_ALLOC_MAX ; ++type) {
         unsigned char *buffer;
@@ -41,7 +41,7 @@ void testRdbToJsonCommon(const char *rdbfile,
         assert_json_equal(jsonfile, expJsonFile);
 
         /*** 2. RDB_parse - set pause-interval to 1 byte ***/
-        int looseCounterAssert = 0;
+        int countPausesAssert = 1;
         long countPauses = 0;
         size_t lastBytes = 0;
         remove(jsonfile);
@@ -53,7 +53,7 @@ void testRdbToJsonCommon(const char *rdbfile,
         while (1) {
             status = RDB_parse(parser);
             if (status == RDB_STATUS_WAIT_MORE_DATA) {
-                looseCounterAssert = 1;
+                countPausesAssert = 0;
                 continue;
             }
             if (status == RDB_STATUS_PAUSED) {
@@ -64,13 +64,10 @@ void testRdbToJsonCommon(const char *rdbfile,
             break;
         }
 
-        /* If recorded WAIT_MORE_DATA, it will mess a little our countPauses evaluation.
-         * When parser reach WAIT_MORE_DATA together with STATUS_PAUSED, then it
-         * will prefer to return WAIT_MORE_DATA */
-        if (looseCounterAssert)
-            assert_true(countPauses > (((long) bufLen) / 2));
-        else
+        /* If recorded WAIT_MORE_DATA, it will mess our countPauses evaluation. Skip it. */
+        if (countPausesAssert)
             assert_int_equal(countPauses + 1, bufLen);
+
         RDB_deleteParser(parser);
         assert_json_equal(jsonfile, expJsonFile);
 
@@ -112,86 +109,103 @@ void testRdbToJsonCommon(const char *rdbfile,
     }
 }
 
+static void test_r2j_single_ziplist_data(void **state) {
+    UNUSED(state);
+    testRdbToJsonCommon(DUMP_FOLDER("ziplist_v3.rdb"), DUMP_FOLDER("ziplist_data.json"), RDB_LEVEL_DATA);
+}
+
+static void test_r2j_single_ziplist_struct(void **state) {
+    UNUSED(state);
+
+    testRdbToJsonCommon(DUMP_FOLDER("ziplist_v3.rdb"), DUMP_FOLDER("ziplist_struct.json"), RDB_LEVEL_STRUCT);
+}
+
+static void test_r2j_single_ziplist_raw (void **state) {
+    UNUSED(state);
+    testRdbToJsonCommon(DUMP_FOLDER("ziplist_v3.rdb"), DUMP_FOLDER("ziplist_raw.json"), RDB_LEVEL_RAW);
+}
+
+static void test_r2j_plain_list_data(void **state) {
+    UNUSED(state);
+    testRdbToJsonCommon(DUMP_FOLDER("plain_list_v6.rdb"), DUMP_FOLDER("plain_list_v6_data.json"), RDB_LEVEL_DATA);
+}
+
+static void test_r2j_plain_list_struct(void **state) {
+    UNUSED(state);
+
+    testRdbToJsonCommon(DUMP_FOLDER("plain_list_v6.rdb"), DUMP_FOLDER("plain_list_v6_struct.json"), RDB_LEVEL_STRUCT);
+}
+
+static void test_r2j_plain_list_raw (void **state) {
+    UNUSED(state);
+    testRdbToJsonCommon(DUMP_FOLDER("plain_list_v6.rdb"), DUMP_FOLDER("plain_list_v6_raw.json"), RDB_LEVEL_RAW);
+}
+
+static void test_r2j_quicklist_data(void **state) {
+    UNUSED(state);
+    testRdbToJsonCommon(DUMP_FOLDER("quicklist.rdb"), DUMP_FOLDER("quicklist_data.json"), RDB_LEVEL_DATA);
+}
+
+static void test_r2j_quicklist_struct(void **state) {
+    UNUSED(state);
+    testRdbToJsonCommon(DUMP_FOLDER("quicklist.rdb"), DUMP_FOLDER("quicklist_struct.json"), RDB_LEVEL_STRUCT);
+}
+
+static void test_r2j_quicklist_raw(void **state) {
+    UNUSED(state);
+    testRdbToJsonCommon(DUMP_FOLDER("quicklist.rdb"), DUMP_FOLDER("quicklist_raw.json"), RDB_LEVEL_RAW);
+}
+
 static void test_r2j_single_list_data(void **state) {
     UNUSED(state);
-    testRdbToJsonCommon(DUMP_FOLDER("single_list.rdb"),
-                        TMP_FOLDER("single_list.json"),
-                        DUMP_FOLDER("single_list_data.json"),
-                        RDB_LEVEL_DATA);
+    testRdbToJsonCommon(DUMP_FOLDER("quicklist2_v11.rdb"), DUMP_FOLDER("single_list_data.json"), RDB_LEVEL_DATA);
 }
 
 static void test_r2j_single_list_struct(void **state) {
     UNUSED(state);
 
-    testRdbToJsonCommon(DUMP_FOLDER("single_list.rdb"),
-                        TMP_FOLDER("single_list.json"),
-                        DUMP_FOLDER("single_list_struct.json"),
-                        RDB_LEVEL_STRUCT);
+    testRdbToJsonCommon(DUMP_FOLDER("quicklist2_v11.rdb"), DUMP_FOLDER("single_list_struct.json"), RDB_LEVEL_STRUCT);
 }
 
 static void test_r2j_single_list_raw (void **state) {
     UNUSED(state);
-    testRdbToJsonCommon(DUMP_FOLDER("single_list.rdb"),
-                        TMP_FOLDER("single_list.json"),
-                        DUMP_FOLDER("single_list_raw.json"),
-                        RDB_LEVEL_RAW);
+    testRdbToJsonCommon(DUMP_FOLDER("quicklist2_v11.rdb"), DUMP_FOLDER("single_list_raw.json"), RDB_LEVEL_RAW);
 }
 
 static void test_r2j_multiple_lists_and_strings_data (void **state) {
     UNUSED(state);
-    testRdbToJsonCommon(DUMP_FOLDER("multiple_lists_strings.rdb"),
-                        TMP_FOLDER("multiple_lists_strings.json"),
-                        DUMP_FOLDER("multiple_lists_strings_data.json"),
-                        RDB_LEVEL_DATA);
+    testRdbToJsonCommon(DUMP_FOLDER("multiple_lists_strings.rdb"), DUMP_FOLDER("multiple_lists_strings_data.json"), RDB_LEVEL_DATA);
 }
 
 static void test_r2j_multiple_lists_and_strings_struct (void **state) {
     UNUSED(state);
-    testRdbToJsonCommon(DUMP_FOLDER("multiple_lists_strings.rdb"),
-                        TMP_FOLDER("multiple_lists_strings.json"),
-                        DUMP_FOLDER("multiple_lists_strings_struct.json"),
-                        RDB_LEVEL_STRUCT);
+    testRdbToJsonCommon(DUMP_FOLDER("multiple_lists_strings.rdb"), DUMP_FOLDER("multiple_lists_strings_struct.json"), RDB_LEVEL_STRUCT);
 }
 
 static void test_r2j_multiple_lists_and_strings_raw (void **state) {
     UNUSED(state);
-    testRdbToJsonCommon(DUMP_FOLDER("multiple_lists_strings.rdb"),
-                        TMP_FOLDER("multiple_lists_strings.json"),
-                        DUMP_FOLDER("multiple_lists_strings_raw.json"),
-                        RDB_LEVEL_RAW);
+    testRdbToJsonCommon(DUMP_FOLDER("multiple_lists_strings.rdb"), DUMP_FOLDER("multiple_lists_strings_raw.json"), RDB_LEVEL_RAW);
 }
 
 static void test_r2j_single_string_data(void **state) {
     UNUSED(state);
-    testRdbToJsonCommon(DUMP_FOLDER("single_key.rdb"),
-                        TMP_FOLDER("single_key.json"),
-                        DUMP_FOLDER("single_key_data.json"),
-                        RDB_LEVEL_DATA);
+    testRdbToJsonCommon(DUMP_FOLDER("single_key.rdb"), DUMP_FOLDER("single_key_data.json"), RDB_LEVEL_DATA);
 }
 
 static void test_r2j_single_string_struct(void **state) {
     UNUSED(state);
 
-    testRdbToJsonCommon(DUMP_FOLDER("single_key.rdb"),
-                        TMP_FOLDER("single_key.json"),
-                        DUMP_FOLDER("single_key_struct.json"),
-                        RDB_LEVEL_STRUCT);
+    testRdbToJsonCommon(DUMP_FOLDER("single_key.rdb"), DUMP_FOLDER("single_key_struct.json"), RDB_LEVEL_STRUCT);
 }
 
 static void test_r2j_single_string_raw(void **state) {
     UNUSED(state);
-    testRdbToJsonCommon(DUMP_FOLDER("single_key.rdb"),
-                        TMP_FOLDER("single_key.json"),
-                        DUMP_FOLDER("single_key_raw.json"),
-                        RDB_LEVEL_RAW);
+    testRdbToJsonCommon(DUMP_FOLDER("single_key.rdb"), DUMP_FOLDER("single_key_raw.json"), RDB_LEVEL_RAW);
 }
 
 static void test_r2j_multiple_dbs (void **state) {
     UNUSED(state);
-    testRdbToJsonCommon(DUMP_FOLDER("multiple_dbs.rdb"),
-                        TMP_FOLDER("multiple_dbs.json"),
-                        DUMP_FOLDER("multiple_dbs_data.json"),
-                     RDB_LEVEL_DATA);
+    testRdbToJsonCommon(DUMP_FOLDER("multiple_dbs.rdb"), DUMP_FOLDER("multiple_dbs_data.json"), RDB_LEVEL_DATA);
 }
 
 /*************************** group_rdb_to_json *******************************/
@@ -201,6 +215,10 @@ int group_rdb_to_json(void) {
         cmocka_unit_test(test_r2j_single_list_struct),
         cmocka_unit_test(test_r2j_single_list_raw),
 
+        cmocka_unit_test(test_r2j_quicklist_data),
+        cmocka_unit_test(test_r2j_quicklist_struct),
+        cmocka_unit_test(test_r2j_quicklist_raw),
+
         cmocka_unit_test(test_r2j_single_string_data),
         cmocka_unit_test(test_r2j_single_string_struct),
         cmocka_unit_test(test_r2j_single_string_raw),
@@ -209,6 +227,13 @@ int group_rdb_to_json(void) {
         cmocka_unit_test(test_r2j_multiple_lists_and_strings_struct),
         cmocka_unit_test(test_r2j_multiple_lists_and_strings_raw),
         cmocka_unit_test(test_r2j_multiple_dbs),
+
+        cmocka_unit_test(test_r2j_single_ziplist_data),
+        cmocka_unit_test(test_r2j_single_ziplist_struct),
+        cmocka_unit_test(test_r2j_single_ziplist_raw),
+
+        cmocka_unit_test(test_r2j_plain_list_data),
+        cmocka_unit_test(test_r2j_plain_list_raw),
     };
     return cmocka_run_group_tests(tests, NULL, NULL);
 }

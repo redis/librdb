@@ -183,6 +183,7 @@ static RdbRes toRespHandlingNewKey(RdbParser *p, void *userData, RdbBulk key, Rd
         RDB_bulkCopyFree(p, ctx->keyCtx.key);
 
     /* handling new key */
+    ctx->crc = 0;
     ctx->keyCtx.info = *info;
     ctx->keyCtx.keyLen = RDB_bulkLen(p, key);
     if ((ctx->keyCtx.key = RDB_bulkClone(p, key)) == NULL)
@@ -271,23 +272,22 @@ static RdbRes toRespHandlingRawFrag(RdbParser *p, void *userData, RdbBulk frag) 
     RdbxToResp *ctx = userData;
     struct iovec iov[10];
     int iovs = 0;
+    size_t fragLen = RDB_bulkLen(p, frag);
 
-    ctx->crc = crc64(ctx->crc, (unsigned char *) frag, RDB_bulkLen(p, frag));
+    ctx->crc = crc64(ctx->crc, (unsigned char *) frag , fragLen);
 
     if (likely(!(ctx->rawCtx.sentFirstFrag))) {
         char keyLenStr[64], totalLenStr[64];
 
         ctx->rawCtx.sentFirstFrag = 1;
-
         IOV_CONST_STR(&iov[iovs++], "*4\r\n$7\r\nRESTORE\r\n$");                /* RESTORE */
         iov_stringLen(&iov[iovs++], ctx->keyCtx.keyLen, keyLenStr);             /* write key len */
         IOV_STRING(&iov[iovs++], ctx->keyCtx.key, ctx->keyCtx.keyLen);          /* write key */
         IOV_CONST_STR(&iov[iovs++], "\r\n$1\r\n0\r\n$");                        /* newline + write TTL */
         iov_stringLen(&iov[iovs++], ctx->rawCtx.valSize + 10, totalLenStr);     /* write value length */
-        IOV_STRING(&iov[iovs++], frag, RDB_bulkLen(p, frag));                   /* write value */
-    } else {
-        IOV_STRING(&iov[iovs++], frag, RDB_bulkLen(p, frag));                   /* write value */
     }
+    IOV_STRING(&iov[iovs++], frag, fragLen);                                    /* write value */
+
     return writevWrap(ctx, iov, iovs, 1, 0);
 }
 

@@ -8,6 +8,7 @@
 #include "../../deps/redis/endianconv.h"
 #include "../../deps/redis/util.h"
 #include "../../deps/redis/listpack.h"
+#include "../../deps/redis/ziplist.h"
 
 #define MAX_STRING_WRITE_CHUNK (1024*63)
 #define DATA_SIZE_UNKNOWN_AHEAD 0
@@ -45,6 +46,45 @@ void parserRawRelease(RdbParser *p) {
             bulkUnmanagedFree(p, ctx->bulkArray + i);
     }
     RDB_free(p, ctx->bulkArray);
+}
+
+/****************************************************************
+ * Sub-Element parsing
+ *
+ * The parser can handle one level of nested parsing-elements (PE), whereby a PE
+ * may be called by another PE and control is returned to the caller once the
+ * parsing of sub-element is complete.
+ *
+ * Currently, this functionality is only adapted and utilized by raw string element
+ * which can also run as sub-element of other data-types. It takes care to write the
+ * processed string to raw-aggregator, as part of RESTORE of current command.
+ *
+ * In addition it returns the string decoded by allocating bulkUnmanagedAlloc()
+ * (The caller won't need to release returned data yet restrictd to use it within
+ * its current parsing-element state).
+ ****************************************************************/
+
+RdbStatus subElementCall(RdbParser *p, ParsingElementType next, int returnState) {
+
+    assert(p->callSubElm.callerElm == PE_MAX); /* prev sub-element flow ended */
+
+    /* release bulk from previous flow of subElement */
+    bulkUnmanagedFree(p, &p->callSubElm.bulkResult);
+
+    p->callSubElm.callerElm = p->parsingElement;
+    p->callSubElm.stateToReturn = returnState;
+    return nextParsingElement(p, next);
+}
+
+RdbStatus subElementReturn(RdbParser *p, BulkInfo *bulkResult) {
+    p->callSubElm.bulkResult = *bulkResult;
+    return nextParsingElementState(p, p->callSubElm.callerElm, p->callSubElm.stateToReturn);
+}
+
+void subElementCallEnd(RdbParser *p, RdbBulk *bulkResult, size_t *len) {
+    *bulkResult = p->callSubElm.bulkResult.ref;
+    *len = p->callSubElm.bulkResult.len;
+    p->callSubElm.callerElm = PE_MAX; /* mark as done */
 }
 
 /*** Parsing Elements ***/
@@ -89,6 +129,61 @@ RdbStatus elementRawEndKey(RdbParser *p) {
 }
 
 RdbStatus elementRawList(RdbParser *p) {
+    enum RAW_LIST_STATES {
+        ST_RAW_LIST_HEADER=0, /* Retrieve number of nodes */
+        ST_RAW_LIST_NEXT_NODE_CALL_STR, /* Process next node. Call PE_RAW_STRING as sub-element */
+        ST_RAW_LIST_NEXT_NODE_STR_RETURN, /* integ check of the returned string from PE_RAW_STRING */
+    } ;
+
+    ElementRawListCtx *listCtx = &p->elmCtx.rawList;
+    RawContext *rawCtx = &p->rawCtx;
+
+    switch (p->elmCtx.state) {
+
+        case ST_RAW_LIST_HEADER: {
+            int headerLen = 0;
+
+            aggMakeRoom(p, 10); /* worse case 9 bytes for len */
+
+            IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &listCtx->numNodes,
+                (unsigned char *) rawCtx->at, &headerLen));
+
+            /*** ENTER SAFE STATE ***/
+
+            IF_NOT_OK_RETURN(cbHandleBegin(p, DATA_SIZE_UNKNOWN_AHEAD));
+            IF_NOT_OK_RETURN(aggUpdateWrittenCbFrag(p, headerLen));
+
+        }
+
+        updateElementState(p, ST_RAW_LIST_NEXT_NODE_CALL_STR); /* fall-thru */
+
+        case ST_RAW_LIST_NEXT_NODE_CALL_STR:
+            return subElementCall(p, PE_RAW_STRING, ST_RAW_LIST_NEXT_NODE_STR_RETURN);
+
+        case ST_RAW_LIST_NEXT_NODE_STR_RETURN: {
+
+            /*** ENTER SAFE STATE (no rdb read)***/
+
+            size_t len;
+            unsigned char *encodedNode;
+
+            /* return from sub-element string parsing */
+            subElementCallEnd(p, (char **) &encodedNode, &len);
+
+            if (--listCtx->numNodes == 0)
+                return nextParsingElement(p, PE_RAW_END_KEY); /* done */
+
+            return updateElementState(p, ST_RAW_LIST_NEXT_NODE_CALL_STR);
+        }
+
+        default:
+            RDB_reportError(p, RDB_ERR_PLAIN_LIST_INVALID_STATE,
+                            "elementRawList() : invalid parsing element state: %d", p->elmCtx.state);
+            return RDB_STATUS_ERROR;
+    }
+}
+
+RdbStatus elementRawQuickList(RdbParser *p) {
 
     enum RAW_LIST_STATES {
         ST_RAW_LIST_HEADER=0, /* Retrieve number of nodes */
@@ -156,12 +251,11 @@ RdbStatus elementRawList(RdbParser *p) {
                     ret = lpValidateIntegrity(encodedNode, len, p->deepIntegCheck,
                                               NULL, NULL);
                 else
-                    ret = 0;
-                   /* TODO:  ret = ziplistValidateIntegrity((unsigned char *) encoded, sdslen(encoded), p->deepIntegCheck, NULL, NULL); */
+                    ret = ziplistValidateIntegrity(encodedNode, len, p->deepIntegCheck, NULL, NULL);
 
                 if (!ret) {
                     RDB_reportError(p, RDB_ERR_QUICK_LIST_INTEG_CHECK,
-                                   "elementRawList(1): Quicklist integrity check failed");
+                                   "elementRawQuickList(1): Quicklist integrity check failed");
                     return RDB_STATUS_ERROR;
                 }
             }
@@ -174,7 +268,7 @@ RdbStatus elementRawList(RdbParser *p) {
 
         default:
             RDB_reportError(p, RDB_ERR_QUICK_LIST_INVALID_STATE,
-                           "elementRawList() : invalid parsing element state");
+                           "elementRawQuickList() : invalid parsing element state: %d", p->elmCtx.state);
             return RDB_STATUS_ERROR;
     }
 }
@@ -208,10 +302,10 @@ RdbStatus elementRawString(RdbParser *p) {
                     case RDB_ENC_INT16: strCtx->len = 2; break;
                     case RDB_ENC_INT32: strCtx->len = 4; break;
                     case RDB_ENC_LZF:
-                        IF_NOT_OK_RETURN(rdbLoadLen(p, &strCtx->isencoded, &strCtx->len,
-                            (unsigned char *) rawCtx->at + headerlen, &headerlen));
-                        IF_NOT_OK_RETURN(rdbLoadLen(p, &strCtx->isencoded, &strCtx->uclen,
-                            (unsigned char *) rawCtx->at + headerlen, &headerlen));
+                        IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &strCtx->len,
+                                                    (unsigned char *) rawCtx->at + headerlen, &headerlen));
+                        IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &strCtx->uclen,
+                                                    (unsigned char *) rawCtx->at + headerlen, &headerlen));
                         break;
                     default:
                         RDB_reportError(p, RDB_ERR_STRING_UNKNOWN_ENCODING_TYPE,
@@ -267,6 +361,13 @@ RdbStatus elementRawString(RdbParser *p) {
             BulkInfo *binfoEnc;
             BulkInfo binfoDec;
 
+            /* Since String (sub)element is called on behalf another element. it loads the raw string
+             * into the common aggregated buffers and optionally decompress the data via the returned value.
+             * If `aggType` will only partially aggregate the data, then there is a chance that calling
+             * aggUpdateWrittenCbFrag() will release aggregated data before it will reach back to the
+             * caller element */
+            assert(rawCtx->aggType == AGG_TYPE_ENTIRE_DATA);
+
             /* Populate ctx->bulkArray with data and ensure that flow can handle
              * wait-more-data (rollback) in the middle by assisting BULK_TYPE_REF */
             IF_NOT_OK_RETURN(aggMakeRoom(p, strCtx->len));
@@ -278,7 +379,9 @@ RdbStatus elementRawString(RdbParser *p) {
             IF_NOT_OK_RETURN(aggUpdateWrittenCbFrag(p, strCtx->len));
 
             if (!(strCtx->isencoded)) {
-                return subElementReturn(p, binfoEnc /* no decoding required */);
+                BulkInfo binfoEncRef;
+                bulkUnmanagedAlloc(p, binfoEnc->len, UNMNG_RQ_ALLOC_REF, binfoEnc->ref, &binfoEncRef);
+                return subElementReturn(p, &binfoEncRef /* no decoding required */);
             }
 
             if (strCtx->encoding <= RDB_ENC_INT32) {
@@ -320,6 +423,49 @@ RdbStatus elementRawString(RdbParser *p) {
             return RDB_STATUS_ERROR;
         }
     }
+}
+
+RdbStatus elementRawZiplist(RdbParser *p) {
+    enum RAW_LIST_STATES {
+        ST_RAW_ZIPLIST_START=0,
+        ST_RAW_ZIPLIST_CALL_STR, /* Call PE_RAW_STRING as sub-element */
+        ST_RAW_ZIPLIST_RET_FROM_STR, /* integ check of the returned string from PE_RAW_STRING */
+    };
+
+    switch  (p->elmCtx.state) {
+        case ST_RAW_ZIPLIST_START:
+            /* take care string won't propagate for having integrity check */
+            IF_NOT_OK_RETURN(cbHandleBegin(p, DATA_SIZE_UNKNOWN_AHEAD));
+
+            /* call raw string as subelement */
+            return subElementCall(p, PE_RAW_STRING, ST_RAW_ZIPLIST_RET_FROM_STR);
+
+        case ST_RAW_ZIPLIST_RET_FROM_STR: {
+            /*** ENTER SAFE STATE (no rdb read)***/
+
+            size_t len;
+            unsigned char *encodedNode;
+
+            /* return from sub-element string parsing */
+            subElementCallEnd(p, (char **) &encodedNode, &len);
+
+            if (!ziplistValidateIntegrity(((unsigned char*)encodedNode), len, p->deepIntegCheck, NULL, NULL)) {
+                RDB_reportError(p, RDB_ERR_ZIP_LIST_INTEG_CHECK, "elementRawZiplist() : ziplist integrity check failed");
+                return RDB_STATUS_ERROR;
+            }
+
+            return nextParsingElement(p, PE_RAW_END_KEY); /* done */
+        }
+
+        default:
+            RDB_reportError(p, RDB_ERR_ZIP_LIST_INVALID_STATE,
+                            "elementRawZiplist() : invalid parsing element state: %d", p->elmCtx.state);
+            return RDB_STATUS_ERROR;
+
+    }
+
+    UNUSED(p);
+    return RDB_STATUS_OK;
 }
 
 /*** various functions ***/
@@ -398,7 +544,7 @@ static RdbStatus aggMakeRoom(RdbParser *p, size_t numBytesRq) {
 
     if (unlikely(p->maxRawLen < ctx->totalSize + numBytesRq)) {
         RDB_reportError(p, RDB_ERR_MAX_RAW_LEN_EXCEEDED_FOR_KEY, "Maximum raw length exceeded for key (len=%lu)",
-                           ctx->totalSize + numBytesRq);
+                        ctx->totalSize + numBytesRq);
         return RDB_STATUS_ERROR;
     }
 

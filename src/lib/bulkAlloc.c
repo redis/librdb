@@ -169,6 +169,12 @@ BulkInfo *bulkPoolAlloc(RdbParser *p, size_t len, AllocTypeRq typeRq, char *refB
         binfo = bulkPoolEnqueue(pool);
         BulkType type = bulkPoolResolveAllocType(p, typeRq);
         bulkPoolAllocNew(p, len, type, refBuf, binfo);
+
+        /* if requested ref another memory but forced to allocate a new buffer since configured
+         * RDB_BULK_ALLOC_EXTERN, then copy referenced data to the new allocated buffer */
+        if (unlikely(typeRq == RQ_ALLOC_APP_BULK_REF) && (type != BULK_TYPE_REF))
+            memcpy(binfo->ref, refBuf, len);
+
     } else {
         binfo = &(pool->queue[pool->readIdx]);
 
@@ -280,6 +286,11 @@ RdbBulkCopy bulkClone(RdbParser *p, BulkInfo *binfo) {
 int bulkPoolIsNewNextAllocDbg(RdbParser *p) {
     BulkPool *pool = p->cache;
     return (pool->writeIdx == pool->readIdx) ? 1 : 0;
+}
+
+void bulkPoolAssertFlushedDbg(RdbParser *p) {
+    BulkPool *pool = p->cache;
+    assert(pool->writeIdx == 0);
 }
 
 static inline BulkInfo *bulkPoolEnqueue(BulkPool *pool) {
@@ -405,7 +416,8 @@ static inline RdbBulk bulkHeapIncrRef(RdbBulk b) {
     return b;
 }
 
-/*** BulkUnmanaged ***/
+/*** BulkUnmanaged - not to be deleted on state transition ***/
+
 
 static inline BulkType bulkUnmanagedResolveAllocType(RdbParser *p, AllocUnmngTypeRq rq) {
     static const BulkType rqAlloc2bulkType[UNMNG_RQ_ALLOC_MAX][RDB_BULK_ALLOC_MAX] = {
@@ -436,6 +448,14 @@ static inline BulkType bulkUnmanagedResolveAllocType(RdbParser *p, AllocUnmngTyp
                  * must obey, even at the cost of another copy */
                 BULK_TYPE_EXTERN,    /* RDB_BULK_ALLOC_EXTERN */
 
+                BULK_TYPE_REF,       /* RDB_BULK_ALLOC_EXTERN_OPT */
+        },
+
+        /* parser request REF for internal use. Trivially released by bulkUnmanagedFree() */
+        [UNMNG_RQ_ALLOC_REF] = {
+                BULK_TYPE_REF,       /* RDB_BULK_ALLOC_STACK */
+                BULK_TYPE_REF,       /* RDB_BULK_ALLOC_HEAP */
+                BULK_TYPE_REF,       /* RDB_BULK_ALLOC_EXTERN */
                 BULK_TYPE_REF,       /* RDB_BULK_ALLOC_EXTERN_OPT */
         },
 

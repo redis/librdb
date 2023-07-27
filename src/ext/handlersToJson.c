@@ -277,34 +277,6 @@ static RdbRes handlingList(RdbParser *p, void *userData, RdbBulk str) {
 
 /*** Handling struct ***/
 
-static RdbRes handlingQListNode(RdbParser *p, void *userData, RdbBulk listNode) {
-    RdbxToJson *ctx = userData;
-
-    if (ctx->state == R2J_IN_KEY) {
-
-        /* output json part */
-        ouput_fprintf(ctx, "[");
-        outputQuotedEscaping(ctx, listNode, RDB_bulkLen(p, listNode));
-
-        /* update new state */
-        ctx->state = R2J_IN_LIST;
-
-    } else if (ctx->state == R2J_IN_LIST) {
-
-        /* output json part */
-        ouput_fprintf(ctx, ",");
-        outputQuotedEscaping(ctx, listNode, RDB_bulkLen(p, listNode));
-
-        /* state unchanged */
-
-    } else {
-        RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
-                        "handlingList(): Invalid state value: %d", ctx->state);
-        return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
-    }
-
-    return RDB_OK;
-}
 
 /*** Handling raw ***/
 
@@ -352,8 +324,9 @@ RdbxToJson *RDBX_createHandlersToJson(RdbParser *p, const char *filename, RdbxTo
         RDB_createHandlersData(p, &callbacks.dataCb, ctx, deleteRdbToJsonCtx);
     } else  if (ctx->conf.level == RDB_LEVEL_STRUCT) {
         callbacks.structCb.handleStringValue = handlingString;
-        callbacks.structCb.handleQListNode = handlingQListNode;
-        callbacks.structCb.handlePlainNode = handlingList;
+        callbacks.structCb.handleListLP = handlingList;
+        callbacks.structCb.handleListZL = handlingList;
+        callbacks.structCb.handleListNode = handlingList;
         RDB_createHandlersStruct(p, &callbacks.structCb, ctx, deleteRdbToJsonCtx);
     } else if (ctx->conf.level == RDB_LEVEL_RAW) {
         callbacks.rawCb.handleFrag = handlingFrag;

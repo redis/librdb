@@ -19,7 +19,7 @@ static void test_pause_by_handlers_callback(void **state) {
     RdbHandlersRawCallbacks cb = { .handleAuxField = handle_pause_aux_field_pause };
     RdbParser *parser = RDB_createParserRdb(NULL);
     RDB_setLogLevel(parser, RDB_LOG_ERROR);
-    assert_non_null(RDBX_createReaderFile(parser, "./test/dumps/single_list.rdb"));
+    assert_non_null(RDBX_createReaderFile(parser, "./test/dumps/quicklist2_v11.rdb"));
     assert_non_null(RDB_createHandlersRaw(parser, &cb, user_data, NULL));
 
     while ((status = RDB_parse(parser)) != RDB_STATUS_OK) {

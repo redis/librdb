@@ -69,8 +69,6 @@ void bulkPoolRelease(RdbParser *p);
 BulkInfo *bulkPoolAlloc(RdbParser *p, size_t len, AllocTypeRq typeRq, char *refBuf);
 void bulkPoolFlush(RdbParser *p);
 void bulkPoolRollback(RdbParser *p);
-void bulkPoolPrintDbg(RdbParser *p);
-int bulkPoolIsNewNextAllocDbg(RdbParser *p);
 
 /*** BulkUnmanaged ***/
 void bulkUnmanagedAlloc(RdbParser *p, size_t len, AllocUnmngTypeRq rq, char *refBuf, BulkInfo *bi);
@@ -78,5 +76,10 @@ void bulkUnmanagedFree(RdbParser *p, BulkInfo *binfo);
 
 /* cloning RdbBulk */
 RdbBulkCopy bulkClone(RdbParser *p, BulkInfo *binfo);
+
+/* debug */
+void bulkPoolPrintDbg(RdbParser *p);
+int bulkPoolIsNewNextAllocDbg(RdbParser *p);
+void bulkPoolAssertFlushedDbg(RdbParser *p);
 
 #endif /*BULK_ALLOC_H*/

@@ -21,7 +21,6 @@ typedef struct RdbReader RdbReader;
 typedef struct RdbParser RdbParser;
 typedef struct RdbHandlers RdbHandlers;
 typedef struct RdbMemAlloc RdbMemAlloc;
-typedef struct rax rax;  /* redis DS */
 
 /****************************************************************
  * Enums & Typedefs
@@ -62,8 +61,11 @@ typedef enum RdbRes {
     RDB_ERR_NOT_SUPPORTED_RDB_ENCODING_TYPE,
     RDB_ERR_UNKNOWN_RDB_ENCODING_TYPE,
     RDB_ERR_QUICK_LIST_INTEG_CHECK,
+    RDB_ERR_ZIP_LIST_INTEG_CHECK,
     RDB_ERR_STRING_INVALID_STATE,
+    RDB_ERR_PLAIN_LIST_INVALID_STATE,
     RDB_ERR_QUICK_LIST_INVALID_STATE,
+    RDB_ERR_ZIP_LIST_INVALID_STATE,
     RDB_ERR_INVALID_BULK_ALLOC_TYPE,
     RDB_ERR_INVALID_BULK_CLONE_REQUEST,
     RDB_ERR_INVALID_BULK_LENGTH_REQUEST,
@@ -191,18 +193,19 @@ typedef struct RdbHandlersRawCallbacks {
 typedef struct RdbHandlersStructCallbacks {
     HANDLERS_COMMON_CALLBACKS
     RdbRes (*handleStringValue)(RdbParser *p, void *userData, RdbBulk str);
-    RdbRes (*handleQListNode)(RdbParser *p, void *userData, RdbBulk listNode);
-    RdbRes (*handlePlainNode)(RdbParser *p, void *userData, RdbBulk node);
+    RdbRes (*handleListLP)(RdbParser *p, void *userData, RdbBulk listLP);
+    RdbRes (*handleListZL)(RdbParser *p, void *userData, RdbBulk listZL);
+    RdbRes (*handleListNode)(RdbParser *p, void *userData, RdbBulk node);
 
     /*** TODO: RdbHandlersStructCallbacks: handlerHashListPack, handleSetIntset, handleZsetListPack, handleFunction ***/
-    RdbRes (*handlerHashListPack)(RdbParser *p, void *userData, RdbBulk hash);
+    RdbRes (*handlerHashLP)(RdbParser *p, void *userData, RdbBulk hashLp);
     RdbRes (*handleSetIntset)(RdbParser *p, void *userData, RdbBulk intSet);
-    RdbRes (*handleSetListPack)(RdbParser *p, void *userData, RdbBulk listpack);
-    RdbRes (*handleSetZip)(RdbParser *p, void *userData, RdbBulk listpack);
-    RdbRes (*handleZsetListPack)(RdbParser *p, void *userData, RdbBulk zset);
+    RdbRes (*handleSetLP)(RdbParser *p, void *userData, RdbBulk setLP);
+    RdbRes (*handleSetZL)(RdbParser *p, void *userData, RdbBulk setZL);
+    RdbRes (*handleZsetLP)(RdbParser *p, void *userData, RdbBulk zsetLP);
     RdbRes (*handleFunction)(RdbParser *p, void *userData, RdbBulk func);
     /*** TODO: RdbHandlersStructCallbacks: stream stuff ... ***/
-    RdbRes (*handleStreamListPack)(RdbParser *p, void *userData, RdbBulk nodekey, RdbBulk listpack);
+    RdbRes (*handleStreamLP)(RdbParser *p, void *userData, RdbBulk nodekey, RdbBulk streamLP);
 
 } RdbHandlersStructCallbacks;
 
@@ -288,7 +291,7 @@ _LIBRDB_API RdbHandlers *RDB_createHandlersData(RdbParser *p,
  * Handlers as Filters. Use this function only from inside Handlers callbacks.
  * As reference, see implementation of RDBX_createHandlersFilterKey
  ****************************************************************/
- _LIBRDB_API void RDB_dontPropagate(RdbParser *p);
+_LIBRDB_API void RDB_dontPropagate(RdbParser *p);
 
 /****************************************************************
  * Parser setters & getters

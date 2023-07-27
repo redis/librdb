@@ -2,6 +2,9 @@ ifeq ($(BUILD_TLS),yes)
 export BUILD_TLS
 endif
 
+# DESTDIR Specifies library installation folder
+DESTDIR?=/usr/local/lib
+
 all:
 	$(MAKE) -C deps -f Makefile all
 	$(MAKE) -C src/lib -f Makefile all
@@ -42,6 +45,10 @@ test:
 valgrind:
 	./runtests -v
 
+install: lib
+	cp lib/librdb.so $(DESTDIR)
+	cp lib/librdb-ext.so $(DESTDIR)
+
 help:
 	@echo "Target rules:"
 	@echo "    all        - Build parser libraries, tests, and run tests."
@@ -51,6 +58,7 @@ help:
 	@echo "    example    - Run the example."
 	@echo "    clean      - Clean without deps folders"
 	@echo "    distclean  - Clean including deps folders"
+	@echo "    install    - Build parser libraries and copy to DESTDIR."
 	@echo "    help       - Prints this message."
 
 
