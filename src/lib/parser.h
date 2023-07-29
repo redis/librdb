@@ -75,6 +75,7 @@ typedef struct BulkInfo {
     void *ref;
     size_t len;    /* allocation size, not including '\0' at the end */
     size_t written;
+    struct BulkInfo *next;
 } BulkInfo;
 
 /* Allocation requests from the parser to BulkPool */
