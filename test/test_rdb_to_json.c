@@ -141,6 +141,66 @@ static void test_r2j_plain_list_raw (void **state) {
     testRdbToJsonCommon(DUMP_FOLDER("plain_list_v6.rdb"), DUMP_FOLDER("plain_list_v6_raw.json"), RDB_LEVEL_RAW);
 }
 
+static void test_r2j_plain_hash_data(void **state) {
+    UNUSED(state);
+    testRdbToJsonCommon(DUMP_FOLDER("plain_hash_v3.rdb"), DUMP_FOLDER("plain_hash_data.json"), RDB_LEVEL_DATA);
+}
+
+static void test_r2j_plain_hash_struct(void **state) {
+    UNUSED(state);
+    testRdbToJsonCommon(DUMP_FOLDER("plain_hash_v3.rdb"), DUMP_FOLDER("plain_hash_struct.json"), RDB_LEVEL_STRUCT);
+}
+
+static void test_r2j_plain_hash_raw (void **state) {
+    UNUSED(state);
+    testRdbToJsonCommon(DUMP_FOLDER("plain_hash_v3.rdb"), DUMP_FOLDER("plain_hash_raw.json"), RDB_LEVEL_RAW);
+}
+
+static void test_r2j_hash_zl_data(void **state) {
+    UNUSED(state);
+    testRdbToJsonCommon(DUMP_FOLDER("hash_zl_v6.rdb"), DUMP_FOLDER("hash_zl_v6_data.json"), RDB_LEVEL_DATA);
+}
+
+static void test_r2j_hash_zl_struct(void **state) {
+    UNUSED(state);
+    testRdbToJsonCommon(DUMP_FOLDER("hash_zl_v6.rdb"), DUMP_FOLDER("hash_zl_v6_struct.json"), RDB_LEVEL_STRUCT);
+}
+
+static void test_r2j_hash_zl_raw (void **state) {
+    UNUSED(state);
+    testRdbToJsonCommon(DUMP_FOLDER("hash_zl_v6.rdb"), DUMP_FOLDER("hash_zl_v6_raw.json"), RDB_LEVEL_RAW);
+}
+
+static void test_r2j_hash_lp_data(void **state) {
+    UNUSED(state);
+    testRdbToJsonCommon(DUMP_FOLDER("hash_lp_v11.rdb"), DUMP_FOLDER("hash_lp_v11_data.json"), RDB_LEVEL_DATA);
+}
+
+static void test_r2j_hash_lp_struct(void **state) {
+    UNUSED(state);
+    testRdbToJsonCommon(DUMP_FOLDER("hash_lp_v11.rdb"), DUMP_FOLDER("hash_lp_v11_struct.json"), RDB_LEVEL_STRUCT);
+}
+
+static void test_r2j_hash_lp_raw (void **state) {
+    UNUSED(state);
+    testRdbToJsonCommon(DUMP_FOLDER("hash_lp_v11.rdb"), DUMP_FOLDER("hash_lp_v11_raw.json"), RDB_LEVEL_RAW);
+}
+
+static void test_r2j_hash_zm_data(void **state) {
+    UNUSED(state);
+    testRdbToJsonCommon(DUMP_FOLDER("hash_zm_v2.rdb"), DUMP_FOLDER("hash_zm_v2_data.json"), RDB_LEVEL_DATA);
+}
+
+static void test_r2j_hash_zm_struct(void **state) {
+    UNUSED(state);
+    testRdbToJsonCommon(DUMP_FOLDER("hash_zm_v2.rdb"), DUMP_FOLDER("hash_zm_v2_struct.json"), RDB_LEVEL_STRUCT);
+}
+
+static void test_r2j_hash_zm_raw(void **state) {
+    UNUSED(state);
+    testRdbToJsonCommon(DUMP_FOLDER("hash_zm_v2.rdb"), DUMP_FOLDER("hash_zm_v2_raw.json"), RDB_LEVEL_RAW);
+}
+
 static void test_r2j_quicklist_data(void **state) {
     UNUSED(state);
     testRdbToJsonCommon(DUMP_FOLDER("quicklist.rdb"), DUMP_FOLDER("quicklist_data.json"), RDB_LEVEL_DATA);
@@ -211,6 +271,12 @@ static void test_r2j_multiple_dbs (void **state) {
 /*************************** group_rdb_to_json *******************************/
 int group_rdb_to_json(void) {
     const struct CMUnitTest tests[] = {
+        /* string */
+        cmocka_unit_test(test_r2j_single_string_data),
+        cmocka_unit_test(test_r2j_single_string_struct),
+        cmocka_unit_test(test_r2j_single_string_raw),
+
+        /* list */
         cmocka_unit_test(test_r2j_single_list_data),
         cmocka_unit_test(test_r2j_single_list_struct),
         cmocka_unit_test(test_r2j_single_list_raw),
@@ -219,21 +285,36 @@ int group_rdb_to_json(void) {
         cmocka_unit_test(test_r2j_quicklist_struct),
         cmocka_unit_test(test_r2j_quicklist_raw),
 
-        cmocka_unit_test(test_r2j_single_string_data),
-        cmocka_unit_test(test_r2j_single_string_struct),
-        cmocka_unit_test(test_r2j_single_string_raw),
-
-        cmocka_unit_test(test_r2j_multiple_lists_and_strings_data),
-        cmocka_unit_test(test_r2j_multiple_lists_and_strings_struct),
-        cmocka_unit_test(test_r2j_multiple_lists_and_strings_raw),
-        cmocka_unit_test(test_r2j_multiple_dbs),
-
         cmocka_unit_test(test_r2j_single_ziplist_data),
         cmocka_unit_test(test_r2j_single_ziplist_struct),
         cmocka_unit_test(test_r2j_single_ziplist_raw),
 
         cmocka_unit_test(test_r2j_plain_list_data),
         cmocka_unit_test(test_r2j_plain_list_raw),
+
+        /* hash */
+        cmocka_unit_test(test_r2j_plain_hash_data),
+        cmocka_unit_test(test_r2j_plain_hash_struct),
+        cmocka_unit_test(test_r2j_plain_hash_raw),
+
+        cmocka_unit_test(test_r2j_hash_zl_data),
+        cmocka_unit_test(test_r2j_hash_zl_struct),
+        cmocka_unit_test(test_r2j_hash_zl_raw),
+
+        cmocka_unit_test(test_r2j_hash_lp_data),
+        cmocka_unit_test(test_r2j_hash_lp_struct),
+        cmocka_unit_test(test_r2j_hash_lp_raw),
+
+        cmocka_unit_test(test_r2j_hash_zm_data),
+        cmocka_unit_test(test_r2j_hash_zm_struct),
+        cmocka_unit_test(test_r2j_hash_zm_raw),
+
+            /* misc */
+        cmocka_unit_test(test_r2j_multiple_lists_and_strings_data),
+        cmocka_unit_test(test_r2j_multiple_lists_and_strings_struct),
+        cmocka_unit_test(test_r2j_multiple_lists_and_strings_raw),
+        cmocka_unit_test(test_r2j_multiple_dbs),
+
     };
     return cmocka_run_group_tests(tests, NULL, NULL);
 }

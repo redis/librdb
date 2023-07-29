@@ -275,8 +275,48 @@ static RdbRes handlingList(RdbParser *p, void *userData, RdbBulk str) {
     return RDB_OK;
 }
 
+static RdbRes handlingHash(RdbParser *p, void *userData, RdbBulk field, RdbBulk value, uint64_t totalNumElm) {
+    UNUSED(totalNumElm);
+    RdbxToJson *ctx = userData;
+
+    if (ctx->state == R2J_IN_KEY) {
+
+        /* output json part */
+        ouput_fprintf(ctx, "{");
+        outputQuotedEscaping(ctx, field, RDB_bulkLen(p, field));
+        ouput_fprintf(ctx, ":");
+        outputQuotedEscaping(ctx, value, RDB_bulkLen(p, value));
+        /* update new state */
+        ctx->state = R2J_IN_HASH;
+    } else if (ctx->state == R2J_IN_HASH) {
+        /* output json part */
+        ouput_fprintf(ctx, ",");
+        outputQuotedEscaping(ctx, field, RDB_bulkLen(p, field));
+        ouput_fprintf(ctx, ":");
+        outputQuotedEscaping(ctx, field, RDB_bulkLen(p, field));
+
+    } else {
+        RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
+                        "handlingList(): Invalid state value: %d", ctx->state);
+        return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
+    }
+
+    return RDB_OK;
+}
+
 /*** Handling struct ***/
 
+static RdbRes handlingStruct(RdbParser *p, void *userData, RdbBulk value) {
+    UNUSED(p);
+    RdbxToJson *ctx = userData;
+
+    /* output json part */
+    ouput_fprintf(ctx, "[");
+    outputQuotedEscaping(ctx, value, RDB_bulkLen(p, value));
+    ouput_fprintf(ctx, "]");
+
+    return RDB_OK;
+}
 
 /*** Handling raw ***/
 
@@ -321,12 +361,19 @@ RdbxToJson *RDBX_createHandlersToJson(RdbParser *p, const char *filename, RdbxTo
     if (ctx->conf.level == RDB_LEVEL_DATA) {
         callbacks.dataCb.handleStringValue = handlingString;
         callbacks.dataCb.handleListElement = handlingList;
+        callbacks.dataCb.handleHashElement = handlingHash;
         RDB_createHandlersData(p, &callbacks.dataCb, ctx, deleteRdbToJsonCtx);
     } else  if (ctx->conf.level == RDB_LEVEL_STRUCT) {
         callbacks.structCb.handleStringValue = handlingString;
-        callbacks.structCb.handleListLP = handlingList;
-        callbacks.structCb.handleListZL = handlingList;
-        callbacks.structCb.handleListNode = handlingList;
+        /* list */
+        callbacks.structCb.handleListPlain = handlingList;
+        callbacks.structCb.handleListLP = handlingStruct;
+        callbacks.structCb.handleListZL = handlingStruct;
+        /* hash */
+        callbacks.structCb.handleHashPlain = handlingHash;
+        callbacks.structCb.handleHashZL = handlingStruct;
+        callbacks.structCb.handleHashLP = handlingStruct;
+        callbacks.structCb.handleHashZM = handlingStruct;
         RDB_createHandlersStruct(p, &callbacks.structCb, ctx, deleteRdbToJsonCtx);
     } else if (ctx->conf.level == RDB_LEVEL_RAW) {
         callbacks.rawCb.handleFrag = handlingFrag;

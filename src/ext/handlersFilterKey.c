@@ -45,6 +45,11 @@ static RdbRes filterHandlingList(RdbParser *p, void *userData, RdbBulk str) {
     return ((RdbxFilterKey *) userData)->cbReturnValue;
 }
 
+static RdbRes filterHandlingHash(RdbParser *p, void *userData, RdbBulk field, RdbBulk value, uint64_t totalNumElm) {
+    UNUSED(p, field, value, totalNumElm);
+    return ((RdbxFilterKey *) userData)->cbReturnValue;
+}
+
 /*** Handling struct ***/
 
 static RdbRes filterHandlingListLP(RdbParser *p, void *userData, RdbBulk listLP) {
@@ -57,8 +62,28 @@ static RdbRes filterHandlingListZL(RdbParser *p, void *userData, RdbBulk listZL)
     return ((RdbxFilterKey *) userData)->cbReturnValue;
 }
 
-static RdbRes filterHandlingListNode(RdbParser *p, void *userData, RdbBulk listNode) {
+static RdbRes filterHandlingListPlain(RdbParser *p, void *userData, RdbBulk listNode) {
     UNUSED(p, listNode);
+    return ((RdbxFilterKey *) userData)->cbReturnValue;
+}
+
+static RdbRes filterHandlingHashLP(RdbParser *p, void *userData, RdbBulk hashLP) {
+    UNUSED(p, hashLP);
+    return ((RdbxFilterKey *) userData)->cbReturnValue;
+}
+
+static RdbRes filterHandlingHashZM(RdbParser *p, void *userData, RdbBulk hashZM) {
+    UNUSED(p, hashZM);
+    return ((RdbxFilterKey *) userData)->cbReturnValue;
+}
+
+static RdbRes filterHandlingHashZL(RdbParser *p, void *userData, RdbBulk hashZL) {
+    UNUSED(p, hashZL);
+    return ((RdbxFilterKey *) userData)->cbReturnValue;
+}
+
+static RdbRes filterHandlingHashPlain(RdbParser *p, void *userData, RdbBulk field, RdbBulk value, uint64_t totalNumElm) {
+    UNUSED(p, field, value, totalNumElm);
     return ((RdbxFilterKey *) userData)->cbReturnValue;
 }
 
@@ -110,14 +135,21 @@ RdbxFilterKey *RDBX_createHandlersFilterKey(RdbParser *p,
     if (RDB_getNumHandlers(p, RDB_LEVEL_DATA)>0) {
         callbacks.dataCb.handleStringValue = filterHandlingString;
         callbacks.dataCb.handleListElement = filterHandlingList;
+        callbacks.dataCb.handleHashElement = filterHandlingHash;
         RDB_createHandlersData(p, &callbacks.dataCb, ctx, deleteFilterKeyCtx);
     }
 
     if (RDB_getNumHandlers(p, RDB_LEVEL_STRUCT)>0) {
         callbacks.structCb.handleStringValue = filterHandlingString;
+        /* list */
         callbacks.structCb.handleListLP = filterHandlingListLP;
         callbacks.structCb.handleListZL = filterHandlingListZL;
-        callbacks.structCb.handleListNode = filterHandlingListNode;
+        callbacks.structCb.handleListPlain = filterHandlingListPlain;
+        /* hash */
+        callbacks.structCb.handleHashPlain = filterHandlingHashPlain;
+        callbacks.structCb.handleHashZL = filterHandlingHashZL;
+        callbacks.structCb.handleHashLP = filterHandlingHashLP;
+        callbacks.structCb.handleHashZM = filterHandlingHashZM;
         RDB_createHandlersStruct(p, &callbacks.structCb, ctx, deleteFilterKeyCtx);
     }
 

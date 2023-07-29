@@ -110,10 +110,16 @@ typedef enum ParsingElementType {
 
     PE_NEW_KEY,
     PE_END_KEY,
+
+    /* parsing data types */
     PE_STRING,
     PE_LIST,
     PE_QUICKLIST,
-    PE_ZIPLIST,
+    PE_LIST_ZL,
+    PE_HASH,
+    PE_HASH_ZL,
+    PE_HASH_LP,
+    PE_HASH_ZM,
 
     /* parsing raw data types */
     PE_RAW_NEW_KEY,
@@ -121,7 +127,11 @@ typedef enum ParsingElementType {
     PE_RAW_STRING,
     PE_RAW_LIST,
     PE_RAW_QUICKLIST,
-    PE_RAW_ZIPLIST,
+    PE_RAW_LIST_ZL,
+    PE_RAW_HASH,
+    PE_RAW_HASH_ZL,
+    PE_RAW_HASH_LP,
+    PE_RAW_HASH_ZM,
 
     PE_END_OF_FILE,
     PE_MAX
@@ -143,6 +153,11 @@ typedef struct {
 } ElementListCtx;
 
 typedef struct {
+    uint64_t numFields;
+    uint64_t visitingField;
+} ElementHashCtx;
+
+typedef struct {
     RdbKeyInfo info;
     ParsingElementType valueType;
     RdbHandlersLevel handleByLevel;
@@ -159,13 +174,20 @@ typedef struct {
     uint64_t container;
 } ElementRawListCtx;
 
+typedef struct {
+    uint64_t numFields;
+    uint64_t  visitField;
+} ElementRawHashCtx;
+
 typedef struct ElementCtx {
     ElementKeyCtx key;
     ElementListCtx list;
+    ElementHashCtx hash;
 
     /* raw elements context */
     ElementRawStringCtx rawString;
     ElementRawListCtx rawList;
+    ElementRawHashCtx rawHash;
 
     int state;  /* parsing-element state */
 
@@ -380,13 +402,22 @@ RdbStatus elementExpireTimeMsec(RdbParser *p);
 RdbStatus elementString(RdbParser *p);
 RdbStatus elementList(RdbParser *p);
 RdbStatus elementQuickList(RdbParser *p);
-RdbStatus elementZiplist(RdbParser *p);
+RdbStatus elementListZL(RdbParser *p);
+RdbStatus elementHash(RdbParser *p);
+RdbStatus elementHashZL(RdbParser *p);
+RdbStatus elementHashLP(RdbParser *p);
+RdbStatus elementHashZM(RdbParser *p);
+
 /*** Raw Parsing Elements ***/
 RdbStatus elementRawNewKey(RdbParser *p);
 RdbStatus elementRawEndKey(RdbParser *p);
 RdbStatus elementRawList(RdbParser *p);
 RdbStatus elementRawQuickList(RdbParser *p);
 RdbStatus elementRawString(RdbParser *p);
-RdbStatus elementRawZiplist(RdbParser *p);
+RdbStatus elementRawListZL(RdbParser *p);
+RdbStatus elementRawHash(RdbParser *p);
+RdbStatus elementRawHashZL(RdbParser *p);
+RdbStatus elementRawHashLP(RdbParser *p);
+RdbStatus elementRawHashZM(RdbParser *p);
 
 #endif /*LIBRDB_PARSER_H*/

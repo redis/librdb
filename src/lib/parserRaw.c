@@ -9,6 +9,7 @@
 #include "../../deps/redis/util.h"
 #include "../../deps/redis/listpack.h"
 #include "../../deps/redis/ziplist.h"
+#include "../../deps/redis/zipmap.h"
 
 #define MAX_STRING_WRITE_CHUNK (1024*63)
 #define DATA_SIZE_UNKNOWN_AHEAD 0
@@ -26,6 +27,12 @@ static inline void aggFlushBulks(RdbParser *p);
 static inline void aggAllocFirstBulk(RdbParser *p);
 static RdbStatus aggMakeRoom(RdbParser *p, size_t numBytesRq);
 static RdbStatus aggUpdateWrittenCbFrag(RdbParser *p, size_t bytesWritten);
+
+static int ziplistValidateIntegrityCb(unsigned char* str, size_t size, RdbParser *p);
+static int listpackValidateIntegrityCb(unsigned char* str, size_t size, RdbParser *p);
+static int zipmapValidateIntegrityCb(unsigned char* str, size_t size, RdbParser *p);
+typedef int (*singleStringTypeValidateCb)(unsigned char* str, size_t size, RdbParser *p); // return 0 for error
+static RdbStatus singleStringTypeHandling(RdbParser *p, singleStringTypeValidateCb validateCb, char *callerName);
 
 /*** init & release ***/
 
@@ -273,13 +280,13 @@ RdbStatus elementRawQuickList(RdbParser *p) {
     }
 }
 
-/* either element or sub-element */
+/* run either as element or as sub-element */
 RdbStatus elementRawString(RdbParser *p) {
 
     enum RAW_STRING_STATES {
         ST_RAW_STRING_PASS_HEADER,
         ST_RAW_STRING_PASS_CHUNKS, /* no need to aggregate entire type. Stream it! */
-        ST_RAW_STRING_PASS_AND_REPLY_CALLER, /* called on behalf another flow */
+        ST_RAW_STRING_PASS_AND_REPLY_CALLER, /* called on behalf another element */
     } ;
 
     ElementRawStringCtx *strCtx = &p->elmCtx.rawString;
@@ -425,47 +432,86 @@ RdbStatus elementRawString(RdbParser *p) {
     }
 }
 
-RdbStatus elementRawZiplist(RdbParser *p) {
-    enum RAW_LIST_STATES {
-        ST_RAW_ZIPLIST_START=0,
-        ST_RAW_ZIPLIST_CALL_STR, /* Call PE_RAW_STRING as sub-element */
-        ST_RAW_ZIPLIST_RET_FROM_STR, /* integ check of the returned string from PE_RAW_STRING */
-    };
+RdbStatus elementRawListZL(RdbParser *p) {
+    return singleStringTypeHandling(p, ziplistValidateIntegrityCb, "elementRawListZL");
+}
 
-    switch  (p->elmCtx.state) {
-        case ST_RAW_ZIPLIST_START:
-            /* take care string won't propagate for having integrity check */
+RdbStatus elementRawHash(RdbParser *p) {
+    size_t len;
+    unsigned char *unusedData;
+
+    enum RAW_HASH_STATES {
+        ST_RAW_HASH_HEADER=0,            /* Retrieve number of nodes */
+        ST_RAW_HASH_READ_NEXT_FIELD_STR, /* Call PE_RAW_STRING as sub-element (read field) */
+        ST_RAW_HASH_READ_NEXT_VALUE_STR, /* Return from sub-element.
+                                          * Call PE_RAW_STRING as sub-element (read value) */
+    } ;
+
+    ElementRawHashCtx *hashCtx = &p->elmCtx.rawHash;
+    RawContext *rawCtx = &p->rawCtx;
+
+    switch (p->elmCtx.state) {
+
+        case ST_RAW_HASH_HEADER: {
+            int headerLen = 0;
+
+            aggMakeRoom(p, 10); /* worse case 9 bytes for len */
+
+            IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &hashCtx->numFields, (unsigned char *) rawCtx->at, &headerLen));
+
+            /*** ENTER SAFE STATE ***/
+
+            hashCtx->visitField = 0;
+
             IF_NOT_OK_RETURN(cbHandleBegin(p, DATA_SIZE_UNKNOWN_AHEAD));
+            IF_NOT_OK_RETURN(aggUpdateWrittenCbFrag(p, headerLen));
 
-            /* call raw string as subelement */
-            return subElementCall(p, PE_RAW_STRING, ST_RAW_ZIPLIST_RET_FROM_STR);
+        }
 
-        case ST_RAW_ZIPLIST_RET_FROM_STR: {
-            /*** ENTER SAFE STATE (no rdb read)***/
+            updateElementState(p, ST_RAW_HASH_READ_NEXT_FIELD_STR); /* fall-thru */
 
-            size_t len;
-            unsigned char *encodedNode;
+        case ST_RAW_HASH_READ_NEXT_FIELD_STR:
 
-            /* return from sub-element string parsing */
-            subElementCallEnd(p, (char **) &encodedNode, &len);
+            /*** ENTER SAFE STATE ***/
 
-            if (!ziplistValidateIntegrity(((unsigned char*)encodedNode), len, p->deepIntegCheck, NULL, NULL)) {
-                RDB_reportError(p, RDB_ERR_ZIP_LIST_INTEG_CHECK, "elementRawZiplist() : ziplist integrity check failed");
-                return RDB_STATUS_ERROR;
+            /* if reached this state from ST_RAW_HASH_READ_NEXT_VALUE_STR */
+            if (hashCtx->visitField > 0) {
+                /* return from sub-element string parsing */
+                subElementCallEnd(p, (char **) &unusedData, &len);
             }
 
-            return nextParsingElement(p, PE_RAW_END_KEY); /* done */
+            if (hashCtx->visitField++ == hashCtx->numFields)
+                return nextParsingElement(p, PE_RAW_END_KEY); /* done */
+
+            return subElementCall(p, PE_RAW_STRING, ST_RAW_HASH_READ_NEXT_VALUE_STR);
+
+        case ST_RAW_HASH_READ_NEXT_VALUE_STR: {
+            
+            /*** ENTER SAFE STATE (no rdb read)***/
+
+            /* return from sub-element string parsing */
+            subElementCallEnd(p, (char **) &unusedData, &len);
+
+            return subElementCall(p, PE_RAW_STRING, ST_RAW_HASH_READ_NEXT_FIELD_STR);
         }
 
         default:
-            RDB_reportError(p, RDB_ERR_ZIP_LIST_INVALID_STATE,
-                            "elementRawZiplist() : invalid parsing element state: %d", p->elmCtx.state);
+            RDB_reportError(p, RDB_ERR_PLAIN_HASH_INVALID_STATE,
+                            "elementRawHash() : invalid parsing element state: %d", p->elmCtx.state);
             return RDB_STATUS_ERROR;
-
     }
+}
 
-    UNUSED(p);
-    return RDB_STATUS_OK;
+RdbStatus elementRawHashZL(RdbParser *p) {
+    return singleStringTypeHandling(p, ziplistValidateIntegrityCb, "elementRawHashZL");
+}
+
+RdbStatus elementRawHashLP(RdbParser *p) {
+    return singleStringTypeHandling(p, listpackValidateIntegrityCb, "elementRawHashLP");
+}
+
+RdbStatus elementRawHashZM(RdbParser *p) {
+    return singleStringTypeHandling(p, zipmapValidateIntegrityCb, "elementRawHashZM");
 }
 
 /*** various functions ***/
@@ -507,6 +553,62 @@ static inline RdbStatus cbHandleBegin(RdbParser *p, size_t size) {
 static inline RdbStatus cbHandleEnd(RdbParser *p) {
     CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_RAW, rdbRaw.handleEnd);
     return RDB_STATUS_OK;
+}
+
+static int ziplistValidateIntegrityCb(unsigned char* str, size_t size, RdbParser *p) {
+    UNUSED(p);
+    return ziplistValidateIntegrity(str, size, 1 /*p->deepIntegCheck*/, NULL, NULL);
+}
+
+static int listpackValidateIntegrityCb(unsigned char* str, size_t size, RdbParser *p) {
+    UNUSED(p);
+    return lpValidateIntegrity(str, size, 1 /*p->deepIntegCheck*/, NULL, NULL);
+}
+
+static int zipmapValidateIntegrityCb(unsigned char* str, size_t size, RdbParser *p) {
+    UNUSED(p);
+    return zipmapValidateIntegrity(str, size, 1 /*p->deepIntegCheck*/);
+}
+
+static RdbStatus singleStringTypeHandling(RdbParser *p, singleStringTypeValidateCb validateCb, char *callerName) {
+
+    enum RAW_LIST_STATES {
+        ST_RAW_SSTYPE_START=0,
+        ST_RAW_SSTYPE_CALL_STR, /* Call PE_RAW_STRING as sub-element */
+        ST_RAW_SSTYPE_RET_FROM_STR, /* integ check of the returned string from PE_RAW_STRING */
+    };
+
+    switch  (p->elmCtx.state) {
+        case ST_RAW_SSTYPE_START:
+            /* take care string won't propagate for having integrity check */
+            IF_NOT_OK_RETURN(cbHandleBegin(p, DATA_SIZE_UNKNOWN_AHEAD));
+
+            /* call raw string as subelement */
+            return subElementCall(p, PE_RAW_STRING, ST_RAW_SSTYPE_RET_FROM_STR);
+
+        case ST_RAW_SSTYPE_RET_FROM_STR: {
+            size_t len;
+            unsigned char *encodedNode;
+
+            /*** ENTER SAFE STATE ***/
+
+            /* return from sub-element string parsing */
+            subElementCallEnd(p, (char **) &encodedNode, &len);
+
+            if (!validateCb(((unsigned char*)encodedNode), len, p)) {
+                RDB_reportError(p, RDB_ERR_SSTYPE_INTEG_CHECK, "%s() : integrity check failed", callerName);
+                return RDB_STATUS_ERROR;
+            }
+
+            return nextParsingElement(p, PE_RAW_END_KEY); /* done */
+        }
+
+        default:
+            RDB_reportError(p, RDB_ERR_SSTYPE_INVALID_STATE,
+                            "%s() : invalid parsing element state: %d", callerName, p->elmCtx.state);
+            return RDB_STATUS_ERROR;
+
+    }
 }
 
 /*** raw aggregator of data ***/

@@ -97,8 +97,8 @@ typedef struct RdbxToRespConf {
     /* TODO: support the option of expire, del, select db */
 
     /* If supportRestore, then data-types will be translated to RESTORE with
-     * raw data instead of data-types commands. This is a performance, version
-     * (specific) aligned, optimization */
+     * raw data instead of data-types commands. This is a performance optimization
+     * that requires to be version aligned. */
     int supportRestore;
 
     /* TODO: support rdb2resp del key before write */

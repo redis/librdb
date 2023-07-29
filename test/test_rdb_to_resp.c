@@ -35,15 +35,19 @@ void assert_resp_file(const char *filename, char *resp, int isPrefix, int expMat
     free(filedata);
 }
 
-static void testRdbToRespCommon(const char *rdbfile,
+static void testRdbToRespCommon(const char *rdbfilename,
                                 RdbxToRespConf *conf,
                                 char *expResp,
                                 int isPrefix,
                                 int expMatch)
 {
     static int outputs = 0;
-    static char respfile[50];
-    snprintf(respfile, sizeof(respfile), "./test/tmp/output%d.resp", ++outputs);
+    static char rdbfile[100];
+    static char respfile[100];
+
+    /* build file path of input (rdb) file and output (resp) file */
+    snprintf(rdbfile, sizeof(rdbfile), "./test/dumps/%s", rdbfilename);
+    snprintf(respfile, sizeof(respfile), "./test/tmp/out%d_%s.resp", ++outputs, rdbfilename);
     RdbStatus  status;
     RdbxToResp *rdbToResp;
     RdbxRespFileWriter *writer;
@@ -93,21 +97,21 @@ static void test_r2r_single_string_exact_match(void **state) {
     /* Won't use RESTORE command because target RDB ver. < source RDB ver. */
     r2rConf.supportRestore = 1;
     r2rConf.restore.dstRdbVersion = 10;
-    testRdbToRespCommon(DUMP_FOLDER("single_key.rdb"), &r2rConf, (char *) expRespData, 0, 1);
+    testRdbToRespCommon("single_key.rdb", &r2rConf, (char *) expRespData, 0, 1);
 
     /* Avoid RESTORE command because corresponding RDB ver. of given Redis ver. < source RDB ver. */
     r2rConf.supportRestore = 1;
     r2rConf.restore.dstRdbVersion = 0;
     r2rConf.restore.dstRedisVersion = "7.0";   /* resolved to rdb version 10 */
-    testRdbToRespCommon(DUMP_FOLDER("single_key.rdb"), &r2rConf, (char *) expRespData, 0, 1);
+    testRdbToRespCommon("single_key.rdb", &r2rConf, (char *) expRespData, 0, 1);
 
     /* Configure not to use RESTORE command */
     r2rConf.supportRestore = 0;
-    testRdbToRespCommon(DUMP_FOLDER("single_key.rdb"), &r2rConf, (char *) expRespData, 0, 1);
+    testRdbToRespCommon("single_key.rdb", &r2rConf, (char *) expRespData, 0, 1);
 
     /* Default configuration avoid RESTORE */
     r2rConf.supportRestore = 0;
-    testRdbToRespCommon(DUMP_FOLDER("single_key.rdb"), NULL, (char *) expRespData, 0, 1);
+    testRdbToRespCommon("single_key.rdb", NULL, (char *) expRespData, 0, 1);
 }
 
 static void test_r2r_single_string_exact_match_restore_exact_match(void **state) {
@@ -133,13 +137,13 @@ static void test_r2r_single_string_exact_match_restore_exact_match(void **state)
     memset(&r2rConf, 0, sizeof(r2rConf));
     r2rConf.supportRestore = 1;
     r2rConf.restore.dstRdbVersion = 11;
-    testRdbToRespCommon(DUMP_FOLDER("single_key.rdb"), &r2rConf, (char *) expRespRestore, 0, 1);
+    testRdbToRespCommon("single_key.rdb", &r2rConf, (char *) expRespRestore, 0, 1);
 
     /* Use RESTORE command because corresponding RDB ver. of given Redis ver. == source RDB ver. */
     r2rConf.supportRestore = 1;
     r2rConf.restore.dstRdbVersion = 0;
     r2rConf.restore.dstRedisVersion = "7.2";
-    testRdbToRespCommon(DUMP_FOLDER("single_key.rdb"), &r2rConf, (char *) expRespRestore, 0, 1);
+    testRdbToRespCommon("single_key.rdb", &r2rConf, (char *) expRespRestore, 0, 1);
 }
 
 static void test_r2r_single_list_exact_match(void **state) {
@@ -154,50 +158,77 @@ static void test_r2r_single_list_exact_match(void **state) {
     memset(&r2rConf, 0, sizeof(r2rConf));
     r2rConf.supportRestore = 1;
     r2rConf.restore.dstRdbVersion = 6;
-    testRdbToRespCommon(DUMP_FOLDER("quicklist2_v11.rdb"), &r2rConf, expResp, 0, 1);
+    testRdbToRespCommon("quicklist2_v11.rdb", &r2rConf, expResp, 0, 1);
 }
 
-static void test_r2r_plainlist(void **state) {
+static void test_r2r_plain_list(void **state) {
     UNUSED(state);
-    runWithAndWithoutRestore(DUMP_FOLDER("plain_list_v6.rdb"));
+    runWithAndWithoutRestore("plain_list_v6.rdb");
 }
 
 static void test_r2r_quicklist(void **state) {
     UNUSED(state);
-    runWithAndWithoutRestore(DUMP_FOLDER("quicklist.rdb"));
+    runWithAndWithoutRestore("quicklist.rdb");
 }
 
-static void test_r2r_single_ziplist(void **state) {
+static void test_r2r_list_ziplist(void **state) {
     UNUSED(state);
-    runWithAndWithoutRestore(DUMP_FOLDER("ziplist_v3.rdb"));
+    runWithAndWithoutRestore("ziplist_v3.rdb");
 }
 
-static void test_r2r_single_list_restore(void **state) {
+static void test_r2r_quicklist2_list(void **state) {
     UNUSED(state);
-    runWithAndWithoutRestore(DUMP_FOLDER("quicklist2_v11.rdb"));
+    runWithAndWithoutRestore("quicklist2_v11.rdb");
 }
 
 static void test_r2r_multiple_lists_and_strings(void **state) {
     UNUSED(state);
-    runWithAndWithoutRestore(DUMP_FOLDER("multiple_lists_strings.rdb"));
+    runWithAndWithoutRestore("multiple_lists_strings.rdb");
+}
+
+static void test_r2r_plain_hash(void **state) {
+    UNUSED(state);
+    runWithAndWithoutRestore("plain_hash_v3.rdb");
+}
+
+static void test_r2r_hash_zl(void **state) {
+    UNUSED(state);
+    runWithAndWithoutRestore("hash_zl_v6.rdb");
+}
+
+static void test_r2r_hash_lp(void **state) {
+    UNUSED(state);
+    runWithAndWithoutRestore("hash_lp_v11.rdb");
+}
+
+static void test_r2r_hash_zm(void **state) {
+    UNUSED(state);
+    runWithAndWithoutRestore("hash_zm_v2.rdb");
 }
 
 /*************************** group_rdb_to_resp *******************************/
 int group_rdb_to_resp(void) {
     const struct CMUnitTest tests[] = {
-            /* string */
+
+            /* selected tests to verify entire payload. It is not really required,
+             * since the generated RESP will be tested against live server as well */
             cmocka_unit_test(test_r2r_single_string_exact_match),
             cmocka_unit_test(test_r2r_single_string_exact_match_restore_exact_match),
-            /* list */
             cmocka_unit_test(test_r2r_single_list_exact_match),
-            cmocka_unit_test(test_r2r_single_list_restore),
-            /* plain list */
-            cmocka_unit_test(test_r2r_plainlist),
-            /* quicklist */
+
+            /*** verify only prefix of generated RESP ***/
+
+            /* list */
+            cmocka_unit_test(test_r2r_plain_list),
             cmocka_unit_test(test_r2r_quicklist),
-            /* ziplist */
-            cmocka_unit_test(test_r2r_single_ziplist),
-            /* list & strings */
+            cmocka_unit_test(test_r2r_quicklist2_list),
+            cmocka_unit_test(test_r2r_list_ziplist),
+            /* hash */
+            cmocka_unit_test(test_r2r_plain_hash),
+            cmocka_unit_test(test_r2r_hash_zl),
+            cmocka_unit_test(test_r2r_hash_lp),
+            cmocka_unit_test(test_r2r_hash_zm),
+            /* misc */
             cmocka_unit_test(test_r2r_multiple_lists_and_strings),
     };
     return cmocka_run_group_tests(tests, NULL, NULL);
