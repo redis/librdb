@@ -61,11 +61,15 @@ typedef enum RdbRes {
     RDB_ERR_NOT_SUPPORTED_RDB_ENCODING_TYPE,
     RDB_ERR_UNKNOWN_RDB_ENCODING_TYPE,
     RDB_ERR_QUICK_LIST_INTEG_CHECK,
-    RDB_ERR_ZIP_LIST_INTEG_CHECK,
+    RDB_ERR_LIST_ZL_INTEG_CHECK,
+    RDB_ERR_HASH_LP_INTEG_CHECK,
+    RDB_ERR_HASH_ZM_INTEG_CHECK,
+    RDB_ERR_SSTYPE_INTEG_CHECK,
     RDB_ERR_STRING_INVALID_STATE,
+    RDB_ERR_PLAIN_HASH_INVALID_STATE,
     RDB_ERR_PLAIN_LIST_INVALID_STATE,
     RDB_ERR_QUICK_LIST_INVALID_STATE,
-    RDB_ERR_ZIP_LIST_INVALID_STATE,
+    RDB_ERR_SSTYPE_INVALID_STATE,
     RDB_ERR_INVALID_BULK_ALLOC_TYPE,
     RDB_ERR_INVALID_BULK_CLONE_REQUEST,
     RDB_ERR_INVALID_BULK_LENGTH_REQUEST,
@@ -193,12 +197,18 @@ typedef struct RdbHandlersRawCallbacks {
 typedef struct RdbHandlersStructCallbacks {
     HANDLERS_COMMON_CALLBACKS
     RdbRes (*handleStringValue)(RdbParser *p, void *userData, RdbBulk str);
-    RdbRes (*handleListLP)(RdbParser *p, void *userData, RdbBulk listLP);
+    /* list */
+    RdbRes (*handleListPlain)(RdbParser *p, void *userData, RdbBulk node);
     RdbRes (*handleListZL)(RdbParser *p, void *userData, RdbBulk listZL);
-    RdbRes (*handleListNode)(RdbParser *p, void *userData, RdbBulk node);
+    RdbRes (*handleListLP)(RdbParser *p, void *userData, RdbBulk listLP);
+    /* hash */
+    RdbRes (*handleHashPlain)(RdbParser *p, void *userData, RdbBulk field, RdbBulk value, uint64_t totalNumElm);
+    RdbRes (*handleHashZL)(RdbParser *p, void *userData, RdbBulk listZL);
+    RdbRes (*handleHashLP)(RdbParser *p, void *userData, RdbBulk hashLp);
+    RdbRes (*handleHashZM)(RdbParser *p, void *userData, RdbBulk hashZM);
 
-    /*** TODO: RdbHandlersStructCallbacks: handlerHashListPack, handleSetIntset, handleZsetListPack, handleFunction ***/
-    RdbRes (*handlerHashLP)(RdbParser *p, void *userData, RdbBulk hashLp);
+
+    /*** TODO: RdbHandlersStructCallbacks: handleSetIntset, handleZsetListPack, handleFunction ***/
     RdbRes (*handleSetIntset)(RdbParser *p, void *userData, RdbBulk intSet);
     RdbRes (*handleSetLP)(RdbParser *p, void *userData, RdbBulk setLP);
     RdbRes (*handleSetZL)(RdbParser *p, void *userData, RdbBulk setZL);
@@ -213,9 +223,9 @@ typedef struct RdbHandlersDataCallbacks {
     HANDLERS_COMMON_CALLBACKS
     RdbRes (*handleStringValue)(RdbParser *p, void *userData, RdbBulk str);
     RdbRes (*handleListElement)(RdbParser *p, void *userData, RdbBulk str);
+    RdbRes (*handleHashElement)(RdbParser *p, void *userData, RdbBulk field, RdbBulk value, uint64_t totalNumElm);
 
-    /*** TODO: RdbHandlersDataCallbacks: handleHashElement, handleSetElement, handleZsetElement ***/
-    RdbRes (*handleHashElement)(RdbParser *p, void *userData, RdbBulk field, RdbBulk elm, uint64_t totalNumElm);
+    /*** TODO: RdbHandlersDataCallbacks: handleSetElement, handleZsetElement ***/
     RdbRes (*handleSetElement)(RdbParser *p, void *userData, RdbBulk elm, uint64_t totalNumElm);
     RdbRes (*handleZsetElement)(RdbParser *p, void *userData, RdbBulk elm, double score, uint64_t totalNumElm);
 

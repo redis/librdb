@@ -21,7 +21,7 @@ static int setupTest(void **state) {
  * 4. assert_json_equal(out1.json , out2.json)
  *
  * The test will run twice against:
- * A. old Redis target (not RESTORE)
+ * A. old Redis target (no RESTORE)
  * B. new Redis target (RESTORE)
  * Note: This test cannot tell if actually run RESTORE command in the background.
  *       test_rdb_to_resp.c verifies that RESTORE command is used only when it should.
@@ -103,22 +103,42 @@ static void test_rdb_to_loader_multiple_lists_strings(void **state) {
 
 static void test_rdb_to_loader_multiple_lists_strings_pipeline_depth_1(void **state) {
     UNUSED(state);
-    test_rdb_to_loader_common(DUMP_FOLDER("multiple_lists_strings.rdb"), 1 /*pipelineDepth*/);
+    test_rdb_to_loader_common(DUMP_FOLDER("multiple_lists_strings.rdb"), 1);
 }
 
 static void test_rdb_to_loader_plain_list(void **state) {
     UNUSED(state);
-    test_rdb_to_loader_common(DUMP_FOLDER("plain_list_v6.rdb"), 1 /*pipelineDepth*/);
+    test_rdb_to_loader_common(DUMP_FOLDER("plain_list_v6.rdb"), 1);
 }
 
 static void test_rdb_to_loader_quicklist(void **state) {
     UNUSED(state);
-    test_rdb_to_loader_common(DUMP_FOLDER("quicklist.rdb"), 1 /*pipelineDepth*/);
+    test_rdb_to_loader_common(DUMP_FOLDER("quicklist.rdb"), 1);
 }
 
 static void test_rdb_to_loader_single_ziplist(void **state) {
     UNUSED(state);
-    test_rdb_to_loader_common(DUMP_FOLDER("ziplist_v3.rdb"), 1 /*pipelineDepth*/);
+    test_rdb_to_loader_common(DUMP_FOLDER("ziplist_v3.rdb"), 1);
+}
+
+static void test_rdb_to_loader_plain_hash(void **state) {
+    UNUSED(state);
+    test_rdb_to_loader_common(DUMP_FOLDER("plain_hash_v3.rdb"), 1);
+}
+
+static void test_rdb_to_loader_hash_zl(void **state) {
+    UNUSED(state);
+    test_rdb_to_loader_common(DUMP_FOLDER("hash_zl_v6.rdb"), 1);
+}
+
+static void test_rdb_to_loader_hash_lp(void **state) {
+    UNUSED(state);
+    test_rdb_to_loader_common(DUMP_FOLDER("hash_lp_v11.rdb"), 1);
+}
+
+static void test_rdb_to_loader_hash_zm(void **state) {
+    UNUSED(state);
+    test_rdb_to_loader_common(DUMP_FOLDER("hash_zm_v2.rdb"), 1);
 }
 
 /*************************** group_rdb_to_loader *******************************/
@@ -130,13 +150,22 @@ int group_rdb_to_loader() {
     }
 
     const struct CMUnitTest tests[] = {
-            cmocka_unit_test_setup(test_rdb_to_loader_single_list, setupTest),
+            /* string */
             cmocka_unit_test_setup(test_rdb_to_loader_single_string, setupTest),
-            cmocka_unit_test_setup(test_rdb_to_loader_multiple_lists_strings, setupTest),
-            cmocka_unit_test_setup(test_rdb_to_loader_multiple_lists_strings_pipeline_depth_1, setupTest),
+            /* list */
+            cmocka_unit_test_setup(test_rdb_to_loader_single_list, setupTest),
             cmocka_unit_test_setup(test_rdb_to_loader_plain_list, setupTest),
             cmocka_unit_test_setup(test_rdb_to_loader_quicklist, setupTest),
             cmocka_unit_test_setup(test_rdb_to_loader_single_ziplist, setupTest),
+            /* hash */
+            cmocka_unit_test_setup(test_rdb_to_loader_plain_hash, setupTest),
+            cmocka_unit_test_setup(test_rdb_to_loader_hash_zl, setupTest),
+            cmocka_unit_test_setup(test_rdb_to_loader_hash_lp, setupTest),
+            cmocka_unit_test_setup(test_rdb_to_loader_hash_zm, setupTest),
+            /* misc */
+            cmocka_unit_test_setup(test_rdb_to_loader_multiple_lists_strings, setupTest),
+            cmocka_unit_test_setup(test_rdb_to_loader_multiple_lists_strings_pipeline_depth_1, setupTest),
+
     };
 
     setupRedisServer();
