@@ -1638,14 +1638,14 @@ static RdbStatus readRdbFromReader(RdbParser *p, size_t len, AllocTypeRq type, c
             bytesToFill -= overflow;
             p->bytesRead -= overflow;
 
-            res = p->reader->readFunc(p, p->reader->readerData,
+            res = p->reader->readFunc(p->reader->readerData,
                                       ((char *) (*binfo)->ref) + (*binfo)->written, bytesToFill);
             (*binfo)->written += bytesToFill;
             if (res != RDB_STATUS_OK) goto not_ok;
             return RDB_STATUS_PAUSED;
         } else { /* fill up entire item */
 
-            res = p->reader->readFunc(p, p->reader->readerData,
+            res = p->reader->readFunc(p->reader->readerData,
                                       ((char *) (*binfo)->ref) + (*binfo)->written, bytesToFill);
             if (unlikely(res != RDB_STATUS_OK)) {
                 (*binfo)->written += bytesToFill;

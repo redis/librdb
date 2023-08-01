@@ -163,7 +163,7 @@ typedef struct RdbStreamConsumerMeta {
 } RdbStreamConsumerMeta;
 
 /* misc function pointer typedefs */
-typedef RdbStatus (*RdbReaderFunc) (RdbParser *p, void *readerData, void *buf, size_t len);
+typedef RdbStatus (*RdbReaderFunc) (void *readerData, void *buf, size_t len);
 typedef void (*RdbFreeFunc) (RdbParser *p, void *obj);
 typedef void (*RdbLoggerCB) (RdbLogLevel l, const char *msg);
 
@@ -260,6 +260,13 @@ _LIBRDB_API RdbStatus RDB_parseBuff(RdbParser *p,
 
 /****************************************************************
  * Create Reader
+ *
+ * The built-in readers should be sufficient for most purposes. However, if they
+ * do not meet your specific needs, you can use the `RDB_createReaderRdb()`
+ * helper function to create a custom reader with its own reader function. The
+ * built-in reader file (readerFile.c) can serve as a code reference for this
+ * purpose.
+ *
  * Used by:   RDBX_createReaderFile
  *           <user-defined-reader>
  ****************************************************************/

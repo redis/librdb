@@ -3,6 +3,7 @@
 #include "common.h"
 
 struct RdbxReaderFile {
+    RdbParser *parser;
     char *filename;
     FILE *file;
 };
@@ -22,18 +23,16 @@ static void deleteReaderFile(RdbParser *p, void *rdata) {
     RDB_free(p, readerData);
 }
 
-static RdbStatus readFile(RdbParser *p, void *data, void *buf, size_t len) {
-    UNUSED(p);
-
+static RdbStatus readFile(void *data, void *buf, size_t len) {
     RdbxReaderFile *readerFile = data;
     size_t newLen = fread(buf, sizeof(char), len, readerFile->file);
     if (ferror( readerFile->file) != 0) {
-        RDB_reportError(p, RDB_ERR_FAILED_READ_RDB_FILE, NULL);
+        RDB_reportError(readerFile->parser, RDB_ERR_FAILED_READ_RDB_FILE, NULL);
         return RDB_STATUS_ERROR;
     }
 
     if (newLen != len) {
-        RDB_reportError(p, RDB_ERR_FAILED_PARTIAL_READ_RDB_FILE, NULL);
+        RDB_reportError(readerFile->parser, RDB_ERR_FAILED_PARTIAL_READ_RDB_FILE, NULL);
         return RDB_STATUS_ERROR;
     }
 
@@ -57,6 +56,7 @@ RdbxReaderFile *RDBX_createReaderFile(RdbParser *p, const char *filename) {
     RDB_log(p, RDB_LOG_INFO, "RDBX_createReaderFile: Initialized with file %s", filename);
 
     RdbxReaderFile *ctx = RDB_alloc(p, sizeof(RdbxReaderFile));
+    ctx->parser = p;
     ctx->file = f;
     ctx->filename = RDB_alloc(p, strlen(filename) + 1);
     strcpy(ctx->filename, filename);
