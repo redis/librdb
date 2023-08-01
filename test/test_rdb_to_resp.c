@@ -52,7 +52,7 @@ static void testRdbToRespCommon(const char *rdbfilename,
     RdbxToResp *rdbToResp;
     RdbxRespFileWriter *writer;
     RdbParser *p = RDB_createParserRdb(NULL);
-    RDB_setLogLevel(p, RDB_LOG_ERROR);
+    RDB_setLogLevel(p, RDB_LOG_ERR);
     assert_non_null(RDBX_createReaderFile(p, rdbfile));
     assert_non_null(rdbToResp = RDBX_createHandlersToResp(p, conf));
     assert_non_null(writer = RDBX_createRespFileWriter(p, rdbToResp, respfile));

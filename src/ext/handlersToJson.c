@@ -71,7 +71,7 @@ static void deleteRdbToJsonCtx(RdbParser *p, void *data) {
     if (ctx->keyCtx.key)
         RDB_bulkCopyFree(p, ctx->keyCtx.key);
 
-    RDB_log(p, RDB_LOG_DEBUG, "handlersToJson: Closing file %s", ctx->filename);
+    RDB_log(p, RDB_LOG_DBG, "handlersToJson: Closing file %s", ctx->filename);
 
     if ((ctx->outfile) && (ctx->outfile != stdout))
         fclose(ctx->outfile);
@@ -92,7 +92,7 @@ static RdbxToJson *initRdbToJsonCtx(RdbParser *p, const char *filename, RdbxToJs
         return NULL;
     }
 
-    RDB_log(p, RDB_LOG_DEBUG, "handlersToJson: Opening file %s", filename);
+    RDB_log(p, RDB_LOG_DBG, "handlersToJson: Opening file %s", filename);
 
     /* init RdbToJson context */
     RdbxToJson *ctx = RDB_alloc(p, sizeof(RdbxToJson));

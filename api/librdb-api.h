@@ -113,10 +113,10 @@ typedef enum RdbHandlersLevel {
 } RdbHandlersLevel;
 
 typedef enum RdbLogLevel {
-    RDB_LOG_ERROR,
-    RDB_LOG_WARNING,
-    RDB_LOG_INFO,
-    RDB_LOG_DEBUG
+    RDB_LOG_ERR,
+    RDB_LOG_WRN,
+    RDB_LOG_INF,
+    RDB_LOG_DBG
 } RdbLogLevel;
 
 /* for explanation, read "Memory management" section below */

@@ -46,7 +46,7 @@ static void test_rdb_to_loader_common(const char *rdbfile, int pipelineDepth) {
 
         /* RDB to JSON */
         parser = RDB_createParserRdb(NULL);
-        RDB_setLogLevel(parser, RDB_LOG_ERROR);
+        RDB_setLogLevel(parser, RDB_LOG_ERR);
         assert_non_null(RDBX_createReaderFile(parser, rdbfile));
         assert_non_null(RDBX_createHandlersToJson(parser,
                                                   TMP_FOLDER("out1.json"),
@@ -58,11 +58,11 @@ static void test_rdb_to_loader_common(const char *rdbfile, int pipelineDepth) {
         /* RDB to TCP */
         RdbxToResp *rdbToResp;
         parser = RDB_createParserRdb(NULL);
-        RDB_setLogLevel(parser, RDB_LOG_ERROR);
+        RDB_setLogLevel(parser, RDB_LOG_ERR);
         assert_non_null(RDBX_createReaderFile(parser, rdbfile));
         assert_non_null(rdbToResp = RDBX_createHandlersToResp(parser, &rdb2respConf));
         assert_non_null(RDBX_createRespToTcpLoader(parser, rdbToResp, "127.0.0.1", redisPort, pipelineDepth));
-        RDB_setLogLevel(parser, RDB_LOG_ERROR);
+        RDB_setLogLevel(parser, RDB_LOG_ERR);
         while ((status = RDB_parse(parser)) == RDB_STATUS_WAIT_MORE_DATA);
         assert_int_equal(status, RDB_STATUS_OK);
         RDB_deleteParser(parser);
@@ -72,7 +72,7 @@ static void test_rdb_to_loader_common(const char *rdbfile, int pipelineDepth) {
 
         /* DUMP-RDB to JSON */
         parser = RDB_createParserRdb(NULL);
-        RDB_setLogLevel(parser, RDB_LOG_ERROR);
+        RDB_setLogLevel(parser, RDB_LOG_ERR);
         assert_non_null(RDBX_createReaderFile(parser, TMP_FOLDER("dump.rdb")));
         assert_non_null(RDBX_createHandlersToJson(parser,
                                                   TMP_FOLDER("out2.json"),

@@ -126,7 +126,7 @@ _LIBRDB_API RdbParser *RDB_createParserRdb(RdbMemAlloc *memAlloc) {
     p->errorMsg[0] = '\0';
     p->appCbCtx.numBulks = 0;
     p->loggerCb = loggerCbDefault;
-    p->logLevel = RDB_LOG_DEBUG;
+    p->logLevel = RDB_LOG_DBG;
     p->maxRawLen = SIZE_MAX;
     p->errorCode = RDB_OK;
     p->handlers[RDB_LEVEL_RAW] = NULL;
@@ -379,7 +379,7 @@ _LIBRDB_API void RDB_reportError(RdbParser *p, RdbRes e, const char *msg, ...) {
     vsnprintf(p->errorMsg + nchars, MAX_ERROR_MSG - nchars, msg, args);
     va_end(args);
 
-    RDB_log(p, RDB_LOG_ERROR, p->errorMsg);
+    RDB_log(p, RDB_LOG_ERR, p->errorMsg);
 }
 
 _LIBRDB_API const char *RDB_getErrorMessage(RdbParser *p) {
@@ -519,7 +519,7 @@ static inline RdbStatus updateStateAfterParse(RdbParser *p, RdbStatus status) {
             /* fall-thru */
         case RDB_STATUS_OK:
             p->state = RDB_STATE_ENDED;
-            RDB_log(p, RDB_LOG_INFO, "Parser done");
+            RDB_log(p, RDB_LOG_INF, "Parser done");
             return RDB_STATUS_OK;
 
         default:
@@ -538,9 +538,9 @@ static RdbStatus parserMainLoop(RdbParser *p) {
 
     if (unlikely(p->debugData)) {
         while (1) {
-            RDB_log(p, RDB_LOG_DEBUG, "[State=%d] %-20s ", p->elmCtx.state, peInfo[p->parsingElement].funcname);
+            RDB_log(p, RDB_LOG_DBG, "[State=%d] %-20s ", p->elmCtx.state, peInfo[p->parsingElement].funcname);
             status = peInfo[p->parsingElement].func(p);
-            RDB_log(p, RDB_LOG_DEBUG, "Return status=%s (next=%s)\n", getStatusString(status),
+            RDB_log(p, RDB_LOG_DBG, "Return status=%s (next=%s)\n", getStatusString(status),
                     peInfo[p->parsingElement].funcname);
             if (status != RDB_STATUS_OK) break;
 
@@ -578,7 +578,7 @@ static inline RdbStatus nextParsingElementKeyValue(RdbParser *p,
 static RdbRes handleNewKeyPrintDbg(RdbParser *p, void *userData, RdbBulk key, RdbKeyInfo *info) {
     UNUSED(p,userData,info);
     UNUSED(key);
-    RDB_log(p, RDB_LOG_DEBUG, "Key=%s, ", key);
+    RDB_log(p, RDB_LOG_DBG, "Key=%s, ", key);
     return RDB_OK;
 }
 
@@ -628,7 +628,7 @@ static RdbStatus finalizeConfig(RdbParser *p, int isParseFromBuff) {
     static int is_crc_init = 0;
     assert(p->state == RDB_STATE_CONFIGURING);
 
-    RDB_log(p, RDB_LOG_INFO, "Finalizing parser configuration");
+    RDB_log(p, RDB_LOG_INF, "Finalizing parser configuration");
 
     if (!is_crc_init) {
         crc64_init();
@@ -636,7 +636,7 @@ static RdbStatus finalizeConfig(RdbParser *p, int isParseFromBuff) {
     }
 
     if ((p->debugData = getEnvVar(ENV_VAR_DEBUG_DATA, 0)) != 0) {
-        RDB_setLogLevel(p, RDB_LOG_DEBUG);
+        RDB_setLogLevel(p, RDB_LOG_DBG);
         RdbHandlersDataCallbacks cb = {.handleNewKey = handleNewKeyPrintDbg};
         RDB_createHandlersData(p, &cb, NULL, NULL);
     }
@@ -662,7 +662,7 @@ static RdbStatus finalizeConfig(RdbParser *p, int isParseFromBuff) {
     resolveMultipleLevelsRegistration(p);
 
     p->state = RDB_STATE_RUNNING;
-    RDB_log(p, RDB_LOG_INFO, "Start processing RDB source");
+    RDB_log(p, RDB_LOG_INF, "Start processing RDB source");
     return RDB_STATUS_OK;
 }
 
@@ -677,10 +677,10 @@ static void printParserState(RdbParser *p) {
 
 static void loggerCbDefault(RdbLogLevel l, const char *msg) {
     static char *logLevelStr[] = {
-            [RDB_LOG_ERROR]    = ":: ERROR ::",
-            [RDB_LOG_WARNING]  = ":: WARN  ::",
-            [RDB_LOG_INFO]     = ":: INFO  ::",
-            [RDB_LOG_DEBUG]    = ":: DEBUG ::",
+            [RDB_LOG_ERR]    = ":: ERROR ::",
+            [RDB_LOG_WRN]  = ":: WARN  ::",
+            [RDB_LOG_INF]     = ":: INFO  ::",
+            [RDB_LOG_DBG]    = ":: DEBUG ::",
     };
     printf("%s %s\n", logLevelStr[l], msg);
 }
@@ -1044,12 +1044,12 @@ RdbStatus elementRdbHeader(RdbParser *p) {
         return RDB_STATUS_ERROR;
     }
 
-    RDB_log(p, RDB_LOG_INFO, "The parsed RDB file version is: %d", p->rdbversion);
+    RDB_log(p, RDB_LOG_INF, "The parsed RDB file version is: %d", p->rdbversion);
 
 
     CALL_COMMON_HANDLERS_CB(p, handleNewRdb, p->rdbversion);
 
-    RDB_log(p, RDB_LOG_INFO, "rdbversion=%d", p->rdbversion);
+    RDB_log(p, RDB_LOG_INF, "rdbversion=%d", p->rdbversion);
 
     return nextParsingElement(p, PE_NEXT_RDB_TYPE);
 }
@@ -1456,7 +1456,7 @@ RdbStatus elementEndOfFile(RdbParser *p) {
         if (!p->ignoreChecksum) {
             memrev64ifbe(&cksum);
             if (cksum == 0) {
-                RDB_log(p, RDB_LOG_WARNING, "RDB file was saved with checksum disabled: no check performed.");
+                RDB_log(p, RDB_LOG_WRN, "RDB file was saved with checksum disabled: no check performed.");
             } else if (cksum != evaluated) {
                 RDB_reportError(p, RDB_ERR_CHECKSUM_FAILURE, "Wrong RDB checksum checksum=%lx, evaluated=%lx",
                                 (unsigned long long) cksum,
@@ -1493,7 +1493,7 @@ RdbStatus rdbLoadInteger(RdbParser *p, int enctype, AllocTypeRq type, char *refB
             ((uint32_t)((unsigned char *) (*binfo)->ref)[3]<<24);
         val = (int32_t)v;
     } else {
-        RDB_log(p, RDB_LOG_ERROR, "Unknown RDB integer encoding type %d", enctype);
+        RDB_log(p, RDB_LOG_ERR, "Unknown RDB integer encoding type %d", enctype);
         RDB_reportError(p, RDB_ERR_INVALID_INT_ENCODING, NULL);
         return RDB_STATUS_ERROR;
     }
@@ -1673,7 +1673,7 @@ static RdbStatus readRdbFromReader(RdbParser *p, size_t len, AllocTypeRq type, c
         /* verify reader reported an error. Otherwise set such one */
         if (p->errorCode == RDB_OK) {
             p->errorCode = RDB_ERR_FAILED_READ_RDB_FILE;
-            RDB_log(p, RDB_LOG_WARNING, "Reader returned error indication but didn't RDB_reportError()");
+            RDB_log(p, RDB_LOG_WRN, "Reader returned error indication but didn't RDB_reportError()");
         }
     } else {
         /* reader can return only ok, wait-more-data or error */

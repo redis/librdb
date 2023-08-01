@@ -30,16 +30,16 @@ static int getOptArg(int argc, char* argv[], int *at,  char *abbrvOpt, char *opt
 
 static void logger(RdbLogLevel l, const char *msg) {
     static char *logLevelStr[] = {
-            [RDB_LOG_ERROR]    = ":: ERROR ::",
-            [RDB_LOG_WARNING]  = ":: WARN  ::",
-            [RDB_LOG_INFO]     = ":: INFO  ::",
-            [RDB_LOG_DEBUG]    = ":: DEBUG ::",
+            [RDB_LOG_ERR]    = ":: ERROR ::",
+            [RDB_LOG_WRN]  = ":: WARN  ::",
+            [RDB_LOG_INF]     = ":: INFO  ::",
+            [RDB_LOG_DBG]    = ":: DEBUG ::",
     };
 
     if (logfile != NULL)
         fprintf(logfile, "%s %s\n", logLevelStr[l], msg);
 
-    if (l == RDB_LOG_ERROR)
+    if (l == RDB_LOG_ERR)
         printf("%s %s\n", logLevelStr[l], msg);
 }
 
@@ -133,20 +133,20 @@ static RdbRes formatRedis(RdbParser *parser, char *input, int argc, char **argv)
     }
 
     if ((pipelineDepth) && ((pipeDepthVal = atoi(pipelineDepth)) == 0)) {
-        logger(RDB_LOG_ERROR, "Value of '--pipeline-depth' ('-l') must be positive integer, bigger than 0");
+        logger(RDB_LOG_ERR, "Value of '--pipeline-depth' ('-l') must be positive integer, bigger than 0");
         return RDB_ERR_GENERAL;
     }
 
     if (portStr) {
         port = atoi(portStr);
         if (port == 0) {
-            loggerWrap(RDB_LOG_ERROR, "Invalid port: %s\n", portStr);
+            loggerWrap(RDB_LOG_ERR, "Invalid port: %s\n", portStr);
             return RDB_ERR_GENERAL;
         }
     }
 
     if ((dstRdbVersion) && ((conf.restore.dstRdbVersion = atoi(dstRdbVersion)) == 0)) {
-        logger(RDB_LOG_ERROR, "Value of '--target-rdb-ver' ('-x') must be positive integer");
+        logger(RDB_LOG_ERR, "Value of '--target-rdb-ver' ('-x') must be positive integer");
         return RDB_ERR_GENERAL;
     }
 
@@ -184,7 +184,7 @@ static RdbRes formatResp(RdbParser *parser, char *input, int argc, char **argv) 
     }
 
     if ((dstRdbVersion) && ((conf.restore.dstRdbVersion = atoi(dstRdbVersion)) == 0)) {
-        logger(RDB_LOG_ERROR, "Value of '--target-rdb-ver' ('-x') must be positive integer");
+        logger(RDB_LOG_ERR, "Value of '--target-rdb-ver' ('-x') must be positive integer");
         return RDB_ERR_GENERAL;
     }
 
@@ -238,7 +238,7 @@ int main(int argc, char **argv)
     }
 
     if (at == argc) { /* didn't find any subcommand (json / resp) */
-        logger(RDB_LOG_ERROR, "Missing <FORMAT> value.");
+        logger(RDB_LOG_ERR, "Missing <FORMAT> value.");
         printUsage();
         return RDB_ERR_GENERAL;
     }
@@ -250,7 +250,7 @@ int main(int argc, char **argv)
 
     /* create the parser and attach it a file reader */
     RdbParser *parser = RDB_createParserRdb(NULL);
-    RDB_setLogLevel(parser, RDB_LOG_INFO);
+    RDB_setLogLevel(parser, RDB_LOG_INF);
     RDB_setLogger(parser, logger);
 
     res = formatFunc(parser, input, argc - at, argv + at);

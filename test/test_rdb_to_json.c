@@ -32,7 +32,7 @@ void testRdbToJsonCommon(const char *rdbfile,
         /*** 1. RDB_parse - parse with RDB reader ***/
         remove(jsonfile);
         RdbParser *parser = RDB_createParserRdb(pMemAlloc);
-        RDB_setLogLevel(parser, RDB_LOG_ERROR);
+        RDB_setLogLevel(parser, RDB_LOG_ERR);
         assert_non_null(RDBX_createReaderFile(parser, rdbfile));
         assert_non_null(RDBX_createHandlersToJson(parser, jsonfile, &r2jConf));
         while ((status = RDB_parse(parser)) == RDB_STATUS_WAIT_MORE_DATA);
@@ -46,7 +46,7 @@ void testRdbToJsonCommon(const char *rdbfile,
         size_t lastBytes = 0;
         remove(jsonfile);
         parser = RDB_createParserRdb(pMemAlloc);
-        RDB_setLogLevel(parser, RDB_LOG_ERROR);
+        RDB_setLogLevel(parser, RDB_LOG_ERR);
         assert_non_null(RDBX_createReaderFile(parser, rdbfile));
         assert_non_null(RDBX_createHandlersToJson(parser, jsonfile, &r2jConf));
         RDB_setPauseInterval(parser, 1 /*bytes*/);
@@ -74,7 +74,7 @@ void testRdbToJsonCommon(const char *rdbfile,
         /*** 3. RDB_parseBuff - parse buffer. Use buffer of size 1 char ***/
         remove(jsonfile);
         parser = RDB_createParserRdb(pMemAlloc);
-        RDB_setLogLevel(parser, RDB_LOG_ERROR);
+        RDB_setLogLevel(parser, RDB_LOG_ERR);
         assert_non_null(RDBX_createHandlersToJson(parser, jsonfile, &r2jConf));
         for (size_t i = 0 ; i < bufLen-1 ; ++i)
             assert_int_equal(RDB_parseBuff(parser, buffer + i, 1, 0), RDB_STATUS_WAIT_MORE_DATA);
@@ -87,7 +87,7 @@ void testRdbToJsonCommon(const char *rdbfile,
         countPauses = 0;
         remove(jsonfile);
         parser = RDB_createParserRdb(pMemAlloc);
-        RDB_setLogLevel(parser, RDB_LOG_ERROR);
+        RDB_setLogLevel(parser, RDB_LOG_ERR);
         assert_non_null(RDBX_createHandlersToJson(parser, jsonfile, &r2jConf));
         RDB_setPauseInterval(parser, 1 /*bytes*/);
         while (1) {
@@ -309,7 +309,7 @@ int group_rdb_to_json(void) {
         cmocka_unit_test(test_r2j_hash_zm_struct),
         cmocka_unit_test(test_r2j_hash_zm_raw),
 
-            /* misc */
+        /* misc */
         cmocka_unit_test(test_r2j_multiple_lists_and_strings_data),
         cmocka_unit_test(test_r2j_multiple_lists_and_strings_struct),
         cmocka_unit_test(test_r2j_multiple_lists_and_strings_raw),

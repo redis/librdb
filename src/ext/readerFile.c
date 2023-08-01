@@ -12,7 +12,7 @@ static void deleteReaderFile(RdbParser *p, void *rdata) {
     if (!rdata) return;
     RdbxReaderFile *readerData = (RdbxReaderFile *) rdata;
 
-    RDB_log(p, RDB_LOG_DEBUG, "RDB Reader: Closing file %s", readerData->filename);
+    RDB_log(p, RDB_LOG_DBG, "RDB Reader: Closing file %s", readerData->filename);
 
     if (readerData->filename)
         RDB_free(p, readerData->filename);
@@ -53,7 +53,7 @@ RdbxReaderFile *RDBX_createReaderFile(RdbParser *p, const char *filename) {
         return NULL;
     }
 
-    RDB_log(p, RDB_LOG_INFO, "RDBX_createReaderFile: Initialized with file %s", filename);
+    RDB_log(p, RDB_LOG_INF, "RDBX_createReaderFile: Initialized with file %s", filename);
 
     RdbxReaderFile *ctx = RDB_alloc(p, sizeof(RdbxReaderFile));
     ctx->parser = p;

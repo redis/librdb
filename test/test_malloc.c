@@ -35,7 +35,7 @@ static void test_extern_alloc(void **state) {
         };
 
         RdbParser *parser = RDB_createParserRdb(&mem);
-        RDB_setLogLevel(parser, RDB_LOG_ERROR);
+        RDB_setLogLevel(parser, RDB_LOG_ERR);
 
         assert_non_null(RDBX_createReaderFile(parser, DUMP_FOLDER("single_key.rdb")));
         RdbxToJsonConf r2jConf = {RDB_LEVEL_DATA, RDBX_CONV_JSON_ENC_PLAIN, 0, 1};
