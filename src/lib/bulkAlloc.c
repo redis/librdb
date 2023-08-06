@@ -293,7 +293,8 @@ int bulkPoolIsNewNextAllocDbg(RdbParser *p) {
 
 void bulkPoolAssertFlushedDbg(RdbParser *p) {
     BulkPool *pool = p->cache;
-    assert(pool->qwrite == 0);
+    assert(pool->qwrite == pool->queue);
+    assert(pool->qread == pool->queue);
 }
 
 static inline BulkInfo *bulkPoolEnqueue(RdbParser *p, BulkPool *pool) {
