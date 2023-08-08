@@ -47,7 +47,7 @@ static void test_createHandlersRdbToJson_and_2_FilterKey(void **state) {
     assert_int_equal( status, RDB_STATUS_OK);
 
     RDB_deleteParser(parser);
-    assert_json_equal(jsonfile, expJsonFile);
+    assert_json_equal(jsonfile, expJsonFile, 0);
 }
 
 static void test_mixed_levels_registration(void **state) {

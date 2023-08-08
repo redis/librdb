@@ -16,6 +16,7 @@
 #include "../../deps/redis/listpack.h"
 #include "../../deps/redis/ziplist.h"
 #include "../../deps/redis/zipmap.h"
+#include "../../deps/redis/intset.h"
 #include "../../deps/redis/lzf.h"
 
 #define DONE_FILL_BULK SIZE_MAX
@@ -34,7 +35,8 @@ struct ParsingElementInfo peInfo[PE_MAX] = {
 
         [PE_END_OF_FILE]      = {elementEndOfFile, "elementEndOfFile", "End parsing RDB file"},
 
-        /* parsing struct/data (RDB_LEVEL_STRUCT/RDB_LEVEL_DATA) */
+        /*** parsing struct/data (RDB_LEVEL_STRUCT/RDB_LEVEL_DATA) ***/
+        /* string */
         [PE_STRING]           = {elementString, "elementString", "Parsing string"},
         /* list */
         [PE_LIST]             = {elementList, "elementList", "Parsing list"},
@@ -44,11 +46,18 @@ struct ParsingElementInfo peInfo[PE_MAX] = {
         [PE_HASH]             = {elementHash, "elementHash", "Parsing Hash"},
         [PE_HASH_ZL]          = {elementHashZL, "elementHashZL", "Parsing hash Ziplist"},
         [PE_HASH_LP]          = {elementHashLP, "elementHashLP", "Parsing hash Listpack"},
-        [PE_HASH_ZM]           = {elementHashZM, "elementHashZM", "Parsing hash Zipmap"},
+        [PE_HASH_ZM]          = {elementHashZM, "elementHashZM", "Parsing hash Zipmap"},
+        /* set */
+        [PE_SET]              = {elementSet, "elementSet", "Parsing set"},
+        [PE_SET_IS]           = {elementSetIS, "elementSetIS", "Parsing set Intset"},
+        [PE_SET_LP]           = {elementSetLP, "elementSetLP", "Parsing set Listpack"},
 
-        /* parsing raw data (RDB_LEVEL_RAW) */
+        /*** parsing raw data (RDB_LEVEL_RAW) ***/
+
         [PE_RAW_NEW_KEY]      = {elementRawNewKey, "elementRawNewKey", "Parsing new raw key-value"},
         [PE_RAW_END_KEY]      = {elementRawEndKey, "elementRawEndKey", "Parsing raw end key"},
+
+        /* string */
         [PE_RAW_STRING]       = {elementRawString, "elementRawString", "Parsing raw string"},
         /* list */
         [PE_RAW_LIST]         = {elementRawList, "elementRawList", "Parsing raw list (legacy)"},
@@ -59,6 +68,10 @@ struct ParsingElementInfo peInfo[PE_MAX] = {
         [PE_RAW_HASH_ZL]      = {elementRawHashZL, "elementRawHashZL", "Parsing raw hash Ziplist"},
         [PE_RAW_HASH_LP]      = {elementRawHashLP, "elementRawHashLP", "Parsing raw hash Listpack"},
         [PE_RAW_HASH_ZM]      = {elementRawHashZM, "elementRawHashZM", "Parsing raw hash Zipmap"},
+        /* set */
+        [PE_RAW_SET]          = {elementRawSet, "elementRawSet", "Parsing raw set"},
+        [PE_RAW_SET_IS]       = {elementRawSetIS, "elementRawSetIS", "Parsing raw set Intset"},
+        [PE_RAW_SET_LP]       = {elementRawSetLP, "elementRawSetLP", "Parsing raw set Listpack"},
 };
 
 /*** Environemnt Variables ***/
@@ -751,8 +764,6 @@ static inline RdbStatus unpackList(RdbParser *p, unsigned char *lp) {
 
 /* return either RDB_STATUS_OK or RDB_STATUS_ERROR */
 static RdbStatus listListpackItem(RdbParser *p, BulkInfo *lpInfo) {
-    /* Silently skip empty listpack */
-    if (lpLength(lpInfo->ref) == 0) return RDB_STATUS_OK;
 
     if (p->elmCtx.key.handleByLevel == RDB_LEVEL_STRUCT) {
         registerAppBulkForNextCb(p, lpInfo);
@@ -1179,6 +1190,10 @@ RdbStatus elementNextRdbType(RdbParser *p) {
         case RDB_TYPE_HASH_ZIPLIST:         return nextParsingElementKeyValue(p, PE_RAW_HASH_ZL, PE_HASH_ZL);
         case RDB_TYPE_HASH_LISTPACK:        return nextParsingElementKeyValue(p, PE_RAW_HASH_LP, PE_HASH_LP);
         case RDB_TYPE_HASH_ZIPMAP:          return nextParsingElementKeyValue(p, PE_RAW_HASH_ZM, PE_HASH_ZM);
+        /* set */
+        case RDB_TYPE_SET:                  return nextParsingElementKeyValue(p, PE_RAW_SET, PE_SET);
+        case RDB_TYPE_SET_LISTPACK:         return nextParsingElementKeyValue(p, PE_RAW_SET_LP, PE_SET_LP);
+        case RDB_TYPE_SET_INTSET:           return nextParsingElementKeyValue(p, PE_RAW_SET_IS, PE_SET_IS);
 
         case RDB_OPCODE_EOF:                return nextParsingElement(p, PE_END_OF_FILE);
 
@@ -1189,16 +1204,13 @@ RdbStatus elementNextRdbType(RdbParser *p) {
         case RDB_OPCODE_MODULE_AUX:
         case RDB_OPCODE_FUNCTION:
         case RDB_OPCODE_FUNCTION2:
-        case RDB_TYPE_SET:
         case RDB_TYPE_ZSET:
         case RDB_TYPE_ZSET_2:
         case RDB_TYPE_MODULE_2:
-        case RDB_TYPE_SET_INTSET:
         case RDB_TYPE_ZSET_ZIPLIST:
         case RDB_TYPE_STREAM_LISTPACKS:
         case RDB_TYPE_ZSET_LISTPACK:
         case RDB_TYPE_STREAM_LISTPACKS_2:
-        case RDB_TYPE_SET_LISTPACK:
         case RDB_TYPE_STREAM_LISTPACKS_3:
             RDB_reportError(p, RDB_ERR_NOT_SUPPORTED_RDB_ENCODING_TYPE,
                             "Not supported RDB encoding type: %d", p->currOpcode);
@@ -1251,8 +1263,13 @@ RdbStatus elementList(RdbParser *p) {
             BulkInfo *binfoNode;
             IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC_APP_BULK, NULL, &binfoNode));
 
+            /*** ENTER SAFE STATE ***/
+
             registerAppBulkForNextCb(p, binfoNode);
-            CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_DATA, rdbData.handleListElement, binfoNode->ref);
+            if (p->elmCtx.key.handleByLevel == RDB_LEVEL_STRUCT)
+                CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_STRUCT, rdbStruct.handleListPlain, binfoNode->ref);
+            else
+                CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_DATA, rdbData.handleListElement, binfoNode->ref);
 
             return (--ctx->list.numNodes) ? updateElementState(p, ST_LIST_NEXT_NODE) : nextParsingElement(p, PE_END_KEY);
         }
@@ -1440,6 +1457,121 @@ RdbStatus elementHashZM(RdbParser *p) {
     if (RDB_STATUS_ERROR == hashZipMapPairs(p, zipmapBulk))
         return RDB_STATUS_ERROR;
 
+    return nextParsingElement(p, PE_END_KEY);
+}
+
+RdbStatus elementSet(RdbParser *p) {
+    ElementCtx *ctx = &p->elmCtx;
+    enum SET_STATES {
+        ST_SET_HEADER=0, /*  Retrieve number of nodes */
+        ST_SET_NEXT_ITEM /* Process next node and callback to app (Iterative) */
+    } ;
+    switch (ctx->state) {
+        case ST_SET_HEADER:
+            IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &(ctx->set.numItems), NULL, NULL));
+
+            /*** ENTER SAFE STATE ***/
+
+            ctx->set.left = ctx->set.numItems;
+
+            updateElementState(p, ST_SET_NEXT_ITEM); /* fall-thru */
+
+        case ST_SET_NEXT_ITEM: {
+            BulkInfo *binfoItem;
+            IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC_APP_BULK, NULL, &binfoItem));
+
+            /*** ENTER SAFE STATE ***/
+
+            registerAppBulkForNextCb(p, binfoItem);
+            if (p->elmCtx.key.handleByLevel == RDB_LEVEL_STRUCT)
+                CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_STRUCT, rdbStruct.handleSetPlain, binfoItem->ref, ctx->set.numItems);
+            else
+                CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_DATA, rdbData.handleSetElement, binfoItem->ref, ctx->set.numItems);
+
+            return (--ctx->set.left) ? updateElementState(p, ST_SET_NEXT_ITEM) : nextParsingElement(p, PE_END_KEY);
+        }
+        default:
+            RDB_reportError(p, RDB_ERR_PLAIN_SET_INVALID_STATE,
+                            "elementList() : invalid parsing element state: %d", ctx->state);
+            return RDB_STATUS_ERROR;
+    }
+}
+
+RdbStatus elementSetIS(RdbParser *p) {
+    BulkInfo *intsetBulk;
+
+    IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC_APP_BULK, NULL, &intsetBulk));
+
+    /*** ENTER SAFE STATE ***/
+
+
+    if (unlikely(!intsetValidateIntegrity(intsetBulk->ref, intsetBulk->len, p->deepIntegCheck))) {
+        RDB_reportError(p, RDB_ERR_SET_IS_INTEG_CHECK, "elementSetIS(): INTSET integrity check failed");
+        return RDB_STATUS_ERROR;
+    }
+
+    if (p->elmCtx.key.handleByLevel == RDB_LEVEL_STRUCT) {
+        registerAppBulkForNextCb(p, intsetBulk);
+        CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_STRUCT, rdbStruct.handleSetIS, intsetBulk->ref);
+    } else {
+        unsigned long numElm = intsetLen((const intset *) intsetBulk->ref);
+        int64_t intele;
+
+        for (int iter = 0; intsetGet(intsetBulk->ref, iter, &intele) != 0; ++iter) {
+            BulkInfo *bulkInt;
+            int buflen = 32;
+            IF_NOT_OK_RETURN(allocFromCache(p, buflen, RQ_ALLOC_APP_BULK, NULL, &bulkInt));
+
+            bulkInt->len = ll2string(bulkInt->ref, buflen, intele);
+
+            registerAppBulkForNextCb(p, bulkInt);
+            CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_DATA, rdbData.handleSetElement, bulkInt->ref, numElm);
+        }
+    }
+
+    return nextParsingElement(p, PE_END_KEY);
+}
+
+RdbStatus elementSetLP(RdbParser *p) {
+    unsigned char *iterator, endCh, *pEndCh, *item;
+    BulkInfo *listpackBulk, *itemBulk;
+    unsigned int itemLen;
+    long long itemVal;
+
+    IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC_APP_BULK, NULL, &listpackBulk));
+
+    /*** ENTER SAFE STATE ***/
+
+    /* Doesn't check for duplication */
+    if (!lpValidateIntegrity(listpackBulk->ref, listpackBulk->len, 1 /*deep_integrity*/, NULL, 0)) {
+        RDB_reportError(p, RDB_ERR_SET_LP_INTEG_CHECK, "elementSetLP(): LISTPACK integrity check failed");
+        return RDB_STATUS_ERROR;
+    }
+
+    /* TODO: handle empty listpack */
+    unsigned long size = lpLength(listpackBulk->ref);
+
+    if (p->elmCtx.key.handleByLevel == RDB_LEVEL_STRUCT) {
+        registerAppBulkForNextCb(p, listpackBulk);
+        CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_STRUCT, rdbStruct.handleSetLP, listpackBulk->ref);
+    } else {
+        iterator = lpFirst(listpackBulk->ref);
+        while (iterator) {
+            item = lpGetValue(iterator, &itemLen, &itemVal);
+
+            if (!(itemBulk = allocBulkForEmbeddedString(p, item, itemLen, itemVal, &endCh, &pEndCh)))
+                return RDB_STATUS_ERROR;
+
+            registerAppBulkForNextCb(p, itemBulk);
+            CALL_HANDLERS_CB(p,
+                             *pEndCh = endCh,   /* <<< finalize: restore modified char */
+                             RDB_LEVEL_DATA,
+                             rdbData.handleSetElement,
+                             itemBulk->ref, size);
+
+            iterator = lpNext(listpackBulk->ref, iterator);
+        }
+    }
     return nextParsingElement(p, PE_END_KEY);
 }
 

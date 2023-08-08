@@ -10,6 +10,7 @@
 #include "../../deps/redis/listpack.h"
 #include "../../deps/redis/ziplist.h"
 #include "../../deps/redis/zipmap.h"
+#include "../../deps/redis/intset.h"
 
 #define MAX_STRING_WRITE_CHUNK (1024*63)
 #define DATA_SIZE_UNKNOWN_AHEAD 0
@@ -31,6 +32,7 @@ static RdbStatus aggUpdateWrittenCbFrag(RdbParser *p, size_t bytesWritten);
 static int ziplistValidateIntegrityCb(unsigned char* str, size_t size, RdbParser *p);
 static int listpackValidateIntegrityCb(unsigned char* str, size_t size, RdbParser *p);
 static int zipmapValidateIntegrityCb(unsigned char* str, size_t size, RdbParser *p);
+static int intsetValidateIntegrityCb(unsigned char* str, size_t size, RdbParser *p);
 typedef int (*singleStringTypeValidateCb)(unsigned char* str, size_t size, RdbParser *p); // return 0 for error
 static RdbStatus singleStringTypeHandling(RdbParser *p, singleStringTypeValidateCb validateCb, char *callerName);
 
@@ -137,9 +139,10 @@ RdbStatus elementRawEndKey(RdbParser *p) {
 
 RdbStatus elementRawList(RdbParser *p) {
     enum RAW_LIST_STATES {
-        ST_RAW_LIST_HEADER=0, /* Retrieve number of nodes */
-        ST_RAW_LIST_NEXT_NODE_CALL_STR, /* Process next node. Call PE_RAW_STRING as sub-element */
+        ST_RAW_LIST_HEADER=0,             /* Retrieve number of nodes */
+        ST_RAW_LIST_NEXT_NODE_CALL_STR,   /* Process next node. Call PE_RAW_STRING as sub-element */
         ST_RAW_LIST_NEXT_NODE_STR_RETURN, /* integ check of the returned string from PE_RAW_STRING */
+                                          /* If more items, goto state #1, else next PE is END_KEY */
     } ;
 
     ElementRawListCtx *listCtx = &p->elmCtx.rawList;
@@ -465,13 +468,10 @@ RdbStatus elementRawHash(RdbParser *p) {
 
             IF_NOT_OK_RETURN(cbHandleBegin(p, DATA_SIZE_UNKNOWN_AHEAD));
             IF_NOT_OK_RETURN(aggUpdateWrittenCbFrag(p, headerLen));
-
         }
-
-            updateElementState(p, ST_RAW_HASH_READ_NEXT_FIELD_STR); /* fall-thru */
+        updateElementState(p, ST_RAW_HASH_READ_NEXT_FIELD_STR); /* fall-thru */
 
         case ST_RAW_HASH_READ_NEXT_FIELD_STR:
-
             /*** ENTER SAFE STATE ***/
 
             /* if reached this state from ST_RAW_HASH_READ_NEXT_VALUE_STR */
@@ -512,6 +512,67 @@ RdbStatus elementRawHashLP(RdbParser *p) {
 
 RdbStatus elementRawHashZM(RdbParser *p) {
     return singleStringTypeHandling(p, zipmapValidateIntegrityCb, "elementRawHashZM");
+}
+
+RdbStatus elementRawSetIS(RdbParser *p) {
+    return singleStringTypeHandling(p, intsetValidateIntegrityCb, "elementRawSetIS");
+}
+
+RdbStatus elementRawSetLP(RdbParser *p) {
+    return singleStringTypeHandling(p, listpackValidateIntegrityCb, "elementRawSetLP");
+}
+
+RdbStatus elementRawSet(RdbParser *p) {
+    enum RAW_SET_STATES {
+        ST_RAW_SET_HEADER=0,             /* Retrieve number of items */
+        ST_RAW_SET_NEXT_ITEM_CALL_STR,   /* Process next item. Call PE_RAW_STRING as sub-element */
+        ST_RAW_SET_NEXT_ITEM_STR_RETURN, /* integ check of the returned string from PE_RAW_STRING */
+        /* If more items, goto state #1, else next PE is END_KEY */
+    } ;
+
+    ElementRawSetCtx *setCtx = &p->elmCtx.rawSet;
+    RawContext *rawCtx = &p->rawCtx;
+
+    switch (p->elmCtx.state) {
+
+        case ST_RAW_SET_HEADER: {
+            int headerLen = 0;
+
+            aggMakeRoom(p, 10); /* worse case 9 bytes for len */
+
+            IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &setCtx->numItems,
+                                        (unsigned char *) rawCtx->at, &headerLen));
+
+            /*** ENTER SAFE STATE ***/
+
+            IF_NOT_OK_RETURN(cbHandleBegin(p, DATA_SIZE_UNKNOWN_AHEAD));
+            IF_NOT_OK_RETURN(aggUpdateWrittenCbFrag(p, headerLen));
+        }
+        updateElementState(p, ST_RAW_SET_NEXT_ITEM_CALL_STR); /* fall-thru */
+
+        case ST_RAW_SET_NEXT_ITEM_CALL_STR:
+            return subElementCall(p, PE_RAW_STRING, ST_RAW_SET_NEXT_ITEM_STR_RETURN);
+
+        case ST_RAW_SET_NEXT_ITEM_STR_RETURN: {
+            /*** ENTER SAFE STATE (no rdb read)***/
+
+            size_t len;
+            unsigned char *encodedItem;
+
+            /* return from sub-element string parsing */
+            subElementCallEnd(p, (char **) &encodedItem, &len);
+
+            if (--setCtx->numItems == 0)
+                return nextParsingElement(p, PE_RAW_END_KEY); /* done */
+
+            return updateElementState(p, ST_RAW_SET_NEXT_ITEM_CALL_STR);
+        }
+
+        default:
+            RDB_reportError(p, RDB_ERR_PLAIN_SET_INVALID_STATE,
+                            "elementRawSet() : invalid parsing element state: %d", p->elmCtx.state);
+            return RDB_STATUS_ERROR;
+    }
 }
 
 /*** various functions ***/
@@ -568,6 +629,11 @@ static int listpackValidateIntegrityCb(unsigned char* str, size_t size, RdbParse
 static int zipmapValidateIntegrityCb(unsigned char* str, size_t size, RdbParser *p) {
     UNUSED(p);
     return zipmapValidateIntegrity(str, size, 1 /*p->deepIntegCheck*/);
+}
+
+static int intsetValidateIntegrityCb(unsigned char* str, size_t size, RdbParser *p) {
+    UNUSED(p);
+    return intsetValidateIntegrity(str, size, 1);
 }
 
 static RdbStatus singleStringTypeHandling(RdbParser *p, singleStringTypeValidateCb validateCb, char *callerName) {
