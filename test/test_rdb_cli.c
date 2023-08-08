@@ -50,13 +50,13 @@ static void test_rdb_cli_resp_common(const char *rdbfile) {
     RDB_deleteParser(parser);
 
     /* Json (from DUMP-RDB) vs. expected Json */
-    assert_json_equal(TMP_FOLDER("out1.json"), TMP_FOLDER("out2.json"));
+    assert_json_equal(TMP_FOLDER("out1.json"), TMP_FOLDER("out2.json"), 0);
 }
 
 static void test_rdb_cli_json(void **state) {
     UNUSED(state);
     runSystemCmd("./bin/rdb-cli ./test/dumps/multiple_lists_strings.rdb json -w -o ./test/tmp/out.json  > /dev/null ");
-    assert_json_equal(DUMP_FOLDER("multiple_lists_strings_data.json"), "./test/tmp/out.json");
+    assert_json_equal(DUMP_FOLDER("multiple_lists_strings_data.json"), "./test/tmp/out.json", 0);
 }
 
 static void test_rdb_cli_resp_tcp(void **state) {

@@ -121,6 +121,9 @@ typedef enum ParsingElementType {
     PE_HASH_ZL,
     PE_HASH_LP,
     PE_HASH_ZM,
+    PE_SET,
+    PE_SET_IS,
+    PE_SET_LP,
 
     /* parsing raw data types */
     PE_RAW_NEW_KEY,
@@ -133,6 +136,9 @@ typedef enum ParsingElementType {
     PE_RAW_HASH_ZL,
     PE_RAW_HASH_LP,
     PE_RAW_HASH_ZM,
+    PE_RAW_SET,
+    PE_RAW_SET_IS,
+    PE_RAW_SET_LP,
 
     PE_END_OF_FILE,
     PE_MAX
@@ -152,6 +158,11 @@ typedef struct ParsingElementInfo {
 typedef struct {
     uint64_t numNodes;
 } ElementListCtx;
+
+typedef struct {
+    uint64_t numItems;
+    uint64_t left;
+} ElementSetCtx;
 
 typedef struct {
     uint64_t numFields;
@@ -176,6 +187,10 @@ typedef struct {
 } ElementRawListCtx;
 
 typedef struct {
+    uint64_t numItems;
+} ElementRawSetCtx;
+
+typedef struct {
     uint64_t numFields;
     uint64_t  visitField;
 } ElementRawHashCtx;
@@ -183,11 +198,13 @@ typedef struct {
 typedef struct ElementCtx {
     ElementKeyCtx key;
     ElementListCtx list;
+    ElementSetCtx set;
     ElementHashCtx hash;
 
     /* raw elements context */
     ElementRawStringCtx rawString;
     ElementRawListCtx rawList;
+    ElementRawSetCtx rawSet;
     ElementRawHashCtx rawHash;
 
     int state;  /* parsing-element state */
@@ -408,6 +425,9 @@ RdbStatus elementHash(RdbParser *p);
 RdbStatus elementHashZL(RdbParser *p);
 RdbStatus elementHashLP(RdbParser *p);
 RdbStatus elementHashZM(RdbParser *p);
+RdbStatus elementSet(RdbParser *p);
+RdbStatus elementSetIS(RdbParser *p);
+RdbStatus elementSetLP(RdbParser *p);
 
 /*** Raw Parsing Elements ***/
 RdbStatus elementRawNewKey(RdbParser *p);
@@ -420,5 +440,10 @@ RdbStatus elementRawHash(RdbParser *p);
 RdbStatus elementRawHashZL(RdbParser *p);
 RdbStatus elementRawHashLP(RdbParser *p);
 RdbStatus elementRawHashZM(RdbParser *p);
+RdbStatus elementRawSet(RdbParser *p);
+RdbStatus elementRawSetIS(RdbParser *p);
+RdbStatus elementRawSetLP(RdbParser *p);
+
+
 
 #endif /*LIBRDB_PARSER_H*/

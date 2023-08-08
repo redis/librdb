@@ -206,6 +206,21 @@ static void test_r2r_hash_zm(void **state) {
     runWithAndWithoutRestore("hash_zm_v2.rdb");
 }
 
+static void test_r2r_plain_set(void **state) {
+    UNUSED(state);
+    runWithAndWithoutRestore("plain_set_v6.rdb");
+}
+
+static void test_r2r_set_is(void **state) {
+    UNUSED(state);
+    runWithAndWithoutRestore("set_is_v11.rdb");
+}
+
+static void test_r2r_set_lp(void **state) {
+    UNUSED(state);
+    runWithAndWithoutRestore("set_is_v11.rdb");
+}
+
 /*************************** group_rdb_to_resp *******************************/
 int group_rdb_to_resp(void) {
     const struct CMUnitTest tests[] = {
@@ -228,6 +243,11 @@ int group_rdb_to_resp(void) {
             cmocka_unit_test(test_r2r_hash_zl),
             cmocka_unit_test(test_r2r_hash_lp),
             cmocka_unit_test(test_r2r_hash_zm),
+            /* set */
+            cmocka_unit_test(test_r2r_plain_set),
+            cmocka_unit_test(test_r2r_set_is),
+            cmocka_unit_test(test_r2r_set_lp),
+
             /* misc */
             cmocka_unit_test(test_r2r_multiple_lists_and_strings),
     };

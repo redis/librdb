@@ -38,7 +38,7 @@ void testRdbToJsonCommon(const char *rdbfile,
         while ((status = RDB_parse(parser)) == RDB_STATUS_WAIT_MORE_DATA);
         assert_int_equal(status, RDB_STATUS_OK);
         RDB_deleteParser(parser);
-        assert_json_equal(jsonfile, expJsonFile);
+        assert_json_equal(jsonfile, expJsonFile, 0);
 
         /*** 2. RDB_parse - set pause-interval to 1 byte ***/
         int countPausesAssert = 1;
@@ -69,7 +69,7 @@ void testRdbToJsonCommon(const char *rdbfile,
             assert_int_equal(countPauses + 1, bufLen);
 
         RDB_deleteParser(parser);
-        assert_json_equal(jsonfile, expJsonFile);
+        assert_json_equal(jsonfile, expJsonFile, 0);
 
         /*** 3. RDB_parseBuff - parse buffer. Use buffer of size 1 char ***/
         remove(jsonfile);
@@ -81,7 +81,7 @@ void testRdbToJsonCommon(const char *rdbfile,
         assert_int_equal(RDB_parseBuff(parser, buffer + bufLen - 1, 1, 0), RDB_STATUS_OK);
 
         RDB_deleteParser(parser);
-        assert_json_equal(jsonfile, expJsonFile);
+        assert_json_equal(jsonfile, expJsonFile, 0);
 
         /*** 4. RDB_parseBuff - parse a single buffer. set pause-interval to 1 byte ***/
         countPauses = 0;
@@ -103,7 +103,7 @@ void testRdbToJsonCommon(const char *rdbfile,
         }
         assert_int_equal(countPauses + 1, bufLen);
         RDB_deleteParser(parser);
-        assert_json_equal(jsonfile, expJsonFile);
+        assert_json_equal(jsonfile, expJsonFile, 0);
 
         free(buffer);
     }
@@ -199,6 +199,52 @@ static void test_r2j_hash_zm_struct(void **state) {
 static void test_r2j_hash_zm_raw(void **state) {
     UNUSED(state);
     testRdbToJsonCommon(DUMP_FOLDER("hash_zm_v2.rdb"), DUMP_FOLDER("hash_zm_v2_raw.json"), RDB_LEVEL_RAW);
+}
+
+static void test_r2j_plain_set_data(void **state) {
+    UNUSED(state);
+    testRdbToJsonCommon(DUMP_FOLDER("plain_set_v6.rdb"), DUMP_FOLDER("plain_set_v6_data.json"), RDB_LEVEL_DATA);
+}
+
+static void test_r2j_plain_set_struct(void **state) {
+    UNUSED(state);
+
+    testRdbToJsonCommon(DUMP_FOLDER("plain_set_v6.rdb"), DUMP_FOLDER("plain_set_v6_struct.json"), RDB_LEVEL_STRUCT);
+}
+
+static void test_r2j_plain_set_raw (void **state) {
+    UNUSED(state);
+    testRdbToJsonCommon(DUMP_FOLDER("plain_set_v6.rdb"), DUMP_FOLDER("plain_set_v6_raw.json"), RDB_LEVEL_RAW);
+}
+
+static void test_r2j_set_is_data(void **state) {
+    UNUSED(state);
+    testRdbToJsonCommon(DUMP_FOLDER("set_is_v11.rdb"), DUMP_FOLDER("set_is_v11_data.json"), RDB_LEVEL_DATA);
+}
+
+static void test_r2j_set_is_struct(void **state) {
+    UNUSED(state);
+    testRdbToJsonCommon(DUMP_FOLDER("set_is_v11.rdb"), DUMP_FOLDER("set_is_v11_struct.json"), RDB_LEVEL_STRUCT);
+}
+
+static void test_r2j_set_is_raw(void **state) {
+    UNUSED(state);
+    testRdbToJsonCommon(DUMP_FOLDER("set_is_v11.rdb"), DUMP_FOLDER("set_is_v11_raw.json"), RDB_LEVEL_STRUCT);
+}
+
+static void test_r2j_set_lp_data(void **state) {
+    UNUSED(state);
+    testRdbToJsonCommon(DUMP_FOLDER("set_lp_v11.rdb"), DUMP_FOLDER("set_lp_v11_data.json"), RDB_LEVEL_DATA);
+}
+
+static void test_r2j_set_lp_struct(void **state) {
+    UNUSED(state);
+    testRdbToJsonCommon(DUMP_FOLDER("set_lp_v11.rdb"), DUMP_FOLDER("set_lp_v11_struct.json"), RDB_LEVEL_STRUCT);
+}
+
+static void test_r2j_set_lp_raw(void **state) {
+    UNUSED(state);
+    testRdbToJsonCommon(DUMP_FOLDER("set_lp_v11.rdb"), DUMP_FOLDER("set_lp_v11_raw.json"), RDB_LEVEL_STRUCT);
 }
 
 static void test_r2j_quicklist_data(void **state) {
@@ -308,6 +354,17 @@ int group_rdb_to_json(void) {
         cmocka_unit_test(test_r2j_hash_zm_data),
         cmocka_unit_test(test_r2j_hash_zm_struct),
         cmocka_unit_test(test_r2j_hash_zm_raw),
+
+        /* set */
+        cmocka_unit_test(test_r2j_plain_set_data),
+        cmocka_unit_test(test_r2j_plain_set_struct),
+        cmocka_unit_test(test_r2j_plain_set_raw),
+        cmocka_unit_test(test_r2j_set_is_data),
+        cmocka_unit_test(test_r2j_set_is_struct),
+        cmocka_unit_test(test_r2j_set_is_raw),
+        cmocka_unit_test(test_r2j_set_lp_data),
+        cmocka_unit_test(test_r2j_set_lp_struct),
+        cmocka_unit_test(test_r2j_set_lp_raw),
 
         /* misc */
         cmocka_unit_test(test_r2j_multiple_lists_and_strings_data),
