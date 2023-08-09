@@ -199,24 +199,24 @@ typedef struct RdbHandlersRawCallbacks {
 
 typedef struct RdbHandlersStructCallbacks {
     HANDLERS_COMMON_CALLBACKS
-    RdbRes (*handleStringValue)(RdbParser *p, void *userData, RdbBulk str);
+    RdbRes (*handleString)(RdbParser *p, void *userData, RdbBulk str);
     /* list */
     RdbRes (*handleListPlain)(RdbParser *p, void *userData, RdbBulk node);
-    RdbRes (*handleListZL)(RdbParser *p, void *userData, RdbBulk listZL);
-    RdbRes (*handleListLP)(RdbParser *p, void *userData, RdbBulk listLP);
+    RdbRes (*handleListZL)(RdbParser *p, void *userData, RdbBulk ziplist);
+    RdbRes (*handleListLP)(RdbParser *p, void *userData, RdbBulk listpack);
     /* hash */
-    RdbRes (*handleHashPlain)(RdbParser *p, void *userData, RdbBulk field, RdbBulk value, uint64_t totalNumElm);
-    RdbRes (*handleHashZL)(RdbParser *p, void *userData, RdbBulk listZL);
-    RdbRes (*handleHashLP)(RdbParser *p, void *userData, RdbBulk hashLp);
-    RdbRes (*handleHashZM)(RdbParser *p, void *userData, RdbBulk hashZM);
+    RdbRes (*handleHashPlain)(RdbParser *p, void *userData, RdbBulk field, RdbBulk value);
+    RdbRes (*handleHashZL)(RdbParser *p, void *userData, RdbBulk ziplist);
+    RdbRes (*handleHashLP)(RdbParser *p, void *userData, RdbBulk listpack);
+    RdbRes (*handleHashZM)(RdbParser *p, void *userData, RdbBulk zipmap);
     /* set */
-    RdbRes (*handleSetPlain)(RdbParser *p, void *userData, RdbBulk item, uint64_t totalNumElm);
+    RdbRes (*handleSetPlain)(RdbParser *p, void *userData, RdbBulk item);
     RdbRes (*handleSetIS)(RdbParser *p, void *userData, RdbBulk intset);
     RdbRes (*handleSetLP)(RdbParser *p, void *userData, RdbBulk listpack);
 
     /*** TODO: RdbHandlersStructCallbacks: ***/
-    RdbRes (*handleZsetZL)(RdbParser *p, void *userData, RdbBulk setZL);
-    RdbRes (*handleZsetLP)(RdbParser *p, void *userData, RdbBulk zsetLP);
+    RdbRes (*handleZsetZL)(RdbParser *p, void *userData, RdbBulk ziplist);
+    RdbRes (*handleZsetLP)(RdbParser *p, void *userData, RdbBulk listpack);
     RdbRes (*handleFunction)(RdbParser *p, void *userData, RdbBulk func);
     /*** TODO: RdbHandlersStructCallbacks: stream stuff ... ***/
     RdbRes (*handleStreamLP)(RdbParser *p, void *userData, RdbBulk nodekey, RdbBulk streamLP);
@@ -226,17 +226,17 @@ typedef struct RdbHandlersStructCallbacks {
 typedef struct RdbHandlersDataCallbacks {
     HANDLERS_COMMON_CALLBACKS
     RdbRes (*handleStringValue)(RdbParser *p, void *userData, RdbBulk str);
-    RdbRes (*handleListElement)(RdbParser *p, void *userData, RdbBulk str);
-    RdbRes (*handleHashElement)(RdbParser *p, void *userData, RdbBulk field, RdbBulk value, uint64_t totalNumElm);
-    RdbRes (*handleSetElement)(RdbParser *p, void *userData, RdbBulk elm, uint64_t totalNumElm);
+    RdbRes (*handleListItem)(RdbParser *p, void *userData, RdbBulk item);
+    RdbRes (*handleHashFieldValue)(RdbParser *p, void *userData, RdbBulk field, RdbBulk value);
+    RdbRes (*handleSetMember)(RdbParser *p, void *userData, RdbBulk member);
 
     /*** TODO: RdbHandlersDataCallbacks: handleZsetElement ***/
-    RdbRes (*handleZsetElement)(RdbParser *p, void *userData, RdbBulk elm, double score, uint64_t totalNumElm);
+    RdbRes (*handleZsetMember)(RdbParser *p, void *userData, RdbBulk member, double score);
 
     /*** TODO: RdbHandlersDataCallbacks: stream stuff ... ***/
 
     RdbRes (*handleStreamMetadata)(RdbParser *p, void *userData, RdbStreamMeta *meta);
-    RdbRes (*handleStreamElement)(RdbParser *p, void *userData, RdbStreamID *id, RdbBulk field, RdbBulk value, uint64_t totalNumElm);
+    RdbRes (*handleStreamItem)(RdbParser *p, void *userData, RdbStreamID *id, RdbBulk field, RdbBulk value);
 
     RdbRes (*handleStreamNewCGroup)(RdbParser *p, void *userData, RdbBulk grpName, RdbStreamGroupMeta *meta);
     RdbRes (*handleStreamCGroupPendingEntry)(RdbParser *p, void *userData, RdbStreamPendingEntry *pendingEntry);
@@ -329,6 +329,19 @@ _LIBRDB_API void RDB_IgnoreChecksum(RdbParser *p);
 _LIBRDB_API void RDB_setLogLevel(RdbParser *p, RdbLogLevel l);
 _LIBRDB_API void RDB_setLogger(RdbParser *p, RdbLoggerCB f);
 _LIBRDB_API void RDB_log(RdbParser *p, RdbLogLevel lvl, const char *format, ...);
+
+/* Following function returns a hint for the total number of items in the current
+ * parsed key context - to assist with memory allocation or other optimizations.
+ * Return valid value inside the following callbacks:
+ * - [RdbHandlersStructCallbacks] handleHashPlain
+ * - [RdbHandlersStructCallbacks] handleSetPlain
+ * - [RdbHandlersDataCallbacks] handleHashFieldValue
+ * - [RdbHandlersDataCallbacks] handleSetMember
+ * - [RdbHandlersDataCallbacks] handleZsetMember
+ * - [RdbHandlersDataCallbacks] handleStreamItem
+ * Otherwise it returns -1.
+ */
+_LIBRDB_API int64_t RDB_getNumItemsHint(RdbParser *p);
 
 /****************************************************************
  * Pause the Parser

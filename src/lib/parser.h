@@ -160,7 +160,6 @@ typedef struct {
 } ElementListCtx;
 
 typedef struct {
-    uint64_t numItems;
     uint64_t left;
 } ElementSetCtx;
 
@@ -173,6 +172,7 @@ typedef struct {
     RdbKeyInfo info;
     ParsingElementType valueType;
     RdbHandlersLevel handleByLevel;
+    int64_t numItemsHint; /* hint for the total number of items in the current parsed key. -1 if unknown */
 } ElementKeyCtx;
 
 typedef struct {
@@ -208,7 +208,6 @@ typedef struct ElementCtx {
     ElementRawHashCtx rawHash;
 
     int state;  /* parsing-element state */
-
 } ElementCtx;
 
 /* The parser can handle one level of nested parsing-elements (PE), whereby a PE

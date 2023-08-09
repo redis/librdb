@@ -1,4 +1,13 @@
-/*
+/* parser.c - implementation of core parser (LEVEL1/2) & API
+ *
+ * This file includes:
+ * - implementation of most of the core API (librdb-api.h)
+ * - Main parsing-elements loop of the parser. See parserMainLoop().
+ * - Holds the parsing-element lookup table (peInfo[]) of the state machine.
+ * - Parsing LEVEL1 (RDB data-structures) and LEVEL2 (Redis data-types).
+ *   Parsing of LEVEL0 (raw data) is implemented at file parserRaw.c
+ *   (Description of the 3 levels available in README.md.)
+ *
  * It is recommended to read the "Parser implementation notes" section
  * in the README.md file as an introduction to this file implementation.
  */
@@ -74,6 +83,34 @@ struct ParsingElementInfo peInfo[PE_MAX] = {
         [PE_RAW_SET_LP]       = {elementRawSetLP, "elementRawSetLP", "Parsing raw set Listpack"},
 };
 
+/* Strings in ziplist/listpacks are embedded without '\0' termination. To avoid
+ * allocating a new memory just for passing it to CALL_HANDLERS_CB, we
+ * can follow these steps:
+ *
+ * 1. Save the last character that comes after the end of the packed
+ *    value in a temporary char (endCh). This is valid and not beyond
+ *    the size of the allocation since in ZP/LP it is guaranteed to have
+ *    a terminating byte at the end, which makes it safe.
+ *
+ * 2. Then allocate from cache `RQ_ALLOC_APP_BULK_REF` which will:
+ *    - Set last character '\0' to terminate the value.
+ *    - And mark the value as a referenced bulk allocation
+ *      (Note, iF app expects APP_BULK, then it is not possible to return
+ *      a reference and a new memory will be allocated instead with proper
+ *      termination of '\0').
+ *
+ *      First two steps are achieved by calling function allocEmbeddedBulk()
+ *
+ * 3. It is the caller responsibility to restore original char right after
+ *    calling CALL_HANDLERS_CB, simply by calling restoreEmbeddedBulk().
+ *    Otherwise ZP/LP will be left corrupted!
+ */
+typedef struct {
+    BulkInfo *binfo;
+    unsigned char endCh;  /* stores value of last char that was overriden with '\0' */
+    unsigned char *pEndCh; /* stores ref to last char that was overriden with '\0' */
+} EmbeddedBulk;
+
 /*** Environemnt Variables ***/
 const char *ENV_VAR_SIM_WAIT_MORE_DATA = "LIBRDB_SIM_WAIT_MORE_DATA"; /* simulate RDB_STATUS_WAIT_MORE_DATA by RDB reader */
 const char *ENV_VAR_DEBUG_DATA = "LIBRDB_DEBUG_DATA";  /* to print parsing-elements and theirs states */
@@ -96,12 +133,13 @@ static RdbHandlers *createHandlersCommon(RdbParser *p, void *userData, RdbFreeFu
 static void loggerCbDefault(RdbLogLevel l, const char *msg);
 static inline RdbStatus updateStateAfterParse(RdbParser *p, RdbStatus status);
 static void printParserState(RdbParser *p);
-BulkInfo *allocBulkForEmbeddedString(RdbParser *p,
+
+static inline void restoreEmbeddedBulk(EmbeddedBulk *embeddedBulk);
+BulkInfo *allocEmbeddedBulk(RdbParser *p,
                                     unsigned char *str,
                                     unsigned int slen,
                                     long long sval,
-                                    unsigned char *endCh,
-                                    unsigned char **pEndCh);
+                                    EmbeddedBulk *embeddedBulk);
 
 /*** RDB Reader function ***/
 static RdbStatus readRdbFromReader(RdbParser *p, size_t len, AllocTypeRq type, char *refBuf, BulkInfo **binfo);
@@ -161,6 +199,7 @@ _LIBRDB_API RdbParser *RDB_createParserRdb(RdbMemAlloc *memAlloc) {
     p->elmCtx.key.info.expiretime = -1;
     p->elmCtx.key.info.lru_idle = -1;
     p->elmCtx.key.info.lfu_freq = -1;
+    p->elmCtx.key.numItemsHint = -1;
 
     p->currOpcode = UINT32_MAX;
     p->deepIntegCheck = 1;
@@ -339,6 +378,10 @@ _LIBRDB_API void RDB_log(RdbParser *p, RdbLogLevel lvl, const char *format, ...)
         va_end(args);
         return;
     }
+}
+
+_LIBRDB_API int64_t RDB_getNumItemsHint(RdbParser *p) {
+    return p->elmCtx.key.numItemsHint;
 }
 
 _LIBRDB_API void RDB_setLogLevel(RdbParser *p, RdbLogLevel l) {
@@ -690,10 +733,10 @@ static void printParserState(RdbParser *p) {
 
 static void loggerCbDefault(RdbLogLevel l, const char *msg) {
     static char *logLevelStr[] = {
-            [RDB_LOG_ERR]    = ":: ERROR ::",
+            [RDB_LOG_ERR]  = ":: ERROR ::",
             [RDB_LOG_WRN]  = ":: WARN  ::",
-            [RDB_LOG_INF]     = ":: INFO  ::",
-            [RDB_LOG_DBG]    = ":: DEBUG ::",
+            [RDB_LOG_INF]  = ":: INFO  ::",
+            [RDB_LOG_DBG]  = ":: DEBUG ::",
     };
     printf("%s %s\n", logLevelStr[l], msg);
 }
@@ -737,25 +780,25 @@ static RdbStatus allocFromCache(RdbParser *p,
 }
 
 static inline RdbStatus unpackList(RdbParser *p, unsigned char *lp) {
-    unsigned char *eptr, endCh, *pEndCh, *item;
+    unsigned char *eptr, *item;
     unsigned int itemLen;
     long long itemVal;
 
     eptr = lpFirst( lp);
     while (eptr) {
-        BulkInfo *binfo;
+        EmbeddedBulk embBulk;
 
         item = lpGetValue(eptr, &itemLen, &itemVal);
 
-        if (!(binfo = allocBulkForEmbeddedString(p, item, itemLen, itemVal, &endCh, &pEndCh)))
+        if (!allocEmbeddedBulk(p, item, itemLen, itemVal, &embBulk))
             return RDB_STATUS_ERROR;
 
-        registerAppBulkForNextCb(p, binfo);
+        registerAppBulkForNextCb(p, embBulk.binfo);
         CALL_HANDLERS_CB(p,
-                         *pEndCh = endCh,   /* <<< finalize: restore modified char */
+                         restoreEmbeddedBulk(&embBulk), /*finalize*/
                          RDB_LEVEL_DATA,
-                         rdbData.handleListElement,
-                         binfo->ref);
+                         rdbData.handleListItem,
+                         embBulk.binfo->ref);
 
         eptr = lpNext( lp, eptr);
     }
@@ -793,23 +836,23 @@ static RdbStatus listZiplistItem(RdbParser *p, BulkInfo *ziplistBulk) {
 
     unsigned char *offsetZL = ziplistIndex(ziplistBulk->ref, 0);
     while (offsetZL != NULL) {
-        unsigned char *item, endChar, *pEndChar;
+        unsigned char *item;
         unsigned int itemLen;
         long long itemVal;
-        BulkInfo *binfo;
+        EmbeddedBulk embBulk;
 
         ziplistGet(offsetZL, &item, &itemLen, &itemVal);
         offsetZL = ziplistNext(ziplistBulk->ref, offsetZL);
 
-        if (!(binfo = allocBulkForEmbeddedString(p, item, itemLen, itemVal, &endChar, &pEndChar)))
+        if (!allocEmbeddedBulk(p, item, itemLen, itemVal, &embBulk))
             return RDB_STATUS_ERROR;
 
-        registerAppBulkForNextCb(p, binfo);
+        registerAppBulkForNextCb(p, embBulk.binfo);
         CALL_HANDLERS_CB(p,
-                         *pEndChar = endChar, // finalize by restore modified char
+                         restoreEmbeddedBulk(&embBulk);, /*finalize*/
                          RDB_LEVEL_DATA,
-                         rdbData.handleListElement,
-                         binfo->ref);
+                         rdbData.handleListItem,
+                         embBulk.binfo->ref);
     }
     return RDB_STATUS_OK;
 }
@@ -822,64 +865,46 @@ static int counterCallback(unsigned char *ptr, unsigned int head_count, void *us
     return 1;
 }
 
-/* Strings in ZP/LP are embedded without '\0' termination. To avoid
- * allocating a new memory just for passing it to CALL_HANDLERS_CB, we
- * can follow these steps:
- *
- * 1. Save the last character that comes after the end of the packed
- *    value in a temporary char (endCh). This is valid and not beyond
- *    the size of the allocation since in ZP/LP it is guaranteed to have
- *    a terminating byte at the end, which makes it safe.
- *
- * 2. Then allocate from cache `RQ_ALLOC_APP_BULK_REF` which will:
- *    - Set last character '\0' to terminate the value.
- *    - And mark the value as a referenced bulk allocation
- *      (Note, iF app expects APP_BULK, then it is not possible to return
- *      a reference and a new memory will be allocated instead with proper
- *      termination of '\0').
- *
- * 3. It is the caller responsibility to restore original char and write
- *    returned `endCh` to `pEndCh` before carry on. Otherwise
- *    ZP/LP will be left corrupted!
- */
-BulkInfo *allocBulkForEmbeddedString(RdbParser *p,
+static inline void restoreEmbeddedBulk(EmbeddedBulk *embeddedBulk) {
+    *(embeddedBulk->pEndCh) = embeddedBulk->endCh;
+}
+
+BulkInfo *allocEmbeddedBulk(RdbParser *p,
                                     unsigned char *str,
                                     unsigned int slen,
                                     long long sval,
-                                    unsigned char *endCh,
-                                    unsigned char **pEndCh)
+                                    EmbeddedBulk *embeddedBulk)
 {
     RdbStatus res;
-    BulkInfo *binfo;
     if (str) {
         unsigned char *strEnd = str + slen;
-        *endCh = *strEnd;
-        *pEndCh = strEnd;
-        res = allocFromCache(p, slen, RQ_ALLOC_APP_BULK_REF, (char *) str, &binfo);
+        embeddedBulk->endCh = *strEnd;
+        embeddedBulk->pEndCh = strEnd;
+        res = allocFromCache(p, slen, RQ_ALLOC_APP_BULK_REF, (char *) str, &(embeddedBulk->binfo));
         if (unlikely(res!=RDB_STATUS_OK)) return NULL;
     } else {
         static unsigned char dummy;
-        *pEndCh = &dummy;
+        embeddedBulk->pEndCh = &dummy;
         int buflen = 32;
-        res = allocFromCache(p, buflen, RQ_ALLOC_APP_BULK, NULL, &binfo);
+        res = allocFromCache(p, buflen, RQ_ALLOC_APP_BULK, NULL, &(embeddedBulk->binfo));
         if (unlikely(res!=RDB_STATUS_OK)) return NULL;
-        binfo->len = ll2string(binfo->ref, buflen, sval);
+        embeddedBulk->binfo->len = ll2string(embeddedBulk->binfo->ref, buflen, sval);
     }
-    return binfo;
+    return embeddedBulk->binfo;
 }
 
-RdbStatus hashZiplistPairs(RdbParser *p, BulkInfo *ziplistBulk) {
+RdbStatus hashZiplist(RdbParser *p, BulkInfo *ziplistBulk) {
     size_t items = 0;
 
-    if (unlikely(0 == ziplistValidateIntegrity(ziplistBulk->ref, ziplistBulk->len, 1, counterCallback, &items))) {
+    if (unlikely(0 == ziplistValidateIntegrity(ziplistBulk->ref, ziplistBulk->len, p->deepIntegCheck, counterCallback, &items))) {
         RDB_reportError(p, RDB_ERR_SSTYPE_INTEG_CHECK,
-                        "hashZiplistPairs(): Ziplist integrity check failed");
+                        "hashZiplist(): Ziplist integrity check failed");
         return RDB_STATUS_ERROR;
     }
 
     if (unlikely((items & 1))) {
         RDB_reportError(p, RDB_ERR_SSTYPE_INTEG_CHECK,
-                        "hashZiplistPairs(): Ziplist integrity check failed. Uneven number of items.");
+                        "hashZiplist(): Ziplist integrity check failed. Uneven number of items.");
         return RDB_STATUS_ERROR;
     }
 
@@ -889,49 +914,49 @@ RdbStatus hashZiplistPairs(RdbParser *p, BulkInfo *ziplistBulk) {
         return RDB_STATUS_OK;
     }
 
+    p->elmCtx.key.numItemsHint = items;
     unsigned char *iterZL = ziplistIndex(ziplistBulk->ref, 0);
     while (iterZL != NULL) {
-        unsigned char *field, *value, tmp1, tmp2, *pend1, *pend2;
+        unsigned char *field, *value;
         unsigned int fieldLen, valueLen;
         long long fieldVal, valueVal;
-        BulkInfo *binfo1, *binfo2;
+        EmbeddedBulk embBulk1, embBulk2;
 
         ziplistGet(iterZL, &field, &fieldLen, &fieldVal);
         iterZL = ziplistNext(ziplistBulk->ref, iterZL);
         ziplistGet(iterZL, &value, &valueLen, &valueVal);
         iterZL = ziplistNext(ziplistBulk->ref, iterZL);
 
-        if (!(binfo1 = allocBulkForEmbeddedString(p, field, fieldLen, fieldVal, &tmp1, &pend1)))
+        if (!allocEmbeddedBulk(p, field, fieldLen, fieldVal, &embBulk1))
             return RDB_STATUS_ERROR;
 
-        if (!(binfo2 = allocBulkForEmbeddedString(p, value, valueLen, valueVal, &tmp2, &pend2)))
+        if (!allocEmbeddedBulk(p, value, valueLen, valueVal, &embBulk2))
             return RDB_STATUS_ERROR;
 
-        registerAppBulkForNextCb(p, binfo1);
-        registerAppBulkForNextCb(p, binfo2);
+        registerAppBulkForNextCb(p, embBulk1.binfo);
+        registerAppBulkForNextCb(p, embBulk2.binfo);
         CALL_HANDLERS_CB(p,
-                         *pend1 = tmp1; *pend2 = tmp2, // finalize: restore modified char
+                         restoreEmbeddedBulk(&embBulk1); restoreEmbeddedBulk(&embBulk2);, /*finalize*/
                          RDB_LEVEL_DATA,
-                         rdbData.handleHashElement,
-                         binfo1->ref,
-                         binfo2->ref,
-                         items);
+                         rdbData.handleHashFieldValue,
+                         embBulk1.binfo->ref,
+                         embBulk2.binfo->ref);
     }
     return RDB_STATUS_OK;
 }
 
-RdbStatus hashListPackPairs(RdbParser *p, BulkInfo *lpBulk) {
+RdbStatus hashListPack(RdbParser *p, BulkInfo *lpBulk) {
     size_t items = 0;
 
-    if (unlikely(0 == lpValidateIntegrity(lpBulk->ref, lpBulk->len, 1, counterCallback, &items))) {
+    if (unlikely(0 == lpValidateIntegrity(lpBulk->ref, lpBulk->len, p->deepIntegCheck, counterCallback, &items))) {
         RDB_reportError(p, RDB_ERR_HASH_LP_INTEG_CHECK,
-                        "hashListPackPairs(): Listpack integrity check failed");
+                        "hashListPack(): Listpack integrity check failed");
         return RDB_STATUS_ERROR;
     }
 
     if (unlikely((items & 1))) {
         RDB_reportError(p, RDB_ERR_HASH_LP_INTEG_CHECK,
-                        "hashListPackPairs(): Listpack integrity check failed. Uneven number of items.");
+                        "hashListPack(): Listpack integrity check failed. Uneven number of items.");
         return RDB_STATUS_ERROR;
     }
 
@@ -941,44 +966,44 @@ RdbStatus hashListPackPairs(RdbParser *p, BulkInfo *lpBulk) {
         return RDB_STATUS_OK;
     }
 
+    p->elmCtx.key.numItemsHint = items;
     unsigned char *iterLP = lpFirst(lpBulk->ref);
     while (iterLP) {
-        unsigned char *field, *value, tmp1 = 'x', tmp2 = 'x', *pend1, *pend2;
+        unsigned char *field, *value;
         unsigned int fieldLen, valueLen;
         long long fieldVal, valueVal;
-        BulkInfo *binfo1, *binfo2;
+        EmbeddedBulk embBulk1, embBulk2;
 
         field = lpGetValue(iterLP, &fieldLen, &fieldVal);
         iterLP = lpNext(lpBulk->ref, iterLP);
         value = lpGetValue(iterLP, &valueLen, &valueVal);
         iterLP = lpNext(lpBulk->ref, iterLP);
 
-        if (!(binfo1 = allocBulkForEmbeddedString(p, field, fieldLen, fieldVal, &tmp1, &pend1)))
+        if (!allocEmbeddedBulk(p, field, fieldLen, fieldVal, &embBulk1))
             return RDB_STATUS_ERROR;
 
-        if (!(binfo2 = allocBulkForEmbeddedString(p, value, valueLen, valueVal, &tmp2, &pend2)))
+        if (!allocEmbeddedBulk(p, value, valueLen, valueVal, &embBulk2))
             return RDB_STATUS_ERROR;
 
-        registerAppBulkForNextCb(p, binfo1);
-        registerAppBulkForNextCb(p, binfo2);
+        registerAppBulkForNextCb(p, embBulk1.binfo);
+        registerAppBulkForNextCb(p, embBulk2.binfo);
         CALL_HANDLERS_CB(p,
-                         *pend1 = tmp1; *pend2 = tmp2, // finalize: restore modified char
+                         restoreEmbeddedBulk(&embBulk1); restoreEmbeddedBulk(&embBulk2);, /*finalize*/
                          RDB_LEVEL_DATA,
-                         rdbData.handleHashElement,
-                         binfo1->ref,
-                         binfo2->ref,
-                         items);
+                         rdbData.handleHashFieldValue,
+                         embBulk1.binfo->ref,
+                         embBulk2.binfo->ref);
     }
     return RDB_STATUS_OK;
 }
 
-RdbStatus hashZipMapPairs(RdbParser *p, BulkInfo *zpBulk) {
-    unsigned char *field, *value, tmp1 = 'x', tmp2 = 'x', *pend1, *pend2;
+RdbStatus hashZipMap(RdbParser *p, BulkInfo *zpBulk) {
+    unsigned char *field, *value;
     unsigned int fieldLen, valueLen;
 
-    if (unlikely(0 == zipmapValidateIntegrity(zpBulk->ref, zpBulk->len, 1))) {
+    if (unlikely(0 == zipmapValidateIntegrity(zpBulk->ref, zpBulk->len, p->deepIntegCheck))) {
         RDB_reportError(p, RDB_ERR_HASH_ZM_INTEG_CHECK,
-                        "hashZipMapPairs(): Zipmap integrity check failed");
+                        "hashZipMap(): Zipmap integrity check failed");
         return RDB_STATUS_ERROR;
     }
 
@@ -989,25 +1014,25 @@ RdbStatus hashZipMapPairs(RdbParser *p, BulkInfo *zpBulk) {
     }
 
     unsigned char *zmIter = zipmapRewind(zpBulk->ref);
-    unsigned int items = zipmapLen(zpBulk->ref);
+    p->elmCtx.key.numItemsHint = zipmapLen(zpBulk->ref);
+
     while ((zmIter = zipmapNext(zmIter, &field, &fieldLen, &value, &valueLen)) != NULL) {
-        BulkInfo *binfo1, *binfo2;
+        EmbeddedBulk embBulk1, embBulk2;
 
-        if (!(binfo1 = allocBulkForEmbeddedString(p, field, fieldLen, 0, &tmp1, &pend1)))
+        if (!allocEmbeddedBulk(p, field, fieldLen, 0, &embBulk1))
             return RDB_STATUS_ERROR;
 
-        if (!(binfo2 = allocBulkForEmbeddedString(p, value, valueLen, 0, &tmp2, &pend2)))
+        if (!allocEmbeddedBulk(p, value, valueLen, 0, &embBulk2))
             return RDB_STATUS_ERROR;
 
-        registerAppBulkForNextCb(p, binfo1);
-        registerAppBulkForNextCb(p, binfo2);
+        registerAppBulkForNextCb(p, embBulk1.binfo);
+        registerAppBulkForNextCb(p, embBulk2.binfo);
         CALL_HANDLERS_CB(p,
-                         *pend1 = tmp1; *pend2 = tmp2, // finalize: restore modified char
+                         restoreEmbeddedBulk(&embBulk1); restoreEmbeddedBulk(&embBulk2);, /*finalize*/
                          RDB_LEVEL_DATA,
-                         rdbData.handleHashElement,
-                         binfo1->ref,
-                         binfo2->ref,
-                         items);
+                         rdbData.handleHashFieldValue,
+                         embBulk1.binfo->ref,
+                         embBulk2.binfo->ref);
     }
     return RDB_STATUS_OK;
 }
@@ -1225,6 +1250,9 @@ RdbStatus elementNextRdbType(RdbParser *p) {
 RdbStatus elementEndKey(RdbParser *p) {
     /*** ENTER SAFE STATE ***/
     CALL_HANDLERS_CB(p, NOP, p->elmCtx.key.handleByLevel, common.handleEndKey);
+
+    p->elmCtx.key.numItemsHint = -1;
+
     return nextParsingElement(p, PE_NEXT_RDB_TYPE);
 }
 
@@ -1238,7 +1266,7 @@ RdbStatus elementString(RdbParser *p) {
 
     registerAppBulkForNextCb(p, binfoStr);
     if (lvl == RDB_LEVEL_STRUCT)
-        CALL_HANDLERS_CB(p, NOP, lvl, rdbStruct.handleStringValue, binfoStr->ref);
+        CALL_HANDLERS_CB(p, NOP, lvl, rdbStruct.handleString, binfoStr->ref);
     else
         CALL_HANDLERS_CB(p, NOP, lvl, rdbData.handleStringValue, binfoStr->ref);
 
@@ -1269,7 +1297,7 @@ RdbStatus elementList(RdbParser *p) {
             if (p->elmCtx.key.handleByLevel == RDB_LEVEL_STRUCT)
                 CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_STRUCT, rdbStruct.handleListPlain, binfoNode->ref);
             else
-                CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_DATA, rdbData.handleListElement, binfoNode->ref);
+                CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_DATA, rdbData.handleListItem, binfoNode->ref);
 
             return (--ctx->list.numNodes) ? updateElementState(p, ST_LIST_NEXT_NODE) : nextParsingElement(p, PE_END_KEY);
         }
@@ -1325,7 +1353,7 @@ RdbStatus elementQuickList(RdbParser *p) {
                 if (lvl == RDB_LEVEL_STRUCT)
                     CALL_HANDLERS_CB(p, NOP, lvl, rdbStruct.handleListPlain, binfoNode->ref);
                 else
-                    CALL_HANDLERS_CB(p, NOP, lvl, rdbData.handleListElement, binfoNode->ref);
+                    CALL_HANDLERS_CB(p, NOP, lvl, rdbData.handleListItem, binfoNode->ref);
 
             } else {
 
@@ -1378,6 +1406,7 @@ RdbStatus elementHash(RdbParser *p) {
         case ST_HASH_HEADER:
             IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &(ctx->hash.numFields), NULL, NULL));
 
+            ctx->key.numItemsHint = ctx->hash.numFields;
             ctx->hash.visitingField = 0;
 
             /*** ENTER SAFE STATE ***/
@@ -1400,14 +1429,12 @@ RdbStatus elementHash(RdbParser *p) {
             if (p->elmCtx.key.handleByLevel == RDB_LEVEL_STRUCT) {
                 CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_STRUCT, rdbStruct.handleHashPlain,
                                  binfoField->ref,
-                                 binfoValue->ref,
-                                 ctx->hash.numFields);
+                                 binfoValue->ref);
             }
             else {
-                CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_DATA, rdbData.handleHashElement,
+                CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_DATA, rdbData.handleHashFieldValue,
                                  binfoField->ref,
-                                 binfoValue->ref,
-                                 ctx->hash.numFields);
+                                 binfoValue->ref);
             }
 
             ++ctx->hash.visitingField;
@@ -1428,7 +1455,7 @@ RdbStatus elementHashZL(RdbParser *p) {
 
     /*** ENTER SAFE STATE ***/
 
-    if (RDB_STATUS_ERROR == hashZiplistPairs(p, ziplistBulk))
+    if (RDB_STATUS_ERROR == hashZiplist(p, ziplistBulk))
         return RDB_STATUS_ERROR;
 
     return nextParsingElement(p, PE_END_KEY);
@@ -1441,7 +1468,7 @@ RdbStatus elementHashLP(RdbParser *p) {
 
     /*** ENTER SAFE STATE ***/
 
-    if (RDB_STATUS_ERROR == hashListPackPairs(p, listpackBulk))
+    if (RDB_STATUS_ERROR == hashListPack(p, listpackBulk))
         return RDB_STATUS_ERROR;
 
     return nextParsingElement(p, PE_END_KEY);
@@ -1454,7 +1481,7 @@ RdbStatus elementHashZM(RdbParser *p) {
 
     /*** ENTER SAFE STATE ***/
 
-    if (RDB_STATUS_ERROR == hashZipMapPairs(p, zipmapBulk))
+    if (RDB_STATUS_ERROR == hashZipMap(p, zipmapBulk))
         return RDB_STATUS_ERROR;
 
     return nextParsingElement(p, PE_END_KEY);
@@ -1468,11 +1495,11 @@ RdbStatus elementSet(RdbParser *p) {
     } ;
     switch (ctx->state) {
         case ST_SET_HEADER:
-            IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &(ctx->set.numItems), NULL, NULL));
+            IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, (uint64_t *) &(ctx->key.numItemsHint), NULL, NULL));
 
             /*** ENTER SAFE STATE ***/
 
-            ctx->set.left = ctx->set.numItems;
+            ctx->set.left = ctx->key.numItemsHint;
 
             updateElementState(p, ST_SET_NEXT_ITEM); /* fall-thru */
 
@@ -1484,9 +1511,9 @@ RdbStatus elementSet(RdbParser *p) {
 
             registerAppBulkForNextCb(p, binfoItem);
             if (p->elmCtx.key.handleByLevel == RDB_LEVEL_STRUCT)
-                CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_STRUCT, rdbStruct.handleSetPlain, binfoItem->ref, ctx->set.numItems);
+                CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_STRUCT, rdbStruct.handleSetPlain, binfoItem->ref);
             else
-                CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_DATA, rdbData.handleSetElement, binfoItem->ref, ctx->set.numItems);
+                CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_DATA, rdbData.handleSetMember, binfoItem->ref);
 
             return (--ctx->set.left) ? updateElementState(p, ST_SET_NEXT_ITEM) : nextParsingElement(p, PE_END_KEY);
         }
@@ -1504,7 +1531,6 @@ RdbStatus elementSetIS(RdbParser *p) {
 
     /*** ENTER SAFE STATE ***/
 
-
     if (unlikely(!intsetValidateIntegrity(intsetBulk->ref, intsetBulk->len, p->deepIntegCheck))) {
         RDB_reportError(p, RDB_ERR_SET_IS_INTEG_CHECK, "elementSetIS(): INTSET integrity check failed");
         return RDB_STATUS_ERROR;
@@ -1514,7 +1540,7 @@ RdbStatus elementSetIS(RdbParser *p) {
         registerAppBulkForNextCb(p, intsetBulk);
         CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_STRUCT, rdbStruct.handleSetIS, intsetBulk->ref);
     } else {
-        unsigned long numElm = intsetLen((const intset *) intsetBulk->ref);
+        p->elmCtx.key.numItemsHint = intsetLen((const intset *) intsetBulk->ref);
         int64_t intele;
 
         for (int iter = 0; intsetGet(intsetBulk->ref, iter, &intele) != 0; ++iter) {
@@ -1525,7 +1551,7 @@ RdbStatus elementSetIS(RdbParser *p) {
             bulkInt->len = ll2string(bulkInt->ref, buflen, intele);
 
             registerAppBulkForNextCb(p, bulkInt);
-            CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_DATA, rdbData.handleSetElement, bulkInt->ref, numElm);
+            CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_DATA, rdbData.handleSetMember, bulkInt->ref);
         }
     }
 
@@ -1533,8 +1559,8 @@ RdbStatus elementSetIS(RdbParser *p) {
 }
 
 RdbStatus elementSetLP(RdbParser *p) {
-    unsigned char *iterator, endCh, *pEndCh, *item;
-    BulkInfo *listpackBulk, *itemBulk;
+    unsigned char *iterator, *item;
+    BulkInfo *listpackBulk;
     unsigned int itemLen;
     long long itemVal;
 
@@ -1543,13 +1569,13 @@ RdbStatus elementSetLP(RdbParser *p) {
     /*** ENTER SAFE STATE ***/
 
     /* Doesn't check for duplication */
-    if (!lpValidateIntegrity(listpackBulk->ref, listpackBulk->len, 1 /*deep_integrity*/, NULL, 0)) {
+    if (!lpValidateIntegrity(listpackBulk->ref, listpackBulk->len, p->deepIntegCheck, NULL, 0)) {
         RDB_reportError(p, RDB_ERR_SET_LP_INTEG_CHECK, "elementSetLP(): LISTPACK integrity check failed");
         return RDB_STATUS_ERROR;
     }
 
     /* TODO: handle empty listpack */
-    unsigned long size = lpLength(listpackBulk->ref);
+    p->elmCtx.key.numItemsHint = lpLength(listpackBulk->ref);
 
     if (p->elmCtx.key.handleByLevel == RDB_LEVEL_STRUCT) {
         registerAppBulkForNextCb(p, listpackBulk);
@@ -1557,17 +1583,18 @@ RdbStatus elementSetLP(RdbParser *p) {
     } else {
         iterator = lpFirst(listpackBulk->ref);
         while (iterator) {
+            EmbeddedBulk embBulk;
             item = lpGetValue(iterator, &itemLen, &itemVal);
 
-            if (!(itemBulk = allocBulkForEmbeddedString(p, item, itemLen, itemVal, &endCh, &pEndCh)))
+            if (!allocEmbeddedBulk(p, item, itemLen, itemVal, &embBulk))
                 return RDB_STATUS_ERROR;
 
-            registerAppBulkForNextCb(p, itemBulk);
+            registerAppBulkForNextCb(p, embBulk.binfo);
             CALL_HANDLERS_CB(p,
-                             *pEndCh = endCh,   /* <<< finalize: restore modified char */
+                             restoreEmbeddedBulk(&embBulk);, /*finalize*/
                              RDB_LEVEL_DATA,
-                             rdbData.handleSetElement,
-                             itemBulk->ref, size);
+                             rdbData.handleSetMember,
+                             embBulk.binfo->ref);
 
             iterator = lpNext(listpackBulk->ref, iterator);
         }

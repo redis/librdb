@@ -30,10 +30,10 @@ static int getOptArg(int argc, char* argv[], int *at,  char *abbrvOpt, char *opt
 
 static void logger(RdbLogLevel l, const char *msg) {
     static char *logLevelStr[] = {
-            [RDB_LOG_ERR]    = ":: ERROR ::",
+            [RDB_LOG_ERR]  = ":: ERROR ::",
             [RDB_LOG_WRN]  = ":: WARN  ::",
-            [RDB_LOG_INF]     = ":: INFO  ::",
-            [RDB_LOG_DBG]    = ":: DEBUG ::",
+            [RDB_LOG_INF]  = ":: INFO  ::",
+            [RDB_LOG_DBG]  = ":: DEBUG ::",
     };
 
     if (logfile != NULL)

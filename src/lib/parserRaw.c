@@ -1,7 +1,15 @@
+/* parserRaw.c - implementation of core parser (LEVEL0)
+ *
+ * Whereas parsing-depth of file parser.c is LEVEL1 (RDB data-structures) and LEVEL2
+ * (Redis data-types), this file parses LEVEL0 of raw data. The incentive to this
+ * separation is that the similarity between LEVEL1 and LEVEL2 is higher which
+ * expects structured data, whereas LEVEL0 is a dump of data that its main purpose
+ * is to use it along with RESTORE command to play it against live Redis server.
+ */
+
 #include <assert.h>
 #include <string.h>
 #include "../../deps/redis/lzf.h"
-/*#include "../deps/redis/crc64.h"*/
 #include "bulkAlloc.h"
 #include "parser.h"
 #include "defines.h"
