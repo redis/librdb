@@ -332,15 +332,7 @@ _LIBRDB_API void RDB_log(RdbParser *p, RdbLogLevel lvl, const char *format, ...)
 
 /* Following function returns a hint for the total number of items in the current
  * parsed key context - to assist with memory allocation or other optimizations.
- * Return valid value inside the following callbacks:
- * - [RdbHandlersStructCallbacks] handleHashPlain
- * - [RdbHandlersStructCallbacks] handleSetPlain
- * - [RdbHandlersDataCallbacks] handleHashFieldValue
- * - [RdbHandlersDataCallbacks] handleSetMember
- * - [RdbHandlersDataCallbacks] handleZsetMember
- * - [RdbHandlersDataCallbacks] handleStreamItem
- * Otherwise it returns -1.
- */
+ * If hint is not available, then return -1. */
 _LIBRDB_API int64_t RDB_getNumItemsHint(RdbParser *p);
 
 /****************************************************************
