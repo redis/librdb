@@ -933,7 +933,7 @@ RdbStatus hashZiplist(RdbParser *p, BulkInfo *ziplistBulk) {
         CALL_HANDLERS_CB(p,
                          restoreEmbeddedBulk(&embBulk1); restoreEmbeddedBulk(&embBulk2);, /*finalize*/
                          RDB_LEVEL_DATA,
-                         rdbData.handleHashFieldValue,
+                         rdbData.handleHashField,
                          embBulk1.binfo->ref,
                          embBulk2.binfo->ref);
     }
@@ -985,7 +985,7 @@ RdbStatus hashListPack(RdbParser *p, BulkInfo *lpBulk) {
         CALL_HANDLERS_CB(p,
                          restoreEmbeddedBulk(&embBulk1); restoreEmbeddedBulk(&embBulk2);, /*finalize*/
                          RDB_LEVEL_DATA,
-                         rdbData.handleHashFieldValue,
+                         rdbData.handleHashField,
                          embBulk1.binfo->ref,
                          embBulk2.binfo->ref);
     }
@@ -1025,7 +1025,7 @@ RdbStatus hashZipMap(RdbParser *p, BulkInfo *zpBulk) {
         CALL_HANDLERS_CB(p,
                          restoreEmbeddedBulk(&embBulk1); restoreEmbeddedBulk(&embBulk2);, /*finalize*/
                          RDB_LEVEL_DATA,
-                         rdbData.handleHashFieldValue,
+                         rdbData.handleHashField,
                          embBulk1.binfo->ref,
                          embBulk2.binfo->ref);
     }
@@ -1427,7 +1427,7 @@ RdbStatus elementHash(RdbParser *p) {
                                  binfoValue->ref);
             }
             else {
-                CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_DATA, rdbData.handleHashFieldValue,
+                CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_DATA, rdbData.handleHashField,
                                  binfoField->ref,
                                  binfoValue->ref);
             }

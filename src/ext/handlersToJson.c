@@ -389,7 +389,7 @@ RdbxToJson *RDBX_createHandlersToJson(RdbParser *p, const char *filename, RdbxTo
     if (ctx->conf.level == RDB_LEVEL_DATA) {
         callbacks.dataCb.handleStringValue = toJsonString;
         callbacks.dataCb.handleListItem = toJsonList;
-        callbacks.dataCb.handleHashFieldValue = toJsonHash;
+        callbacks.dataCb.handleHashField = toJsonHash;
         callbacks.dataCb.handleSetMember = toJsonSet;
         RDB_createHandlersData(p, &callbacks.dataCb, ctx, deleteRdbToJsonCtx);
     } else  if (ctx->conf.level == RDB_LEVEL_STRUCT) {

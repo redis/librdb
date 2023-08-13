@@ -244,7 +244,7 @@ typedef struct RdbHandlersStructCallbacks {
     /* Callback to handle a zipmap-based hash value */
     RdbRes (*handleHashZM)(RdbParser *p, void *userData, RdbBulk zipmap);
 
-    /* Callback to handle an item from a plain-hash */
+    /* Callback to handle an item from a plain-set */
     RdbRes (*handleSetPlain)(RdbParser *p, void *userData, RdbBulk item);
     /* Callback to handle an intset-based set value */
     RdbRes (*handleSetIS)(RdbParser *p, void *userData, RdbBulk intset);
@@ -282,7 +282,7 @@ typedef struct RdbHandlersDataCallbacks {
     /* Callback to handle an item from a list */
     RdbRes (*handleListItem)(RdbParser *p, void *userData, RdbBulk item);
     /* Callback to handle a field-value pair within a hash */
-    RdbRes (*handleHashFieldValue)(RdbParser *p, void *userData, RdbBulk field, RdbBulk value);
+    RdbRes (*handleHashField)(RdbParser *p, void *userData, RdbBulk field, RdbBulk value);
     /* Callback to handle a member within a set */
     RdbRes (*handleSetMember)(RdbParser *p, void *userData, RdbBulk member);
 

@@ -135,7 +135,7 @@ RdbxFilterKey *RDBX_createHandlersFilterKey(RdbParser *p,
     if (RDB_getNumHandlers(p, RDB_LEVEL_DATA)>0) {
         callbacks.dataCb.handleStringValue = filterString;
         callbacks.dataCb.handleListItem = filterList;
-        callbacks.dataCb.handleHashFieldValue = filterHash;
+        callbacks.dataCb.handleHashField = filterHash;
         RDB_createHandlersData(p, &callbacks.dataCb, ctx, deleteFilterKeyCtx);
     }
 

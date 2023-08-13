@@ -387,7 +387,7 @@ _LIBRDB_API RdbxToResp *RDBX_createHandlersToResp(RdbParser *p, RdbxToRespConf *
     dataCb.handleEndKey = toRespEndKey;
     dataCb.handleStringValue = toRespString;
     dataCb.handleListItem = toRespList;
-    dataCb.handleHashFieldValue = toRespHash;
+    dataCb.handleHashField = toRespHash;
     dataCb.handleSetMember = toRespSet;
     dataCb.handleEndRdb = toRespEndRdb;
     RDB_createHandlersData(p, &dataCb, ctx, deleteRdbToRespCtx);
