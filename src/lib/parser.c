@@ -19,6 +19,7 @@
 #include "../../deps/redis/crc64.h"
 #include "bulkAlloc.h"
 #include "parser.h"
+#include "version.h"
 #include "defines.h"
 #include "../../deps/redis/endianconv.h"
 #include "../../deps/redis/util.h"
@@ -525,16 +526,10 @@ _LIBRDB_API void RDB_handleByLevel(RdbParser *p, RdbDataType type, RdbHandlersLe
 }
 
 _LIBRDB_API const char *RDB_getLibVersion(int *major, int *minor, int *patch) {
-    static int initialized = 0;
-    static char versionString[50];
-
-    if (major) *major = RDB_MAJOR_VERSION;
-    if (minor) *minor = RDB_MINOR_VERSION;
-    if (patch) *patch = RDB_PATCH_VERSION;
-    if (!initialized) sprintf(versionString, "%d.%d.%d", *major, *minor, *patch);
-    initialized = 1;
-
-    return versionString;
+    if (major) *major = LIBRDB_MAJOR_VERSION;
+    if (minor) *minor = LIBRDB_MINOR_VERSION;
+    if (patch) *patch = LIBRDB_PATCH_VERSION;
+    return LIBRDB_VERSION_STRING;
 }
 
 /*** various functions ***/

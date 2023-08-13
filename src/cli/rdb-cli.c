@@ -53,6 +53,7 @@ static void loggerWrap(RdbLogLevel l, const char *msg, ...) {
 }
 
 static void printUsage() {
+    printf("[v%s] ", RDB_getLibVersion(NULL,NULL,NULL));
     printf("Usage: rdb-cli /path/to/dump.rdb [OPTIONS] <FORMAT {json|resp|redis}> [FORMAT_OPTIONS]\n");
     printf("OPTIONS:\n");
     printf("\t-k, --filter-key <REGEX>      Filter keys using regular expressions\n");
@@ -60,6 +61,7 @@ static void printUsage() {
 
     printf("FORMAT_OPTIONS ('json'):\n");
     printf("\t-w, --with-aux-values         Include auxiliary values\n");
+    printf("\t-f, --flatten                 Print flatten json, without DBs Parenthesis\n");
     printf("\t-o, --output <FILE>           Specify the output file. If not specified, output goes to stdout\n\n");
 
     printf("FORMAT_OPTIONS ('resp'):\n");
@@ -77,12 +79,13 @@ static void printUsage() {
 
 static RdbRes formatJson(RdbParser *parser, char *input, int argc, char **argv) {
     char *output = NULL;/*default:stdout*/
-    int withAuxValues = 0; /*without*/
+    int flatten=0, withAuxValues = 0; /*without*/
 
     /* parse specific command options */
     for (int at = 1; at < argc; ++at) {
         char *opt = argv[at];
         if (getOptArg(argc, argv, &at, "-o", "--output", opt, NULL, &output)) continue;
+        if (getOptArg(argc, argv, &at, "-f", "--flatten", opt, &flatten, NULL)) continue;
         if (getOptArg(argc, argv, &at, "-w", "--with-aux-values", opt, &withAuxValues, NULL)) continue;
 
         fprintf(stderr, "Invalid JSON [FORMAT_OPTIONS] argument: %s\n", opt);
@@ -94,7 +97,7 @@ static RdbRes formatJson(RdbParser *parser, char *input, int argc, char **argv) 
             .level = RDB_LEVEL_DATA,
             .encoding = RDBX_CONV_JSON_ENC_PLAIN,
             .skipAuxField = !(withAuxValues),
-            .flatten = 1,
+            .flatten = flatten,
     };
 
     if (RDBX_createReaderFile(parser, input) == NULL)

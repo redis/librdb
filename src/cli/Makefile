@@ -27,7 +27,8 @@ endif
 
 ######################################### RULES #######################################
 all: $(TARGET_APP)
-	mv $(TARGET_APP) ../../bin
+	rm -f ../../bin/$(TARGET_APP)
+	cp $(TARGET_APP) ../../bin/
 	@echo "Done.";
 
 $(TARGET_APP): %: %.c
