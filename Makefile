@@ -1,12 +1,14 @@
-ifeq ($(BUILD_TLS),yes)
-export BUILD_TLS
-endif
 
-# DESTDIR Specifies library installation folder
-LDCONFIG=ldconfig
 PREFIX?=/usr/local
-DESTDIR?=/usr/local/lib
-INSTALL_BIN=$(PREFIX)/bin
+DESTDIR?=
+INSTALL = /usr/bin/install -c
+BINDIR=$(DESTDIR)$(PREFIX)/bin
+LIBDIR=$(DESTDIR)$(PREFIX)/lib
+INCDIR=$(DESTDIR)$(PREFIX)/include/librdb/
+
+VERSION = $(shell grep -oP '(?<=LIBRDB_VERSION_STRING ")[0-9]+\.[0-9]+\.[0-9]+' ./src/lib/version.h)
+
+# ------------------------- ALL --------------------------------------
 
 all:
 	$(MAKE) -C deps -f Makefile all
@@ -23,47 +25,67 @@ clean:
 	$(MAKE) -C examples -f Makefile clean
 	$(MAKE) -C test -f Makefile clean
 
-distclean:
-	$(MAKE) -C deps -f Makefile clean
-	$(MAKE) -C src/lib -f Makefile clean
-	$(MAKE) -C src/ext -f Makefile clean
-	$(MAKE) -C src/cli -f Makefile clean
-	$(MAKE) -C examples -f Makefile clean
-	$(MAKE) -C test -f Makefile clean
+distclean: clean
 
-example:
+example: all
 	cd examples && export LD_LIBRARY_PATH=../lib && ./example1
 
-test:
+# ------------------------- TEST --------------------------------------
+
+build_test: all
 	$(MAKE) -C test -f Makefile all
+
+test: build_test
 	./runtests
 
-valgrind:
-	$(MAKE) -C test -f Makefile all
+valgrind: build_test
 	./runtests -v
 
+# ------------------------- INSTALL --------------------------------------
 install: all
-	cp lib/librdb.so $(DESTDIR)
-	cp lib/librdb-ext.so $(DESTDIR)
-	cp bin/rdb-cli $(INSTALL_BIN)
-	($(LDCONFIG) || true)  >/dev/null 2>&1;
+	$(INSTALL) -d $(BINDIR)
+	$(INSTALL) -m 755 bin/rdb-cli $(BINDIR)/rdb-cli-$(VERSION)
+	ln -fs $(BINDIR)/rdb-cli-$(VERSION) $(BINDIR)/rdb-cli
+	$(INSTALL) -d $(LIBDIR)
+	$(INSTALL) -m 755 lib/librdb.so $(LIBDIR)/librdb.so.$(VERSION)
+	ln -fs $(LIBDIR)/librdb.so.$(VERSION) $(LIBDIR)/librdb.so
+	$(INSTALL) -m 755 lib/librdb-ext.so $(LIBDIR)/librdb-ext.so.$(VERSION)
+	ln -fs $(LIBDIR)/librdb-ext.so.$(VERSION) $(LIBDIR)/librdb-ext.so
+	$(INSTALL) -m 755 lib/librdb.a $(LIBDIR)/librdb.a.$(VERSION)
+	ln -fs $(LIBDIR)/librdb.a.$(VERSION) $(LIBDIR)/librdb.a
+	$(INSTALL) -m 755 lib/librdb-ext.a $(LIBDIR)/librdb-ext.a.$(VERSION)
+	ln -fs $(LIBDIR)/librdb-ext.a.$(VERSION) $(LIBDIR)/librdb-ext.a
+	$(INSTALL) -d $(INCDIR)
+	$(INSTALL) -m 644 api/librdb-api.h $(INCDIR)
+	$(INSTALL) -m 644 api/librdb-ext-api.h $(INCDIR)
 
 uninstall:
-	rm -f $(DESTDIR)/lib/librdb.so
-	rm -f $(DESTDIR)/lib/librdb-ext.so
-	rm -f $(INSTALL_BIN)/rdb-cli
+	rm -f $(BINDIR)/rdb-cli || true
+	rm -f $(BINDIR)/rdb-cli-$(VERSION)
+	rm -f $(LIBDIR)/librdb.so
+	rm -f $(LIBDIR)/librdb.so.$(VERSION)
+	rm -f $(LIBDIR)/librdb-ext.so
+	rm -f $(LIBDIR)/librdb-ext.so.$(VERSION)
+	rm -f $(LIBDIR)/librdb.a
+	rm -f $(LIBDIR)/librdb.a.$(VERSION)
+	rm -f $(LIBDIR)/librdb-ext.a
+	rm -f $(LIBDIR)/librdb-ext.a.$(VERSION)
+	rm -f $(INCDIR)/librdb-api.h
+	rm -f $(INCDIR)/librdb-ext-api.h
+
+# ------------------------- HELP --------------------------------------
 
 help:
-	@echo "Target rules:"
-	@echo "    all        - Build parser libraries, tests, and run tests."
-	@echo "    test       - Run tests with shared lib."
-	@echo "    valgrind   - Run tests with static lib and valgrind."
-	@echo "    example    - Run the example."
+	@echo "librdb (v$(VERSION)) target rules:"
+	@echo "    all        - Build parser libraries, tests, and run tests"
+	@echo "    test       - Run tests with shared lib"
+	@echo "    valgrind   - Run tests with static lib and valgrind"
+	@echo "    example    - Run the example"
 	@echo "    clean      - Clean without deps folders"
 	@echo "    distclean  - Clean including deps folders"
-	@echo "    install    - Build parser libraries and copy to DESTDIR (?=/usr/local/lib)"
-	@echo "    uninstall  - Remove libraries from DESTDIR."
-	@echo "    help       - Prints this message."
+	@echo "    install    - Build parser libraries and copy to (DESTDIR)\(PREFIX)"
+	@echo "    uninstall  - Remove libraries from (DESTDIR)\(PREFIX)"
+	@echo "    help       - Prints this message"
 
 
-.PHONY: all clean test help valgrind install uninstall
+.PHONY: all test valgrind example clean distclean install uninstall build_test help version

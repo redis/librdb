@@ -55,7 +55,7 @@ static void test_rdb_cli_resp_common(const char *rdbfile) {
 
 static void test_rdb_cli_json(void **state) {
     UNUSED(state);
-    runSystemCmd("./bin/rdb-cli ./test/dumps/multiple_lists_strings.rdb json -w -o ./test/tmp/out.json  > /dev/null ");
+    runSystemCmd("./bin/rdb-cli ./test/dumps/multiple_lists_strings.rdb json -f -w -o ./test/tmp/out.json  > /dev/null ");
     assert_json_equal(DUMP_FOLDER("multiple_lists_strings_data.json"), "./test/tmp/out.json");
 }
 

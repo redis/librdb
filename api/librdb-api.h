@@ -477,10 +477,6 @@ _LIBRDB_API void RDB_handleByLevel(RdbParser *p, RdbDataType t, RdbHandlersLevel
  * Follows the semantic semver versioning convention
  *****************************************************************/
 
-#define RDB_MAJOR_VERSION 255
-#define RDB_MINOR_VERSION 255
-#define RDB_PATCH_VERSION 255
-
 _LIBRDB_API const char* RDB_getLibVersion(int* major, int* minor, int* patch);
 
 #ifdef __cplusplus
