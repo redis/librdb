@@ -71,7 +71,7 @@ static void deleteRdbToJsonCtx(RdbParser *p, void *data) {
     if (ctx->keyCtx.key)
         RDB_bulkCopyFree(p, ctx->keyCtx.key);
 
-    RDB_log(p, RDB_LOG_DEBUG, "handlersToJson: Closing file %s", ctx->filename);
+    RDB_log(p, RDB_LOG_DBG, "handlersToJson: Closing file %s", ctx->filename);
 
     if ((ctx->outfile) && (ctx->outfile != stdout))
         fclose(ctx->outfile);
@@ -92,7 +92,7 @@ static RdbxToJson *initRdbToJsonCtx(RdbParser *p, const char *filename, RdbxToJs
         return NULL;
     }
 
-    RDB_log(p, RDB_LOG_DEBUG, "handlersToJson: Opening file %s", filename);
+    RDB_log(p, RDB_LOG_DBG, "handlersToJson: Opening file %s", filename);
 
     /* init RdbToJson context */
     RdbxToJson *ctx = RDB_alloc(p, sizeof(RdbxToJson));
@@ -134,7 +134,7 @@ static RdbRes handlingAuxField(RdbParser *p, void *userData, RdbBulk auxkey, Rdb
     return RDB_OK;
 }
 
-static RdbRes handlingEndKey(RdbParser *p, void *userData) {
+static RdbRes toJsonEndKey(RdbParser *p, void *userData) {
     RdbxToJson *ctx = userData;
 
     /* output json part */
@@ -152,7 +152,7 @@ static RdbRes handlingEndKey(RdbParser *p, void *userData) {
             break; /* do nothing */
         default:
             RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
-                            "handlingEndKey(): Invalid state value: %d", ctx->state);
+                            "toJsonEndKey(): Invalid state value: %d", ctx->state);
             return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
     }
 
@@ -165,12 +165,12 @@ static RdbRes handlingEndKey(RdbParser *p, void *userData) {
     return RDB_OK;
 }
 
-static RdbRes handlingNewKey(RdbParser *p, void *userData, RdbBulk key, RdbKeyInfo *info) {
+static RdbRes toJsonNewKey(RdbParser *p, void *userData, RdbBulk key, RdbKeyInfo *info) {
     RdbxToJson *ctx = userData;
 
     if (ctx->state != R2J_IN_DB) {
         RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
-                        "handlingNewKey(): Invalid state value: %d", ctx->state);
+                        "toJsonNewKey(): Invalid state value: %d", ctx->state);
         return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
     }
     ctx->keyCtx.key = RDB_bulkClone(p, key);
@@ -187,7 +187,7 @@ static RdbRes handlingNewKey(RdbParser *p, void *userData, RdbBulk key, RdbKeyIn
     return RDB_OK;
 }
 
-static RdbRes handlingNewDb(RdbParser *p, void *userData, int db) {
+static RdbRes toJsonNewDb(RdbParser *p, void *userData, int db) {
     UNUSED(db);
     RdbxToJson *ctx = userData;
 
@@ -202,7 +202,7 @@ static RdbRes handlingNewDb(RdbParser *p, void *userData, int db) {
         }
     } else {
         RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
-                        "handlingNewDb(): Invalid state value: %d", ctx->state);
+                        "toJsonNewDb(): Invalid state value: %d", ctx->state);
         return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
     }
 
@@ -213,12 +213,12 @@ static RdbRes handlingNewDb(RdbParser *p, void *userData, int db) {
     return RDB_OK;
 }
 
-static RdbRes handlingEndRdb(RdbParser *p, void *userData) {
+static RdbRes toJsonEndRdb(RdbParser *p, void *userData) {
     RdbxToJson *ctx = userData;
 
     if (ctx->state != R2J_IN_DB) {
         RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
-                        "handlingEndRdb(): Invalid state value: %d", ctx->state);
+                        "toJsonEndRdb(): Invalid state value: %d", ctx->state);
         return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
     }
 
@@ -236,24 +236,24 @@ static RdbRes handlingEndRdb(RdbParser *p, void *userData) {
 
 /*** Handling data ***/
 
-static RdbRes handlingString(RdbParser *p, void *userData, RdbBulk value) {
+static RdbRes toJsonString(RdbParser *p, void *userData, RdbBulk string) {
     UNUSED(p);
     RdbxToJson *ctx = userData;
 
     /* output json part */
-    outputQuotedEscaping(ctx, value, RDB_bulkLen(p, value));
+    outputQuotedEscaping(ctx, string, RDB_bulkLen(p, string));
 
     return RDB_OK;
 }
 
-static RdbRes handlingList(RdbParser *p, void *userData, RdbBulk str) {
+static RdbRes toJsonList(RdbParser *p, void *userData, RdbBulk item) {
     RdbxToJson *ctx = userData;
 
     if (ctx->state == R2J_IN_KEY) {
 
         /* output json part */
         ouput_fprintf(ctx, "[");
-        outputQuotedEscaping(ctx, str, RDB_bulkLen(p, str));
+        outputQuotedEscaping(ctx, item, RDB_bulkLen(p, item));
 
         /* update new state */
         ctx->state = R2J_IN_LIST;
@@ -262,13 +262,70 @@ static RdbRes handlingList(RdbParser *p, void *userData, RdbBulk str) {
 
         /* output json part */
         ouput_fprintf(ctx, ",");
-        outputQuotedEscaping(ctx, str, RDB_bulkLen(p, str));
+        outputQuotedEscaping(ctx, item, RDB_bulkLen(p, item));
 
         /* state unchanged */
 
     } else {
         RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
-                        "handlingList(): Invalid state value: %d", ctx->state);
+                        "toJsonList(): Invalid state value: %d", ctx->state);
+        return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
+    }
+
+    return RDB_OK;
+}
+
+static RdbRes toJsonSet(RdbParser *p, void *userData, RdbBulk member) {
+    RdbxToJson *ctx = userData;
+
+    if (ctx->state == R2J_IN_KEY) {
+
+        /* output json part */
+        ouput_fprintf(ctx, "[");
+        outputQuotedEscaping(ctx, member, RDB_bulkLen(p, member));
+
+        /* update new state */
+        ctx->state = R2J_IN_SET;
+
+    } else if (ctx->state == R2J_IN_SET) {
+
+        /* output json part */
+        ouput_fprintf(ctx, ",");
+        outputQuotedEscaping(ctx, member, RDB_bulkLen(p, member));
+
+        /* state unchanged */
+
+    } else {
+        RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
+                        "toJsonSet(): Invalid state value: %d", ctx->state);
+        return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
+    }
+
+    return RDB_OK;
+}
+
+static RdbRes toJsonHash(RdbParser *p, void *userData, RdbBulk field, RdbBulk value) {
+    RdbxToJson *ctx = userData;
+
+    if (ctx->state == R2J_IN_KEY) {
+
+        /* output json part */
+        ouput_fprintf(ctx, "{");
+        outputQuotedEscaping(ctx, field, RDB_bulkLen(p, field));
+        ouput_fprintf(ctx, ":");
+        outputQuotedEscaping(ctx, value, RDB_bulkLen(p, value));
+        /* update new state */
+        ctx->state = R2J_IN_HASH;
+    } else if (ctx->state == R2J_IN_HASH) {
+        /* output json part */
+        ouput_fprintf(ctx, ",");
+        outputQuotedEscaping(ctx, field, RDB_bulkLen(p, field));
+        ouput_fprintf(ctx, ":");
+        outputQuotedEscaping(ctx, field, RDB_bulkLen(p, field));
+
+    } else {
+        RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
+                        "toJsonList(): Invalid state value: %d", ctx->state);
         return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
     }
 
@@ -277,10 +334,21 @@ static RdbRes handlingList(RdbParser *p, void *userData, RdbBulk str) {
 
 /*** Handling struct ***/
 
+static RdbRes toJsonStruct(RdbParser *p, void *userData, RdbBulk value) {
+    UNUSED(p);
+    RdbxToJson *ctx = userData;
+
+    /* output json part */
+    ouput_fprintf(ctx, "[");
+    outputQuotedEscaping(ctx, value, RDB_bulkLen(p, value));
+    ouput_fprintf(ctx, "]");
+
+    return RDB_OK;
+}
 
 /*** Handling raw ***/
 
-static RdbRes handlingFrag(RdbParser *p, void *userData, RdbBulk frag) {
+static RdbRes toJsonFrag(RdbParser *p, void *userData, RdbBulk frag) {
     UNUSED(p);
     RdbxToJson *ctx = userData;
     /* output json part */
@@ -288,7 +356,7 @@ static RdbRes handlingFrag(RdbParser *p, void *userData, RdbBulk frag) {
     return RDB_OK;
 }
 
-static RdbRes handlingRawBegin(RdbParser *p, void *userData, size_t size) {
+static RdbRes toJsonRawBegin(RdbParser *p, void *userData, size_t size) {
     UNUSED(p);
     UNUSED(size);
     RdbxToJson *ctx = userData;
@@ -296,7 +364,7 @@ static RdbRes handlingRawBegin(RdbParser *p, void *userData, size_t size) {
     return RDB_OK;
 }
 
-static RdbRes handlingRawEnd(RdbParser *p, void *userData) {
+static RdbRes toJsonRawEnd(RdbParser *p, void *userData) {
     UNUSED(p);
     RdbxToJson *ctx = userData;
     ouput_fprintf(ctx, "\"");
@@ -313,25 +381,37 @@ RdbxToJson *RDBX_createHandlersToJson(RdbParser *p, const char *filename, RdbxTo
     if (!(ctx->conf.skipAuxField))
         callbacks.common.handleAuxField = handlingAuxField;
 
-    callbacks.common.handleNewKey = handlingNewKey;
-    callbacks.common.handleEndKey = handlingEndKey;
-    callbacks.common.handleNewDb = handlingNewDb;
-    callbacks.common.handleEndRdb = handlingEndRdb;
+    callbacks.common.handleNewKey = toJsonNewKey;
+    callbacks.common.handleEndKey = toJsonEndKey;
+    callbacks.common.handleNewDb = toJsonNewDb;
+    callbacks.common.handleEndRdb = toJsonEndRdb;
 
     if (ctx->conf.level == RDB_LEVEL_DATA) {
-        callbacks.dataCb.handleStringValue = handlingString;
-        callbacks.dataCb.handleListElement = handlingList;
+        callbacks.dataCb.handleStringValue = toJsonString;
+        callbacks.dataCb.handleListItem = toJsonList;
+        callbacks.dataCb.handleHashField = toJsonHash;
+        callbacks.dataCb.handleSetMember = toJsonSet;
         RDB_createHandlersData(p, &callbacks.dataCb, ctx, deleteRdbToJsonCtx);
     } else  if (ctx->conf.level == RDB_LEVEL_STRUCT) {
-        callbacks.structCb.handleStringValue = handlingString;
-        callbacks.structCb.handleListLP = handlingList;
-        callbacks.structCb.handleListZL = handlingList;
-        callbacks.structCb.handleListNode = handlingList;
+        callbacks.structCb.handleString = toJsonString;
+        /* list */
+        callbacks.structCb.handleListPlain = toJsonList;
+        callbacks.structCb.handleListLP = toJsonStruct;
+        callbacks.structCb.handleListZL = toJsonStruct;
+        /* hash */
+        callbacks.structCb.handleHashPlain = toJsonHash;
+        callbacks.structCb.handleHashZL = toJsonStruct;
+        callbacks.structCb.handleHashLP = toJsonStruct;
+        callbacks.structCb.handleHashZM = toJsonStruct;
+        /* set */
+        callbacks.structCb.handleSetPlain = toJsonSet;
+        callbacks.structCb.handleSetIS = toJsonStruct;
+        callbacks.structCb.handleSetLP = toJsonStruct;
         RDB_createHandlersStruct(p, &callbacks.structCb, ctx, deleteRdbToJsonCtx);
     } else if (ctx->conf.level == RDB_LEVEL_RAW) {
-        callbacks.rawCb.handleFrag = handlingFrag;
-        callbacks.rawCb.handleBegin = handlingRawBegin;
-        callbacks.rawCb.handleEnd = handlingRawEnd;
+        callbacks.rawCb.handleFrag = toJsonFrag;
+        callbacks.rawCb.handleBegin = toJsonRawBegin;
+        callbacks.rawCb.handleEnd = toJsonRawEnd;
         RDB_createHandlersRaw(p, &callbacks.rawCb, ctx, deleteRdbToJsonCtx);
     }
 

@@ -272,9 +272,22 @@ int compare_json_lines(const void* line1, const void* line2) {
     return strcmp(*(const char**)line1, *(const char**)line2);
 }
 
+
+static unsigned char xorstr(const char *str) {
+    unsigned char result = 0;
+
+    while (*str) {
+        if ((*str != ' ') && (*str != '\t') )
+        result ^= *str;
+        str++;
+    }
+
+    return result;
+}
+
 /* sanitize, sort, and compare */
 #define MAX_LINE_LENGTH  4096
-void assert_json_equal(const char* filename1, const char* filename2) {
+void assert_json_equal(const char* filename1, const char* filename2, int ignoreListOrder) {
     char line1[MAX_LINE_LENGTH];
     char line2[MAX_LINE_LENGTH];
     char* lines1[MAX_LINE_LENGTH];
@@ -306,11 +319,15 @@ void assert_json_equal(const char* filename1, const char* filename2) {
     qsort(lines1, lineCount1, sizeof(char *), compare_json_lines);
     qsort(lines2, lineCount2, sizeof(char *), compare_json_lines);
 
-    for (int i = 0; i < lineCount1; i++)
-        if (strcmp(lines1[i], lines2[i]) != 0) {
-            printf ("strcmp fail: [%s] [%s]\n", lines1[i], lines2[i]);
+    for (int i = 0; i < lineCount1; i++) {
+        /* simplify cmp for ignoreListOrder */
+        if ( ((ignoreListOrder) && (xorstr(lines1[i]) != xorstr(lines2[i]))) ||
+             ((!ignoreListOrder) && (strcmp(lines1[i], lines2[i]) != 0)) )
+        {
+            printf("strcmp fail: [%s] [%s]\n", lines1[i], lines2[i]);
             goto end_cmp;
         }
+    }
 
     res = 0;
 

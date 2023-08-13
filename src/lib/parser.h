@@ -75,6 +75,7 @@ typedef struct BulkInfo {
     void *ref;
     size_t len;    /* allocation size, not including '\0' at the end */
     size_t written;
+    struct BulkInfo *next;
 } BulkInfo;
 
 /* Allocation requests from the parser to BulkPool */
@@ -110,10 +111,19 @@ typedef enum ParsingElementType {
 
     PE_NEW_KEY,
     PE_END_KEY,
+
+    /* parsing data types */
     PE_STRING,
     PE_LIST,
     PE_QUICKLIST,
-    PE_ZIPLIST,
+    PE_LIST_ZL,
+    PE_HASH,
+    PE_HASH_ZL,
+    PE_HASH_LP,
+    PE_HASH_ZM,
+    PE_SET,
+    PE_SET_IS,
+    PE_SET_LP,
 
     /* parsing raw data types */
     PE_RAW_NEW_KEY,
@@ -121,7 +131,14 @@ typedef enum ParsingElementType {
     PE_RAW_STRING,
     PE_RAW_LIST,
     PE_RAW_QUICKLIST,
-    PE_RAW_ZIPLIST,
+    PE_RAW_LIST_ZL,
+    PE_RAW_HASH,
+    PE_RAW_HASH_ZL,
+    PE_RAW_HASH_LP,
+    PE_RAW_HASH_ZM,
+    PE_RAW_SET,
+    PE_RAW_SET_IS,
+    PE_RAW_SET_LP,
 
     PE_END_OF_FILE,
     PE_MAX
@@ -143,9 +160,19 @@ typedef struct {
 } ElementListCtx;
 
 typedef struct {
+    uint64_t left;
+} ElementSetCtx;
+
+typedef struct {
+    uint64_t numFields;
+    uint64_t visitingField;
+} ElementHashCtx;
+
+typedef struct {
     RdbKeyInfo info;
     ParsingElementType valueType;
     RdbHandlersLevel handleByLevel;
+    int64_t numItemsHint; /* hint for the total number of items in the current parsed key. -1 if unknown */
 } ElementKeyCtx;
 
 typedef struct {
@@ -159,16 +186,28 @@ typedef struct {
     uint64_t container;
 } ElementRawListCtx;
 
+typedef struct {
+    uint64_t numItems;
+} ElementRawSetCtx;
+
+typedef struct {
+    uint64_t numFields;
+    uint64_t  visitField;
+} ElementRawHashCtx;
+
 typedef struct ElementCtx {
     ElementKeyCtx key;
     ElementListCtx list;
+    ElementSetCtx set;
+    ElementHashCtx hash;
 
     /* raw elements context */
     ElementRawStringCtx rawString;
     ElementRawListCtx rawList;
+    ElementRawSetCtx rawSet;
+    ElementRawHashCtx rawHash;
 
     int state;  /* parsing-element state */
-
 } ElementCtx;
 
 /* The parser can handle one level of nested parsing-elements (PE), whereby a PE
@@ -380,13 +419,30 @@ RdbStatus elementExpireTimeMsec(RdbParser *p);
 RdbStatus elementString(RdbParser *p);
 RdbStatus elementList(RdbParser *p);
 RdbStatus elementQuickList(RdbParser *p);
-RdbStatus elementZiplist(RdbParser *p);
+RdbStatus elementListZL(RdbParser *p);
+RdbStatus elementHash(RdbParser *p);
+RdbStatus elementHashZL(RdbParser *p);
+RdbStatus elementHashLP(RdbParser *p);
+RdbStatus elementHashZM(RdbParser *p);
+RdbStatus elementSet(RdbParser *p);
+RdbStatus elementSetIS(RdbParser *p);
+RdbStatus elementSetLP(RdbParser *p);
+
 /*** Raw Parsing Elements ***/
 RdbStatus elementRawNewKey(RdbParser *p);
 RdbStatus elementRawEndKey(RdbParser *p);
 RdbStatus elementRawList(RdbParser *p);
 RdbStatus elementRawQuickList(RdbParser *p);
 RdbStatus elementRawString(RdbParser *p);
-RdbStatus elementRawZiplist(RdbParser *p);
+RdbStatus elementRawListZL(RdbParser *p);
+RdbStatus elementRawHash(RdbParser *p);
+RdbStatus elementRawHashZL(RdbParser *p);
+RdbStatus elementRawHashLP(RdbParser *p);
+RdbStatus elementRawHashZM(RdbParser *p);
+RdbStatus elementRawSet(RdbParser *p);
+RdbStatus elementRawSetIS(RdbParser *p);
+RdbStatus elementRawSetLP(RdbParser *p);
+
+
 
 #endif /*LIBRDB_PARSER_H*/

@@ -144,7 +144,7 @@ static inline RdbRes writevWrap(RdbxToResp *ctx, const struct iovec *iov, int cn
 
 /*** Handling common ***/
 
-static RdbRes toRespHandlingNewDb(RdbParser *p, void *userData, int dbid) {
+static RdbRes toRespNewDb(RdbParser *p, void *userData, int dbid) {
     UNUSED(p);
 
     struct iovec iov[10];
@@ -161,7 +161,7 @@ static RdbRes toRespHandlingNewDb(RdbParser *p, void *userData, int dbid) {
     return writevWrap(ctx, iov, 4, 1, 1);
 }
 
-static RdbRes toRespHandlingNewRdb(RdbParser *p, void *userData, int rdbVersion) {
+static RdbRes toRespStartRdb(RdbParser *p, void *userData, int rdbVersion) {
     UNUSED(p);
     RdbxToResp *ctx = userData;
 
@@ -175,7 +175,7 @@ static RdbRes toRespHandlingNewRdb(RdbParser *p, void *userData, int rdbVersion)
 
 /* TODO: support option rdb2resp del key before write */
 /* TODO: support expiry */
-static RdbRes toRespHandlingNewKey(RdbParser *p, void *userData, RdbBulk key, RdbKeyInfo *info) {
+static RdbRes toRespNewKey(RdbParser *p, void *userData, RdbBulk key, RdbKeyInfo *info) {
     UNUSED(info);
     RdbxToResp *ctx = userData;
 
@@ -191,7 +191,7 @@ static RdbRes toRespHandlingNewKey(RdbParser *p, void *userData, RdbBulk key, Rd
     return RDB_OK;
 }
 
-static RdbRes toRespHandlingEndKey(RdbParser *p, void *userData) {
+static RdbRes toRespEndKey(RdbParser *p, void *userData) {
     UNUSED(p);
     RdbxToResp *ctx = userData;
 
@@ -204,11 +204,11 @@ static RdbRes toRespHandlingEndKey(RdbParser *p, void *userData) {
 
 /*** Handling data ***/
 
-static RdbRes toRespHandlingString(RdbParser *p, void *userData, RdbBulk value) {
+static RdbRes toRespString(RdbParser *p, void *userData, RdbBulk string) {
     RdbxToResp *ctx = userData;
 
     char keyLenStr[64], valLenStr[64];
-    int valLen = RDB_bulkLen(p, value);
+    int valLen = RDB_bulkLen(p, string);
 
     /*** fillup iovec ***/
 
@@ -219,20 +219,20 @@ static RdbRes toRespHandlingString(RdbParser *p, void *userData, RdbBulk value) 
     iov_stringLen(&iov[1], ctx->keyCtx.keyLen, keyLenStr);
     IOV_STRING(&iov[2], ctx->keyCtx.key, ctx->keyCtx.keyLen);
     IOV_CONST_STR(&iov[3], "\r\n$");
-    /* write value */
+    /* write string */
     iov_stringLen(&iov[4], valLen, valLenStr);
-    IOV_STRING(&iov[5], value, valLen);
+    IOV_STRING(&iov[5], string, valLen);
     IOV_CONST_STR(&iov[6], "\r\n");
     return writevWrap(ctx, iov, 7, 1, 1);
 }
 
-static RdbRes toRespHandlingList(RdbParser *p, void *userData, RdbBulk value) {
+static RdbRes toRespList(RdbParser *p, void *userData, RdbBulk item) {
     RdbxToResp *ctx = userData;
 
     /*** fillup iovec ***/
 
     char keyLenStr[64], valLenStr[64];
-    int valLen = RDB_bulkLen(p, value);
+    int valLen = RDB_bulkLen(p, item);
 
     struct iovec iov[7];
     /* write RPUSH */
@@ -241,14 +241,63 @@ static RdbRes toRespHandlingList(RdbParser *p, void *userData, RdbBulk value) {
     iov_stringLen(&iov[1], ctx->keyCtx.keyLen, keyLenStr);
     IOV_STRING(&iov[2], ctx->keyCtx.key, ctx->keyCtx.keyLen);
     IOV_CONST_STR(&iov[3], "\r\n$");
-    /* write value */
+    /* write item */
     iov_stringLen(&iov[4], valLen, valLenStr);
-    IOV_STRING(&iov[5], value, valLen);
+    IOV_STRING(&iov[5], item, valLen);
     IOV_CONST_STR(&iov[6], "\r\n");
     return writevWrap(ctx, iov, 7, 1, 1);
 }
 
-static RdbRes toRespHandlingEndRdb(RdbParser *p, void *userData) {
+static RdbRes toRespHash(RdbParser *p, void *userData, RdbBulk field, RdbBulk value) {
+    RdbxToResp *ctx = userData;
+
+    /*** fillup iovec ***/
+
+    char keyLenStr[64], fieldLenStr[64], valueLenStr[64];
+    int fieldLen = RDB_bulkLen(p, field);
+    int valueLen = RDB_bulkLen(p, value);
+
+    struct iovec iov[10];
+    /* write RPUSH */
+    IOV_CONST_STR(&iov[0], "*4\r\n$4\r\nHSET\r\n$");
+    /* write key */
+    iov_stringLen(&iov[1], ctx->keyCtx.keyLen, keyLenStr);
+    IOV_STRING(&iov[2], ctx->keyCtx.key, ctx->keyCtx.keyLen);
+    IOV_CONST_STR(&iov[3], "\r\n$");
+    /* write field */
+    iov_stringLen(&iov[4], fieldLen, fieldLenStr);
+    IOV_STRING(&iov[5], field, fieldLen);
+    IOV_CONST_STR(&iov[6], "\r\n$");
+    /* write value */
+    iov_stringLen(&iov[7], valueLen, valueLenStr);
+    IOV_STRING(&iov[8], value, valueLen);
+    IOV_CONST_STR(&iov[9], "\r\n");
+    return writevWrap(ctx, iov, sizeof(iov)/sizeof(iov[0]), 1, 1);
+}
+
+static RdbRes toRespSet(RdbParser *p, void *userData, RdbBulk member) {
+    RdbxToResp *ctx = userData;
+
+    /*** fillup iovec ***/
+
+    char keyLenStr[64], valLenStr[64];
+    int valLen = RDB_bulkLen(p, member);
+
+    struct iovec iov[7];
+    /* write RPUSH */
+    IOV_CONST_STR(&iov[0], "*3\r\n$4\r\nSADD\r\n$");
+    /* write key */
+    iov_stringLen(&iov[1], ctx->keyCtx.keyLen, keyLenStr);
+    IOV_STRING(&iov[2], ctx->keyCtx.key, ctx->keyCtx.keyLen);
+    IOV_CONST_STR(&iov[3], "\r\n$");
+    /* write member */
+    iov_stringLen(&iov[4], valLen, valLenStr);
+    IOV_STRING(&iov[5], member, valLen);
+    IOV_CONST_STR(&iov[6], "\r\n");
+    return writevWrap(ctx, iov, 7, 1, 1);
+}
+
+static RdbRes toRespEndRdb(RdbParser *p, void *userData) {
     UNUSED(p);
     RdbxToResp *ctx = userData;
     RdbxRespWriter *writer = &ctx->respWriter;
@@ -258,7 +307,7 @@ static RdbRes toRespHandlingEndRdb(RdbParser *p, void *userData) {
 
 /*** Handling raw ***/
 
-static RdbRes toRespHandlingRawBegin(RdbParser *p, void *userData, size_t size) {
+static RdbRes toRespRawBegin(RdbParser *p, void *userData, size_t size) {
     UNUSED(p);
     RdbxToResp *ctx = userData;
 
@@ -267,7 +316,7 @@ static RdbRes toRespHandlingRawBegin(RdbParser *p, void *userData, size_t size) 
     return RDB_OK;
 }
 
-static RdbRes toRespHandlingRawFrag(RdbParser *p, void *userData, RdbBulk frag) {
+static RdbRes toRespRawFrag(RdbParser *p, void *userData, RdbBulk frag) {
     UNUSED(p);
     RdbxToResp *ctx = userData;
     struct iovec iov[10];
@@ -291,7 +340,7 @@ static RdbRes toRespHandlingRawFrag(RdbParser *p, void *userData, RdbBulk frag) 
     return writevWrap(ctx, iov, iovs, 1, 0);
 }
 
-static RdbRes toRespHandlingRawFragEnd(RdbParser *p, void *userData) {
+static RdbRes toRespRawFragEnd(RdbParser *p, void *userData) {
     UNUSED(p);
     RdbxToResp *ctx = userData;
     uint64_t *crc = &(ctx->crc);
@@ -331,24 +380,26 @@ _LIBRDB_API RdbxToResp *RDBX_createHandlersToResp(RdbParser *p, RdbxToRespConf *
 
     RdbHandlersDataCallbacks dataCb;
     memset(&dataCb, 0, sizeof(RdbHandlersDataCallbacks));
-    dataCb.handleNewRdb = toRespHandlingNewRdb;
+    dataCb.handleStartRdb = toRespStartRdb;
     if (ctx->conf.applySelectDbCmds)
-        dataCb.handleNewDb = toRespHandlingNewDb;
-    dataCb.handleNewKey = toRespHandlingNewKey;
-    dataCb.handleEndKey = toRespHandlingEndKey;
-    dataCb.handleStringValue = toRespHandlingString;
-    dataCb.handleListElement = toRespHandlingList;
-    dataCb.handleEndRdb = toRespHandlingEndRdb;
+        dataCb.handleNewDb = toRespNewDb;
+    dataCb.handleNewKey = toRespNewKey;
+    dataCb.handleEndKey = toRespEndKey;
+    dataCb.handleStringValue = toRespString;
+    dataCb.handleListItem = toRespList;
+    dataCb.handleHashField = toRespHash;
+    dataCb.handleSetMember = toRespSet;
+    dataCb.handleEndRdb = toRespEndRdb;
     RDB_createHandlersData(p, &dataCb, ctx, deleteRdbToRespCtx);
 
     RdbHandlersRawCallbacks rawCb;
     memset(&rawCb, 0, sizeof(RdbHandlersRawCallbacks));
-    rawCb.handleNewRdb = NULL; /* already registered to this common callback */
-    rawCb.handleNewKey = toRespHandlingNewKey;
-    rawCb.handleEndKey = toRespHandlingEndKey;
-    rawCb.handleFrag = toRespHandlingRawFrag;
-    rawCb.handleBegin = toRespHandlingRawBegin;
-    rawCb.handleEnd = toRespHandlingRawFragEnd;
+    rawCb.handleStartRdb = NULL; /* already registered to this common callback */
+    rawCb.handleNewKey = toRespNewKey;
+    rawCb.handleEndKey = toRespEndKey;
+    rawCb.handleFrag = toRespRawFrag;
+    rawCb.handleBegin = toRespRawBegin;
+    rawCb.handleEnd = toRespRawFragEnd;
     RDB_createHandlersRaw(p, &rawCb, ctx, deleteRdbToRespCtx);
     return ctx;
 }

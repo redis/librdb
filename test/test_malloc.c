@@ -35,7 +35,7 @@ static void test_extern_alloc(void **state) {
         };
 
         RdbParser *parser = RDB_createParserRdb(&mem);
-        RDB_setLogLevel(parser, RDB_LOG_ERROR);
+        RDB_setLogLevel(parser, RDB_LOG_ERR);
 
         assert_non_null(RDBX_createReaderFile(parser, DUMP_FOLDER("single_key.rdb")));
         RdbxToJsonConf r2jConf = {RDB_LEVEL_DATA, RDBX_CONV_JSON_ENC_PLAIN, 0, 1};
@@ -45,7 +45,7 @@ static void test_extern_alloc(void **state) {
         while ((status = RDB_parse(parser)) == RDB_STATUS_WAIT_MORE_DATA);
         assert_int_equal(status, RDB_STATUS_OK);
         RDB_deleteParser(parser);
-        assert_json_equal(TMP_FOLDER("single_key.json"), DUMP_FOLDER("single_key_data.json"));
+        assert_json_equal(TMP_FOLDER("single_key.json"), DUMP_FOLDER("single_key_data.json"), 0);
 
         switch (bulkAllocType) {
             case RDB_BULK_ALLOC_STACK:

@@ -23,17 +23,15 @@ typedef struct {
 } BulkHeapHdr;
 
 struct BulkPool {
-    BulkInfo *queue;
-    int writeIdx;
-    int readIdx;
-    int queueSize;
+    unsigned int qsize;
+    BulkInfo *queue, *qread, *qwrite;
 
     RdbMemAlloc mem;
     BulkStack *stack;
 };
 
 /* BulkPool */
-static inline BulkInfo *bulkPoolEnqueue(BulkPool *pool);
+static inline BulkInfo *bulkPoolEnqueue(RdbParser *p, BulkPool *pool);
 static inline BulkType bulkPoolResolveAllocType(RdbParser *p, AllocTypeRq rq);
 
 /* BulkHeap */
@@ -96,9 +94,12 @@ _LIBRDB_API  RdbBulkCopy RDB_bulkCopyClone(RdbParser *p, RdbBulkCopy b, size_t l
 BulkPool *bulkPoolInit(RdbMemAlloc *mem) {
 
     BulkPool *pool = (BulkPool *) mem->malloc(sizeof(BulkPool));
-    pool->queue = (BulkInfo *) mem->malloc(INIT_QUEUE_SIZE * sizeof(BulkInfo));
-    pool->readIdx = pool->writeIdx = 0;
-    pool->queueSize = INIT_QUEUE_SIZE;
+
+    /* init queue with a dummy item */
+    pool->qread = pool->qwrite = pool->queue = mem->malloc(sizeof(BulkInfo));
+    pool->queue->next = NULL;
+    pool->qsize = 0;
+
     pool->stack = bulkStackInit(mem, STACK_SIZE);
     pool->mem = *mem;
     return pool;
@@ -106,10 +107,17 @@ BulkPool *bulkPoolInit(RdbMemAlloc *mem) {
 
 void bulkPoolRelease(RdbParser *p) {
     BulkPool *pool = p->cache;
+
     if (!pool) return;
 
     bulkPoolFlush(p);
-    RDB_free(p, pool->queue);
+
+    while (pool->queue != NULL) {
+        BulkInfo *curr = pool->queue;
+        pool->queue = pool->queue->next;
+        RDB_free(p, curr);
+    }
+
     bulkStackRelease(pool->stack);
     RDB_free(p, pool);
     p->cache = NULL;
@@ -165,8 +173,8 @@ BulkInfo *bulkPoolAlloc(RdbParser *p, size_t len, AllocTypeRq typeRq, char *refB
 
     /* if no cached buffers in queue (i.e. first time to read this data)
      * then allocate new buffer and fill it from reader */
-    if (pool->readIdx == pool->writeIdx) {
-        binfo = bulkPoolEnqueue(pool);
+    if (pool->qread == pool->qwrite) {
+        binfo = bulkPoolEnqueue(p, pool);
         BulkType type = bulkPoolResolveAllocType(p, typeRq);
         bulkPoolAllocNew(p, len, type, refBuf, binfo);
 
@@ -176,68 +184,63 @@ BulkInfo *bulkPoolAlloc(RdbParser *p, size_t len, AllocTypeRq typeRq, char *refB
             memcpy(binfo->ref, refBuf, len);
 
     } else {
-        binfo = &(pool->queue[pool->readIdx]);
+        binfo = pool->qread;
 
         /* assert allocation request (after rollback) has exact same length as before */
-        if (len != pool->queue[pool->readIdx].len)
-            assert (len == pool->queue[pool->readIdx].len);
+        assert (len == pool->qread->len);
     }
 
-
-    ++pool->readIdx;
+    pool->qread = pool->qread->next;
     return binfo;
 }
 
 void bulkPoolFlush(RdbParser *p) {
     BulkPool *pool = p->cache;
-    for (int i = 0 ; i < pool->writeIdx ; ++i) {
+    for (BulkInfo *iter = pool->queue ; iter != pool->qwrite ; iter = iter->next) {
         /* release all bulks that are not allocated in stack */
-        switch(pool->queue[i].bulkType) {
+        switch(iter->bulkType) {
             case BULK_TYPE_REF:
                 break;
             case BULK_TYPE_STACK:
                 break;
             case BULK_TYPE_HEAP:
-                bulkHeapDecrRef(p, pool->queue[i].ref);
+                bulkHeapDecrRef(p, iter->ref);
                 break;
             case BULK_TYPE_EXTERN:
-                pool->mem.appBulk.free(pool->queue[i].ref);
+                pool->mem.appBulk.free(iter->ref);
                 break;
             default:
                 RDB_reportError(p, RDB_ERR_INVALID_BULK_ALLOC_TYPE,
-                                "bulkPoolFlush(): Invalid bulk allocation type: %d", pool->queue[i].bulkType);
+                                "bulkPoolFlush(): Invalid bulk allocation type: %d", iter->bulkType);
                 break;
         }
     }
-    pool->readIdx = pool->writeIdx = 0;
+    pool->qread = pool->qwrite = pool->queue;
     bulkStackFlush(pool->stack);
 }
 
 void bulkPoolRollback(RdbParser *p) {
     BulkPool *pool = p->cache;
-    pool->readIdx = 0;
+    pool->qread = pool->queue;
 }
 
 void bulkPoolPrintDbg(RdbParser *p) {
     BulkPool *pool = p->cache;
     printf("*********************************************************\n");
     printf("BulkPool Info:\n");
-    printf("  queue size: %d\n", pool->queueSize);
+    printf("  queue size: %d\n", pool->qsize);
     printf("  queue address: %p\n", (void *) pool->queue);
-    printf("  queue read index: %d\n", pool->readIdx);
-    printf("  queue write index: %d\n", pool->writeIdx);
+    printf("  queue read address: %p\n", (void *) pool->qread);
+    printf("  queue write address: %p\n", (void *) pool->qwrite);
     printf("  stack start address: %p\n", pool->stack->buf);
     printf("  stack write address: %p\n", pool->stack->writePtr);
 
     printf("BulkPool - Queue items: \n");
-    for (int i = 0; i != pool->writeIdx ; ++i)
+    for (BulkInfo *iter = pool->queue ; iter != pool->qwrite ; iter = iter->next)
         printf(" - [allocType=%d] [written=%lu] %p: \"0x%X 0x%X ...\":\"%s\" (len=%lu) \n",
-               pool->queue[i].bulkType,
-               pool->queue[i].written,
-               pool->queue[i].ref,
-               ((unsigned char *)pool->queue[i].ref)[0],
-               ((unsigned char *)pool->queue[i].ref)[1],
-               (unsigned char *)pool->queue[i].ref, pool->queue[i].len);
+               iter->bulkType, iter->written, iter->ref,
+               ((unsigned char *)iter->ref)[0], ((unsigned char *)iter->ref)[1],
+               (unsigned char *)iter->ref, iter->len);
     printf("\n*********************************************************\n");
 }
 
@@ -285,21 +288,25 @@ RdbBulkCopy bulkClone(RdbParser *p, BulkInfo *binfo) {
 
 int bulkPoolIsNewNextAllocDbg(RdbParser *p) {
     BulkPool *pool = p->cache;
-    return (pool->writeIdx == pool->readIdx) ? 1 : 0;
+    return (pool->qwrite == pool->qread) ? 1 : 0;
 }
 
 void bulkPoolAssertFlushedDbg(RdbParser *p) {
     BulkPool *pool = p->cache;
-    assert(pool->writeIdx == 0);
+    assert(pool->qwrite == pool->queue);
+    assert(pool->qread == pool->queue);
 }
 
-static inline BulkInfo *bulkPoolEnqueue(BulkPool *pool) {
-    pool->writeIdx += 1;
-    if (unlikely(pool->writeIdx == pool->queueSize)) {
-        pool->queueSize *= 2;
-        pool->queue = realloc(pool->queue, pool->queueSize * sizeof(BulkInfo));
+static inline BulkInfo *bulkPoolEnqueue(RdbParser *p, BulkPool *pool) {
+    BulkInfo *ret = pool->qwrite;
+
+    if (unlikely(pool->qwrite->next == NULL)) {
+        pool->qwrite->next = p->mem.malloc(sizeof(BulkInfo));
+        pool->qwrite->next->next = NULL;
+        pool->qsize++;
     }
-    return &(pool->queue[pool->writeIdx - 1]);
+    pool->qwrite = pool->qwrite->next;
+    return ret;
 }
 
 static inline BulkType bulkPoolResolveAllocType(RdbParser *p, AllocTypeRq typeRq) {

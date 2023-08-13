@@ -15,10 +15,10 @@
 
 void logger(RdbLogLevel l, const char *msg) {
     static char *logLevelStr[] = {
-            [RDB_LOG_ERROR]    = "| ERROR |",
-            [RDB_LOG_WARNING]  = "| WARN  |",
-            [RDB_LOG_INFO]     = "| INFO  |",
-            [RDB_LOG_DEBUG]    = "| DEBUG |",
+            [RDB_LOG_ERR]  = "| ERROR |",
+            [RDB_LOG_WRN]  = "| WARN  |",
+            [RDB_LOG_INF]  = "| INFO  |",
+            [RDB_LOG_DBG]  = "| DEBUG |",
     };
     printf("%s %s\n", logLevelStr[l], msg);
 }
@@ -39,7 +39,7 @@ int main() {
 
     parser = RDB_createParserRdb(NULL);
     if (!parser) {
-        logger(RDB_LOG_ERROR, "Failed to create parser");
+        logger(RDB_LOG_ERR, "Failed to create parser");
         return RDB_ERR_FAILED_CREATE_PARSER;
     }
 
@@ -66,7 +66,7 @@ int main() {
 PARSER_ERROR:
     err = RDB_getErrorCode(parser);
     assert(err != RDB_OK);
-    logger(RDB_LOG_ERROR, RDB_getErrorMessage(parser));
+    logger(RDB_LOG_ERR, RDB_getErrorMessage(parser));
 
 PARSER_END:
     RDB_deleteParser(parser);

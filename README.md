@@ -355,7 +355,7 @@ of callbacks, it is the duty of the application to configure for each RDB object
 what level it is needed to get handled by calling `RDB_handleByLevel()`. Otherwise, the
 parser will resolve it by parsing and calling handlers that are registered at lowest level.
 
-As for the common callbacks to all levels (which includes `handleNewRdb`, `handleNewDb`,
+As for the common callbacks to all levels (which includes `handleStartRdb`, `handleNewDb`,
 `handleEndRdb`, `handleDbSize` and `handleAuxField`) if registered at different
 levels then all of them will be called, one by one, starting from handlers that are
 registered at the lowest level.

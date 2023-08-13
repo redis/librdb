@@ -32,7 +32,7 @@ static void test_createHandlersRdbToJson_and_2_FilterKey(void **state) {
 
     RdbStatus  status;
     RdbParser *parser = RDB_createParserRdb(NULL);
-    RDB_setLogLevel(parser, RDB_LOG_ERROR);
+    RDB_setLogLevel(parser, RDB_LOG_ERR);
     assert_non_null(RDBX_createReaderFile(parser, rdbfile));
     RdbxToJsonConf r2jConf = {RDB_LEVEL_DATA, RDBX_CONV_JSON_ENC_PLAIN, 0, 1};
     assert_non_null(RDBX_createHandlersToJson(parser,
@@ -47,7 +47,7 @@ static void test_createHandlersRdbToJson_and_2_FilterKey(void **state) {
     assert_int_equal( status, RDB_STATUS_OK);
 
     RDB_deleteParser(parser);
-    assert_json_equal(jsonfile, expJsonFile);
+    assert_json_equal(jsonfile, expJsonFile, 0);
 }
 
 static void test_mixed_levels_registration(void **state) {
@@ -66,7 +66,7 @@ static void test_mixed_levels_registration(void **state) {
 
     RdbStatus  status;
     RdbParser *parser = RDB_createParserRdb(NULL);
-    RDB_setLogLevel(parser, RDB_LOG_ERROR);
+    RDB_setLogLevel(parser, RDB_LOG_ERR);
     assert_non_null(RDBX_createReaderFile(parser, rdbfile));
     RdbxToJsonConf conf1 = {RDB_LEVEL_DATA, RDBX_CONV_JSON_ENC_PLAIN, 1, 1};
     assert_non_null(RDBX_createHandlersToJson(parser, jsonfileData, &conf1));

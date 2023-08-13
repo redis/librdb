@@ -32,13 +32,13 @@ void testRdbToJsonCommon(const char *rdbfile,
         /*** 1. RDB_parse - parse with RDB reader ***/
         remove(jsonfile);
         RdbParser *parser = RDB_createParserRdb(pMemAlloc);
-        RDB_setLogLevel(parser, RDB_LOG_ERROR);
+        RDB_setLogLevel(parser, RDB_LOG_ERR);
         assert_non_null(RDBX_createReaderFile(parser, rdbfile));
         assert_non_null(RDBX_createHandlersToJson(parser, jsonfile, &r2jConf));
         while ((status = RDB_parse(parser)) == RDB_STATUS_WAIT_MORE_DATA);
         assert_int_equal(status, RDB_STATUS_OK);
         RDB_deleteParser(parser);
-        assert_json_equal(jsonfile, expJsonFile);
+        assert_json_equal(jsonfile, expJsonFile, 0);
 
         /*** 2. RDB_parse - set pause-interval to 1 byte ***/
         int countPausesAssert = 1;
@@ -46,7 +46,7 @@ void testRdbToJsonCommon(const char *rdbfile,
         size_t lastBytes = 0;
         remove(jsonfile);
         parser = RDB_createParserRdb(pMemAlloc);
-        RDB_setLogLevel(parser, RDB_LOG_ERROR);
+        RDB_setLogLevel(parser, RDB_LOG_ERR);
         assert_non_null(RDBX_createReaderFile(parser, rdbfile));
         assert_non_null(RDBX_createHandlersToJson(parser, jsonfile, &r2jConf));
         RDB_setPauseInterval(parser, 1 /*bytes*/);
@@ -69,25 +69,25 @@ void testRdbToJsonCommon(const char *rdbfile,
             assert_int_equal(countPauses + 1, bufLen);
 
         RDB_deleteParser(parser);
-        assert_json_equal(jsonfile, expJsonFile);
+        assert_json_equal(jsonfile, expJsonFile, 0);
 
         /*** 3. RDB_parseBuff - parse buffer. Use buffer of size 1 char ***/
         remove(jsonfile);
         parser = RDB_createParserRdb(pMemAlloc);
-        RDB_setLogLevel(parser, RDB_LOG_ERROR);
+        RDB_setLogLevel(parser, RDB_LOG_ERR);
         assert_non_null(RDBX_createHandlersToJson(parser, jsonfile, &r2jConf));
         for (size_t i = 0 ; i < bufLen-1 ; ++i)
             assert_int_equal(RDB_parseBuff(parser, buffer + i, 1, 0), RDB_STATUS_WAIT_MORE_DATA);
         assert_int_equal(RDB_parseBuff(parser, buffer + bufLen - 1, 1, 0), RDB_STATUS_OK);
 
         RDB_deleteParser(parser);
-        assert_json_equal(jsonfile, expJsonFile);
+        assert_json_equal(jsonfile, expJsonFile, 0);
 
         /*** 4. RDB_parseBuff - parse a single buffer. set pause-interval to 1 byte ***/
         countPauses = 0;
         remove(jsonfile);
         parser = RDB_createParserRdb(pMemAlloc);
-        RDB_setLogLevel(parser, RDB_LOG_ERROR);
+        RDB_setLogLevel(parser, RDB_LOG_ERR);
         assert_non_null(RDBX_createHandlersToJson(parser, jsonfile, &r2jConf));
         RDB_setPauseInterval(parser, 1 /*bytes*/);
         while (1) {
@@ -103,7 +103,7 @@ void testRdbToJsonCommon(const char *rdbfile,
         }
         assert_int_equal(countPauses + 1, bufLen);
         RDB_deleteParser(parser);
-        assert_json_equal(jsonfile, expJsonFile);
+        assert_json_equal(jsonfile, expJsonFile, 0);
 
         free(buffer);
     }
@@ -139,6 +139,112 @@ static void test_r2j_plain_list_struct(void **state) {
 static void test_r2j_plain_list_raw (void **state) {
     UNUSED(state);
     testRdbToJsonCommon(DUMP_FOLDER("plain_list_v6.rdb"), DUMP_FOLDER("plain_list_v6_raw.json"), RDB_LEVEL_RAW);
+}
+
+static void test_r2j_plain_hash_data(void **state) {
+    UNUSED(state);
+    testRdbToJsonCommon(DUMP_FOLDER("plain_hash_v3.rdb"), DUMP_FOLDER("plain_hash_data.json"), RDB_LEVEL_DATA);
+}
+
+static void test_r2j_plain_hash_struct(void **state) {
+    UNUSED(state);
+    testRdbToJsonCommon(DUMP_FOLDER("plain_hash_v3.rdb"), DUMP_FOLDER("plain_hash_struct.json"), RDB_LEVEL_STRUCT);
+}
+
+static void test_r2j_plain_hash_raw (void **state) {
+    UNUSED(state);
+    testRdbToJsonCommon(DUMP_FOLDER("plain_hash_v3.rdb"), DUMP_FOLDER("plain_hash_raw.json"), RDB_LEVEL_RAW);
+}
+
+static void test_r2j_hash_zl_data(void **state) {
+    UNUSED(state);
+    testRdbToJsonCommon(DUMP_FOLDER("hash_zl_v6.rdb"), DUMP_FOLDER("hash_zl_v6_data.json"), RDB_LEVEL_DATA);
+}
+
+static void test_r2j_hash_zl_struct(void **state) {
+    UNUSED(state);
+    testRdbToJsonCommon(DUMP_FOLDER("hash_zl_v6.rdb"), DUMP_FOLDER("hash_zl_v6_struct.json"), RDB_LEVEL_STRUCT);
+}
+
+static void test_r2j_hash_zl_raw (void **state) {
+    UNUSED(state);
+    testRdbToJsonCommon(DUMP_FOLDER("hash_zl_v6.rdb"), DUMP_FOLDER("hash_zl_v6_raw.json"), RDB_LEVEL_RAW);
+}
+
+static void test_r2j_hash_lp_data(void **state) {
+    UNUSED(state);
+    testRdbToJsonCommon(DUMP_FOLDER("hash_lp_v11.rdb"), DUMP_FOLDER("hash_lp_v11_data.json"), RDB_LEVEL_DATA);
+}
+
+static void test_r2j_hash_lp_struct(void **state) {
+    UNUSED(state);
+    testRdbToJsonCommon(DUMP_FOLDER("hash_lp_v11.rdb"), DUMP_FOLDER("hash_lp_v11_struct.json"), RDB_LEVEL_STRUCT);
+}
+
+static void test_r2j_hash_lp_raw (void **state) {
+    UNUSED(state);
+    testRdbToJsonCommon(DUMP_FOLDER("hash_lp_v11.rdb"), DUMP_FOLDER("hash_lp_v11_raw.json"), RDB_LEVEL_RAW);
+}
+
+static void test_r2j_hash_zm_data(void **state) {
+    UNUSED(state);
+    testRdbToJsonCommon(DUMP_FOLDER("hash_zm_v2.rdb"), DUMP_FOLDER("hash_zm_v2_data.json"), RDB_LEVEL_DATA);
+}
+
+static void test_r2j_hash_zm_struct(void **state) {
+    UNUSED(state);
+    testRdbToJsonCommon(DUMP_FOLDER("hash_zm_v2.rdb"), DUMP_FOLDER("hash_zm_v2_struct.json"), RDB_LEVEL_STRUCT);
+}
+
+static void test_r2j_hash_zm_raw(void **state) {
+    UNUSED(state);
+    testRdbToJsonCommon(DUMP_FOLDER("hash_zm_v2.rdb"), DUMP_FOLDER("hash_zm_v2_raw.json"), RDB_LEVEL_RAW);
+}
+
+static void test_r2j_plain_set_data(void **state) {
+    UNUSED(state);
+    testRdbToJsonCommon(DUMP_FOLDER("plain_set_v6.rdb"), DUMP_FOLDER("plain_set_v6_data.json"), RDB_LEVEL_DATA);
+}
+
+static void test_r2j_plain_set_struct(void **state) {
+    UNUSED(state);
+
+    testRdbToJsonCommon(DUMP_FOLDER("plain_set_v6.rdb"), DUMP_FOLDER("plain_set_v6_struct.json"), RDB_LEVEL_STRUCT);
+}
+
+static void test_r2j_plain_set_raw (void **state) {
+    UNUSED(state);
+    testRdbToJsonCommon(DUMP_FOLDER("plain_set_v6.rdb"), DUMP_FOLDER("plain_set_v6_raw.json"), RDB_LEVEL_RAW);
+}
+
+static void test_r2j_set_is_data(void **state) {
+    UNUSED(state);
+    testRdbToJsonCommon(DUMP_FOLDER("set_is_v11.rdb"), DUMP_FOLDER("set_is_v11_data.json"), RDB_LEVEL_DATA);
+}
+
+static void test_r2j_set_is_struct(void **state) {
+    UNUSED(state);
+    testRdbToJsonCommon(DUMP_FOLDER("set_is_v11.rdb"), DUMP_FOLDER("set_is_v11_struct.json"), RDB_LEVEL_STRUCT);
+}
+
+static void test_r2j_set_is_raw(void **state) {
+    UNUSED(state);
+    testRdbToJsonCommon(DUMP_FOLDER("set_is_v11.rdb"), DUMP_FOLDER("set_is_v11_raw.json"), RDB_LEVEL_STRUCT);
+}
+
+static void test_r2j_set_lp_data(void **state) {
+    UNUSED(state);
+    testRdbToJsonCommon(DUMP_FOLDER("set_lp_v11.rdb"), DUMP_FOLDER("set_lp_v11_data.json"), RDB_LEVEL_DATA);
+}
+
+static void test_r2j_set_lp_struct(void **state) {
+    UNUSED(state);
+    testRdbToJsonCommon(DUMP_FOLDER("set_lp_v11.rdb"), DUMP_FOLDER("set_lp_v11_struct.json"), RDB_LEVEL_STRUCT);
+}
+
+static void test_r2j_set_lp_raw(void **state) {
+    UNUSED(state);
+    testRdbToJsonCommon(DUMP_FOLDER("set_lp_v11.rdb"), DUMP_FOLDER("set_lp_v11_raw.json"), RDB_LEVEL_STRUCT);
 }
 
 static void test_r2j_quicklist_data(void **state) {
@@ -211,6 +317,12 @@ static void test_r2j_multiple_dbs (void **state) {
 /*************************** group_rdb_to_json *******************************/
 int group_rdb_to_json(void) {
     const struct CMUnitTest tests[] = {
+        /* string */
+        cmocka_unit_test(test_r2j_single_string_data),
+        cmocka_unit_test(test_r2j_single_string_struct),
+        cmocka_unit_test(test_r2j_single_string_raw),
+
+        /* list */
         cmocka_unit_test(test_r2j_single_list_data),
         cmocka_unit_test(test_r2j_single_list_struct),
         cmocka_unit_test(test_r2j_single_list_raw),
@@ -219,21 +331,47 @@ int group_rdb_to_json(void) {
         cmocka_unit_test(test_r2j_quicklist_struct),
         cmocka_unit_test(test_r2j_quicklist_raw),
 
-        cmocka_unit_test(test_r2j_single_string_data),
-        cmocka_unit_test(test_r2j_single_string_struct),
-        cmocka_unit_test(test_r2j_single_string_raw),
-
-        cmocka_unit_test(test_r2j_multiple_lists_and_strings_data),
-        cmocka_unit_test(test_r2j_multiple_lists_and_strings_struct),
-        cmocka_unit_test(test_r2j_multiple_lists_and_strings_raw),
-        cmocka_unit_test(test_r2j_multiple_dbs),
-
         cmocka_unit_test(test_r2j_single_ziplist_data),
         cmocka_unit_test(test_r2j_single_ziplist_struct),
         cmocka_unit_test(test_r2j_single_ziplist_raw),
 
         cmocka_unit_test(test_r2j_plain_list_data),
         cmocka_unit_test(test_r2j_plain_list_raw),
+
+        /* hash */
+        cmocka_unit_test(test_r2j_plain_hash_data),
+        cmocka_unit_test(test_r2j_plain_hash_struct),
+        cmocka_unit_test(test_r2j_plain_hash_raw),
+
+        cmocka_unit_test(test_r2j_hash_zl_data),
+        cmocka_unit_test(test_r2j_hash_zl_struct),
+        cmocka_unit_test(test_r2j_hash_zl_raw),
+
+        cmocka_unit_test(test_r2j_hash_lp_data),
+        cmocka_unit_test(test_r2j_hash_lp_struct),
+        cmocka_unit_test(test_r2j_hash_lp_raw),
+
+        cmocka_unit_test(test_r2j_hash_zm_data),
+        cmocka_unit_test(test_r2j_hash_zm_struct),
+        cmocka_unit_test(test_r2j_hash_zm_raw),
+
+        /* set */
+        cmocka_unit_test(test_r2j_plain_set_data),
+        cmocka_unit_test(test_r2j_plain_set_struct),
+        cmocka_unit_test(test_r2j_plain_set_raw),
+        cmocka_unit_test(test_r2j_set_is_data),
+        cmocka_unit_test(test_r2j_set_is_struct),
+        cmocka_unit_test(test_r2j_set_is_raw),
+        cmocka_unit_test(test_r2j_set_lp_data),
+        cmocka_unit_test(test_r2j_set_lp_struct),
+        cmocka_unit_test(test_r2j_set_lp_raw),
+
+        /* misc */
+        cmocka_unit_test(test_r2j_multiple_lists_and_strings_data),
+        cmocka_unit_test(test_r2j_multiple_lists_and_strings_struct),
+        cmocka_unit_test(test_r2j_multiple_lists_and_strings_raw),
+        cmocka_unit_test(test_r2j_multiple_dbs),
+
     };
     return cmocka_run_group_tests(tests, NULL, NULL);
 }

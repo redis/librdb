@@ -133,8 +133,8 @@ static void test_struct_handlers_callbacks_bulk_ops (void **state) {
         RdbHandlersStructCallbacks callbacks = {
                 .handleAuxField = handle_aux_field,
                 .handleNewKey = handle_new_key,
-                .handleStringValue = handle_string_value,
-                .handleListNode = handle_list_element,
+                .handleString = handle_string_value,
+                .handleListPlain = handle_list_element,
                 .handleListLP = handle_list_element,
 
         };
@@ -161,7 +161,7 @@ static void test_data_handlers_callbacks_bulk_ops (void **state) {
                 .handleAuxField = handle_aux_field,
                 .handleNewKey = handle_new_key,
                 .handleStringValue = handle_string_value,
-                .handleListElement = handle_list_element,
+                .handleListItem = handle_list_element,
         };
 
         RdbParser *parser = RDB_createParserRdb(&mem);
