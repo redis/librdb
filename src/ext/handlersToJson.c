@@ -96,6 +96,7 @@ static RdbxToJson *initRdbToJsonCtx(RdbParser *p, const char *filename, RdbxToJs
 
     /* init RdbToJson context */
     RdbxToJson *ctx = RDB_alloc(p, sizeof(RdbxToJson));
+    memset(ctx, 0, sizeof(RdbxToJson));
     ctx->filename = RDB_alloc(p, strlen(filename)+1);
     strcpy(ctx->filename, filename);
     ctx->outfile = f;
@@ -192,11 +193,11 @@ static RdbRes toJsonNewDb(RdbParser *p, void *userData, int db) {
     RdbxToJson *ctx = userData;
 
     if (ctx->state == R2J_IDLE) {
-        if (!ctx->conf.flatten) ouput_fprintf(ctx, "[{\n");
+        if (!ctx->conf.flatten) ouput_fprintf(ctx, "{\n");
     } else if (ctx->state == R2J_IN_DB) {
         /* output json part */
         if (!ctx->conf.flatten) {
-            ouput_fprintf(ctx, "},{\n");
+            ouput_fprintf(ctx, "\n},{\n");
         } else {
             ouput_fprintf(ctx, ",\n");
         }
@@ -213,20 +214,35 @@ static RdbRes toJsonNewDb(RdbParser *p, void *userData, int db) {
     return RDB_OK;
 }
 
+static RdbRes toJsonNewRdb(RdbParser *p, void *userData, int rdbVersion) {
+    UNUSED(rdbVersion);
+    RdbxToJson *ctx = userData;
+
+    if (ctx->state != R2J_IDLE) {
+        RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
+                        "toJsonNewRdb(): Invalid state value: %d", ctx->state);
+        return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
+    }
+
+    if (!ctx->conf.flatten) ouput_fprintf(ctx, "[");
+
+    return RDB_OK;
+}
+
 static RdbRes toJsonEndRdb(RdbParser *p, void *userData) {
     RdbxToJson *ctx = userData;
 
-    if (ctx->state != R2J_IN_DB) {
+    if (ctx->state == R2J_IDLE) {
+        RDB_log(p, RDB_LOG_WRN, "RDB is empty.");
+    } else if (ctx->state == R2J_IN_DB) {
+        if (!ctx->conf.flatten) ouput_fprintf(ctx, "\n}");
+    } else {
         RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
                         "toJsonEndRdb(): Invalid state value: %d", ctx->state);
         return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
     }
 
-    /* output json part */
-    if (!ctx->conf.flatten)
-        ouput_fprintf(ctx, "\n}]\n");
-    else
-        ouput_fprintf(ctx, "\n");
+    if (!ctx->conf.flatten) ouput_fprintf(ctx, "]\n");
 
     /* update new state */
     ctx->state = R2J_IDLE;
@@ -384,6 +400,7 @@ RdbxToJson *RDBX_createHandlersToJson(RdbParser *p, const char *filename, RdbxTo
     callbacks.common.handleNewKey = toJsonNewKey;
     callbacks.common.handleEndKey = toJsonEndKey;
     callbacks.common.handleNewDb = toJsonNewDb;
+    callbacks.common.handleStartRdb = toJsonNewRdb;
     callbacks.common.handleEndRdb = toJsonEndRdb;
 
     if (ctx->conf.level == RDB_LEVEL_DATA) {

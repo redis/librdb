@@ -23,6 +23,27 @@ static void test_createReader_missingFile(void **state) {
     RDB_deleteParser(parser);
 }
 
+static void test_empty_rdb(void **state) {
+    UNUSED(state);
+
+    const char *rdbfile = DUMP_FOLDER("empty.rdb");
+    const char *jsonfile = TMP_FOLDER("empty.json");
+
+    RdbStatus  status;
+    RdbParser *parser = RDB_createParserRdb(NULL);
+    RDB_setLogLevel(parser, RDB_LOG_ERR);
+    assert_non_null(RDBX_createReaderFile(parser, rdbfile));
+    RdbxToJsonConf r2jConf = {RDB_LEVEL_DATA, RDBX_CONV_JSON_ENC_PLAIN, 0, 1};
+    assert_non_null(RDBX_createHandlersToJson(parser,
+                                              jsonfile,
+                                              &r2jConf));
+
+    while ((status = RDB_parse(parser)) == RDB_STATUS_WAIT_MORE_DATA);
+    assert_int_equal( status, RDB_STATUS_OK);
+
+    RDB_deleteParser(parser);
+}
+
 static void test_createHandlersRdbToJson_and_2_FilterKey(void **state) {
     UNUSED(state);
 
@@ -112,6 +133,7 @@ int group_main(void) {
     /* Insert here your test functions */
     const struct CMUnitTest tests[] = {
         cmocka_unit_test(test_createReader_missingFile),
+        cmocka_unit_test(test_empty_rdb),
         cmocka_unit_test(test_createHandlersRdbToJson_and_2_FilterKey),
         cmocka_unit_test(test_mixed_levels_registration),
     };
