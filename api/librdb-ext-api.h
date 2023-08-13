@@ -134,14 +134,14 @@ _LIBRDB_API RdbxToResp *RDBX_createHandlersToResp(RdbParser *, RdbxToRespConf *)
  *           <user-defined-handlers>
  ****************************************************************/
 
-struct RdbxRespWriter {
+typedef struct RdbxRespWriter {
     void *ctx;
     void (*delete)(void *ctx);
 
     /* return 0 on success. Otherwise 1 */
-    int (*writev) (void *ctx, const struct iovec *ioVec, int count, int startCmd, int endCmd);
+    int (*writev) (void *ctx, struct iovec *ioVec, int count, int startCmd, int endCmd);
     int (*flush) (void *ctx);
-};
+} RdbxRespWriter;
 
 _LIBRDB_API void RDBX_attachRespWriter(RdbxToResp *rdbToResp, RdbxRespWriter *writer);
 

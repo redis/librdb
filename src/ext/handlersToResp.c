@@ -131,7 +131,7 @@ static void resolveSupportRestore(RdbParser *p, RdbxToResp *ctx, int srcRdbVer) 
     RDB_handleByLevel(p, RDB_DATA_TYPE_MODULE, RDB_LEVEL_RAW, 0);
 }
 
-static inline RdbRes writevWrap(RdbxToResp *ctx, const struct iovec *iov, int cnt, int startCmd, int endCmd) {
+static inline RdbRes writevWrap(RdbxToResp *ctx, struct iovec *iov, int cnt, int startCmd, int endCmd) {
     RdbxRespWriter *writer = &ctx->respWriter;
     if (unlikely(writer->writev(writer->ctx, iov, cnt, startCmd, endCmd))) {
         RdbRes errCode = RDB_getErrorCode(ctx->parser);

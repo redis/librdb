@@ -20,6 +20,8 @@
 
 #define REPLY_BUFF_SIZE           4096  /* reply buffer size */
 
+#define MAX_EAGAIN_RETRY          3
+
 
 struct RdbxRespToTcpLoader {
 
@@ -90,8 +92,10 @@ static inline void recordNewCmd(RdbxRespToTcpLoader *ctx, const struct iovec *cm
 
 /* Write the vector of data to the TCP socket with writev() sys-call.
  * Return 0 for success, 1 otherwise. */
-static int tcpLoaderWritev(void *context, const struct iovec *iov, int count, int startCmd, int endCmd) {
-    UNUSED(startCmd, endCmd);
+static int tcpLoaderWritev(void *context, struct iovec *iov, int count, int startCmd, int endCmd) {
+    int origCount = count;
+    ssize_t writeResult;
+    int retries = 0;
 
     RdbxRespToTcpLoader *ctx = context;
 
@@ -103,9 +107,44 @@ static int tcpLoaderWritev(void *context, const struct iovec *iov, int count, in
     if (startCmd)
         recordNewCmd(ctx, iov, count);
 
-    if (unlikely(writev(ctx->fd, iov, count) == -1)) {
-        RDB_reportError(ctx->p, (RdbRes) RDBX_ERR_RESP2TCP_FAILED_WRITE, "Failed to write tcp socket");
+    while (1)
+    {
+        writeResult = writev(ctx->fd, iov, count);
+
+        /* check for error */
+        if (unlikely(writeResult == -1)) {
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                if ((retries++) >= MAX_EAGAIN_RETRY) {
+                    RDB_reportError(ctx->p, (RdbRes) RDBX_ERR_RESP2TCP_FAILED_WRITE,
+                                    "Failed to write tcp socket. Exceeded EAGAIN retry limit");
+                    return 1;
+                }
+                usleep(1000 * retries); /* Backoff and Retries  */
+                continue;
+            } else {
+                RDB_reportError(ctx->p, (RdbRes) RDBX_ERR_RESP2TCP_FAILED_WRITE,
+                                "Failed to write tcp socket (errno=%d)", errno);
+                printf("count=%d origCount=%d\n",count, origCount);for (int i = 0 ; i <  count ; ++i) {
+                    printf ("iov[%d]: base=%p len=%lu\n", i, iov[i].iov_base, iov[i].iov_len );
+                }
         return 1;
+    }
+        }
+
+        /* crunch iov entries that were transmitted entirely */
+        while ((count) && (iov->iov_len <= (size_t) writeResult)) {
+            writeResult -= iov->iov_len;
+            ++iov;
+            --count;
+        }
+
+        /* if managed to send all iov entries */
+        if (likely(count == 0))
+            break;
+
+        /* Update pointed iov entry. Only partial of its data sent */
+        iov->iov_len -= writeResult;
+        iov->iov_base = (char *) iov->iov_base + writeResult;
     }
 
     ctx->pendingCmds.num += endCmd;
