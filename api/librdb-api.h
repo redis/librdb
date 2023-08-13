@@ -228,7 +228,7 @@ typedef struct RdbHandlersStructCallbacks {
     /* Callback to handle a string value of a key */
     RdbRes (*handleString)(RdbParser *p, void *userData, RdbBulk str);
 
-    /* Callback to handle an item from a plain-list */
+    /* Callback to handle an item from a plain-list. Or plain node of RDB_TYPE_LIST_QUICKLIST_2 */
     RdbRes (*handleListPlain)(RdbParser *p, void *userData, RdbBulk node);
     /* Callback to handle a ziplist-based list value */
     RdbRes (*handleListZL)(RdbParser *p, void *userData, RdbBulk ziplist);
