@@ -161,7 +161,7 @@ static RdbRes toRespNewDb(RdbParser *p, void *userData, int dbid) {
     return writevWrap(ctx, iov, 4, 1, 1);
 }
 
-static RdbRes toRespNewRdb(RdbParser *p, void *userData, int rdbVersion) {
+static RdbRes toRespStartRdb(RdbParser *p, void *userData, int rdbVersion) {
     UNUSED(p);
     RdbxToResp *ctx = userData;
 
@@ -380,7 +380,7 @@ _LIBRDB_API RdbxToResp *RDBX_createHandlersToResp(RdbParser *p, RdbxToRespConf *
 
     RdbHandlersDataCallbacks dataCb;
     memset(&dataCb, 0, sizeof(RdbHandlersDataCallbacks));
-    dataCb.handleNewRdb = toRespNewRdb;
+    dataCb.handleStartRdb = toRespStartRdb;
     if (ctx->conf.applySelectDbCmds)
         dataCb.handleNewDb = toRespNewDb;
     dataCb.handleNewKey = toRespNewKey;
@@ -394,7 +394,7 @@ _LIBRDB_API RdbxToResp *RDBX_createHandlersToResp(RdbParser *p, RdbxToRespConf *
 
     RdbHandlersRawCallbacks rawCb;
     memset(&rawCb, 0, sizeof(RdbHandlersRawCallbacks));
-    rawCb.handleNewRdb = NULL; /* already registered to this common callback */
+    rawCb.handleStartRdb = NULL; /* already registered to this common callback */
     rawCb.handleNewKey = toRespNewKey;
     rawCb.handleEndKey = toRespEndKey;
     rawCb.handleFrag = toRespRawFrag;

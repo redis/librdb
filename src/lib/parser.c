@@ -1083,7 +1083,7 @@ RdbStatus elementRdbHeader(RdbParser *p) {
     RDB_log(p, RDB_LOG_INF, "The parsed RDB file version is: %d", p->rdbversion);
 
 
-    CALL_COMMON_HANDLERS_CB(p, handleNewRdb, p->rdbversion);
+    CALL_COMMON_HANDLERS_CB(p, handleStartRdb, p->rdbversion);
 
     RDB_log(p, RDB_LOG_INF, "rdbversion=%d", p->rdbversion);
 

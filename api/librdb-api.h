@@ -171,77 +171,139 @@ typedef void (*RdbFreeFunc) (RdbParser *p, void *obj);
 typedef void (*RdbLoggerCB) (RdbLogLevel l, const char *msg);
 
 /****************************************************************
- * Handlers callbacks struct
+  * Common Callbacks for Registration (handlers Level 0/1/2)
+  *
+  *  Common Callbacks to all levels. If registered at different levels then all
+  *  of them will be called, one by one, starting from handlers that are
+  *  registered at the lowest level.
  ****************************************************************/
 
-/* TODO: Pass "RdbParser *p" for each cb? User can hold it as well in "userData" */
-
-/* avoid nested structures */
-#define HANDLERS_COMMON_CALLBACKS \
-    RdbRes (*handleNewRdb)(RdbParser *p, void *userData, int rdbVersion); \
-    RdbRes (*handleNewDb)(RdbParser *p, void *userData,  int db); \
-    RdbRes (*handleEndRdb)(RdbParser *p, void *userData); \
-    RdbRes (*handleDbSize)(RdbParser *p, void *userData, uint64_t db_size, uint64_t exp_size); \
-    RdbRes (*handleAuxField)(RdbParser *p, void *userData, RdbBulk auxkey, RdbBulk auxval); \
-    RdbRes (*handleNewKey)(RdbParser *p, void *userData, RdbBulk key, RdbKeyInfo *info); \
+/* Definition of the common callback functions for handling various RDB parsing events */
+#define HANDLERS_COMMON_CALLBACKS                                                                             \
+    /* Callback once RDB header was parsed */                                                                 \
+    RdbRes (*handleStartRdb)(RdbParser *p, void *userData, int rdbVersion);                                   \
+    /* Callback to indicate the completion of the parsing process for the dump file */                        \
+    RdbRes (*handleEndRdb)(RdbParser *p, void *userData);                                                     \
+    /* Callback to indicate start parsing of database `dbnum` */                                              \
+    RdbRes (*handleNewDb)(RdbParser *p, void *userData,  int dbnum);                                          \
+    /* Callback per db before the keys, with the key count and the total voletaile key count */               \
+    RdbRes (*handleDbSize)(RdbParser *p, void *userData, uint64_t db_size, uint64_t exp_size);                \
+    /* Callback in the beginning of the RDB with various keys and values. exists since redis 3.2 (RDB v7) */  \
+    RdbRes (*handleAuxField)(RdbParser *p, void *userData, RdbBulk auxkey, RdbBulk auxval);                   \
+    /* Callback on each new key along with additional info, such as, expire-time, LRU, etc. */                \
+    RdbRes (*handleNewKey)(RdbParser *p, void *userData, RdbBulk key, RdbKeyInfo *info);                      \
+    /* Callback on each completion of a key. Useful To finalize handled key. */                               \
     RdbRes (*handleEndKey)(RdbParser *p, void *userData);
+
+/****************************************************************
+  * Rdb raw Callbacks for Registration (handlers Level 0)
+  *
+  *  This level of callback registration is adequate mainly when it is required
+  *  to RESTORE from RDB source and play it against live Redis server.
+ ****************************************************************/
 
 typedef struct RdbHandlersRawCallbacks {
     HANDLERS_COMMON_CALLBACKS
+    /* Callback on start of serializing value of a new key */
     RdbRes (*handleBegin)(RdbParser *p, void *userData, size_t size);
+    /* Callback on one or more chunks of serialized value of a key */
     RdbRes (*handleFrag)(RdbParser *p, void *userData, RdbBulk frag);
+    /* Callback on end of serializing value of a key */
     RdbRes (*handleEnd)(RdbParser *p, void *userData);
 
     /*** TODO: RdbHandlersRawCallbacks: handleBeginModuleAux ***/
     RdbRes (*handleBeginModuleAux)(RdbParser *p, void *userData, RdbBulk name, int encver, int when);
-
 } RdbHandlersRawCallbacks;
+
+/****************************************************************
+ * Rdb data-structures Callbacks for Registration (handlers Level 1)
+ *
+ *  This level of callback registration is adequate mainly when it is required to
+ *  analyze memory consumption, or other reason for inspection of "low-level"
+ *  data structures of RDB file.
+ ****************************************************************/
 
 typedef struct RdbHandlersStructCallbacks {
     HANDLERS_COMMON_CALLBACKS
+    /* Callback to handle a string value of a key */
     RdbRes (*handleString)(RdbParser *p, void *userData, RdbBulk str);
-    /* list */
+
+    /* Callback to handle an item from a plain-list */
     RdbRes (*handleListPlain)(RdbParser *p, void *userData, RdbBulk node);
+    /* Callback to handle a ziplist-based list value */
     RdbRes (*handleListZL)(RdbParser *p, void *userData, RdbBulk ziplist);
+    /* Callback to handle a listpack-based list value */
     RdbRes (*handleListLP)(RdbParser *p, void *userData, RdbBulk listpack);
-    /* hash */
+
+    /* Callback to handle a field-value pair within a plain-hash */
     RdbRes (*handleHashPlain)(RdbParser *p, void *userData, RdbBulk field, RdbBulk value);
+    /* Callback to handle a ziplist-based hash value */
     RdbRes (*handleHashZL)(RdbParser *p, void *userData, RdbBulk ziplist);
+    /* Callback to handle a listpack-based hash value */
     RdbRes (*handleHashLP)(RdbParser *p, void *userData, RdbBulk listpack);
+    /* Callback to handle a zipmap-based hash value */
     RdbRes (*handleHashZM)(RdbParser *p, void *userData, RdbBulk zipmap);
-    /* set */
+
+    /* Callback to handle an item from a plain-hash */
     RdbRes (*handleSetPlain)(RdbParser *p, void *userData, RdbBulk item);
+    /* Callback to handle an intset-based set value */
     RdbRes (*handleSetIS)(RdbParser *p, void *userData, RdbBulk intset);
+    /* Callback to handle a listpack-based set value */
     RdbRes (*handleSetLP)(RdbParser *p, void *userData, RdbBulk listpack);
 
     /*** TODO: RdbHandlersStructCallbacks: ***/
+
+    /* Callback to handle a ziplist-based sorted set value */
     RdbRes (*handleZsetZL)(RdbParser *p, void *userData, RdbBulk ziplist);
+    /* Callback to handle a listpack-based sorted set value */
     RdbRes (*handleZsetLP)(RdbParser *p, void *userData, RdbBulk listpack);
+    /* Callback to handle function code */
     RdbRes (*handleFunction)(RdbParser *p, void *userData, RdbBulk func);
+
     /*** TODO: RdbHandlersStructCallbacks: stream stuff ... ***/
+
+    /* Callback to handle a stream key with listpack value */
     RdbRes (*handleStreamLP)(RdbParser *p, void *userData, RdbBulk nodekey, RdbBulk streamLP);
 
 } RdbHandlersStructCallbacks;
 
+/****************************************************************
+ * Redis Data Type Callbacks for Registration (handlers Level 2)
+ *
+ * This level of callback registration is adequate when the focus is solely on
+ * the logical data types within the database, such as to export the data to
+ * another framework or investigate the content of the data.
+ ****************************************************************/
+
 typedef struct RdbHandlersDataCallbacks {
     HANDLERS_COMMON_CALLBACKS
+    /* Callback to handle the value of a string key */
     RdbRes (*handleStringValue)(RdbParser *p, void *userData, RdbBulk str);
+    /* Callback to handle an item from a list */
     RdbRes (*handleListItem)(RdbParser *p, void *userData, RdbBulk item);
+    /* Callback to handle a field-value pair within a hash */
     RdbRes (*handleHashFieldValue)(RdbParser *p, void *userData, RdbBulk field, RdbBulk value);
+    /* Callback to handle a member within a set */
     RdbRes (*handleSetMember)(RdbParser *p, void *userData, RdbBulk member);
 
     /*** TODO: RdbHandlersDataCallbacks: handleZsetElement ***/
+
+    /* Callback to handle a member within a sorted set along with its score */
     RdbRes (*handleZsetMember)(RdbParser *p, void *userData, RdbBulk member, double score);
 
     /*** TODO: RdbHandlersDataCallbacks: stream stuff ... ***/
 
+    /* Callback to handle metadata associated with a stream */
     RdbRes (*handleStreamMetadata)(RdbParser *p, void *userData, RdbStreamMeta *meta);
+    /* Callback to handle an item within a stream along with its field and value */
     RdbRes (*handleStreamItem)(RdbParser *p, void *userData, RdbStreamID *id, RdbBulk field, RdbBulk value);
-
+    /* Callback to handle the creation of a new consumer group within a stream */
     RdbRes (*handleStreamNewCGroup)(RdbParser *p, void *userData, RdbBulk grpName, RdbStreamGroupMeta *meta);
+    /* Callback to handle a pending entry within a consumer group */
     RdbRes (*handleStreamCGroupPendingEntry)(RdbParser *p, void *userData, RdbStreamPendingEntry *pendingEntry);
-
+    /* Callback to handle the creation of a new consumer within a stream */
     RdbRes (*handleStreamNewConsumer)(RdbParser *p, void *userData, RdbBulk consName, RdbStreamConsumerMeta *meta);
+    /* Callback to handle a pending entry within a consumer */
     RdbRes (*handleStreamConsumerPendingEntry)(RdbParser *p, void *userData, RdbStreamPendingEntry *pendingEntry);
 
 } RdbHandlersDataCallbacks;
