@@ -36,5 +36,5 @@ jobs:
         run: |
           export LD_LIBRARY_PATH=/usr/local/lib/
           export LIBRDB_REDIS_FOLDER=~/redis/src
-          make
+          make all valgrind
         working-directory: ${{github.workspace}}
