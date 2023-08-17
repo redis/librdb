@@ -32,7 +32,7 @@ void setupRedisServer();
 void teardownRedisServer();
 
 /* test groups */
-int group_rdb_to_loader();
+int group_rdb_to_redis();
 int group_test_rdb_cli();
 int group_rdb_to_resp();
 int group_main();

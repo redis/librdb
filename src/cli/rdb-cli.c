@@ -159,8 +159,7 @@ static RdbRes formatRedis(RdbParser *parser, char *input, int argc, char **argv)
     if ((rdbToResp = RDBX_createHandlersToResp(parser, &conf)) == NULL)
         return RDB_ERR_GENERAL;
 
-
-    if (RDBX_createRespToTcpLoader(parser, rdbToResp, hostname, port, pipeDepthVal) == NULL)
+    if (RDBX_createRespToRedisTcp(parser, rdbToResp, hostname, port) == NULL)
         return RDB_ERR_GENERAL;
 
     return RDB_OK;

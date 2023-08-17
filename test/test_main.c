@@ -177,7 +177,7 @@ int main(int argc, char *argv[]) {
     RUN_TEST_GROUP(group_mem_management);
     RUN_TEST_GROUP(group_bulk_ops);
     RUN_TEST_GROUP(group_pause);
-    RUN_TEST_GROUP(group_rdb_to_loader); /*external*/
+    RUN_TEST_GROUP(group_rdb_to_redis); /*external*/
     RUN_TEST_GROUP(group_test_rdb_cli); /*external*/
 
 
@@ -188,7 +188,7 @@ int main(int argc, char *argv[]) {
     RUN_TEST_GROUP(group_rdb_to_json);
     RUN_TEST_GROUP(group_mem_management);
     RUN_TEST_GROUP(group_bulk_ops);
-    RUN_TEST_GROUP(group_rdb_to_loader); /*external*/
+    RUN_TEST_GROUP(group_rdb_to_redis); /*external*/
     RUN_TEST_GROUP(group_test_rdb_cli); /*external*/
 
     printf("\n*************** END TESTING *******************\n");
