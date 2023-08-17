@@ -162,6 +162,50 @@ static void test_rdb_to_redis_set_lp(void **state) {
     test_rdb_to_redis_common(DUMP_FOLDER("set_lp_v11.rdb"), 1, 1);
 }
 
+/* iff 'delKeyBeforeWrite' is not set, then the parser will return an error on
+ * loading 100_lists.rdb ("mylist1 mylist2 ... mylist100") on key 'mylist62'
+ * Because key `mylist62` created earlier with a string value.  */
+static void test_rdb_to_redis_del_before_write(void **state) {
+    UNUSED(state);
+    RdbParser *parser;
+    RdbStatus status;
+    for (int delKeyBeforeWrite = 0 ; delKeyBeforeWrite <= 1 ; ++delKeyBeforeWrite) {
+        RdbxToRespConf rdb2respConf = {
+                .delKeyBeforeWrite = delKeyBeforeWrite,
+                .supportRestore = 1,
+                .restore.dstRdbVersion = 100};
+
+        runSystemCmd("%s/redis-cli -p %d set mylist62 1 > /dev/null", redisInstallFolder, redisPort);
+        /* RDB to TCP */
+        RdbxToResp *rdbToResp;
+        parser = RDB_createParserRdb(NULL);
+        RDB_setLogLevel(parser, RDB_LOG_ERR);
+        assert_non_null(RDBX_createReaderFile(parser, DUMP_FOLDER("100_lists.rdb")));
+        assert_non_null(rdbToResp = RDBX_createHandlersToResp(parser, &rdb2respConf));
+
+        assert_non_null(RDBX_createRespToRedisTcp(parser,
+                                                  rdbToResp,
+                                                  "127.0.0.1",
+                                                  redisPort));
+
+        RDB_setLogLevel(parser, RDB_LOG_ERR);
+
+        while ((status = RDB_parse(parser)) == RDB_STATUS_WAIT_MORE_DATA);
+
+        if (status == RDB_STATUS_OK)
+            assert_int_equal(delKeyBeforeWrite, 1);
+        else {
+            assert_int_equal(delKeyBeforeWrite, 0);
+            /* verify returned error code. Verify error message. */
+            RdbRes err = RDB_getErrorCode(parser);
+            assert_int_equal(err, RDBX_ERR_RESP_WRITE);
+            assert_non_null(strstr(RDB_getErrorMessage(parser), "mylist62"));
+        }
+
+        RDB_deleteParser(parser);
+    }
+}
+
 /*************************** group_rdb_to_redis *******************************/
 int group_rdb_to_redis() {
 
@@ -191,6 +235,7 @@ int group_rdb_to_redis() {
             /* misc */
             cmocka_unit_test_setup(test_rdb_to_redis_multiple_lists_strings, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_multiple_lists_strings_pipeline_depth_1, setupTest),
+            cmocka_unit_test_setup(test_rdb_to_redis_del_before_write, setupTest),
 
     };
 

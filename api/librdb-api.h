@@ -381,12 +381,20 @@ _LIBRDB_API void RDB_dontPropagate(RdbParser *p);
  * Parser setters & getters
  ****************************************************************/
 
-_LIBRDB_API void RDB_setMaxRawLenHandling(RdbParser *p, size_t size);
 _LIBRDB_API void RDB_setDeepIntegCheck(RdbParser *p, int deep);
 _LIBRDB_API size_t RDB_getBytesProcessed(RdbParser *p);
 _LIBRDB_API RdbState RDB_getState(RdbParser *p);
 _LIBRDB_API int RDB_getNumHandlers(RdbParser *p, RdbHandlersLevel lvl);
 _LIBRDB_API void RDB_IgnoreChecksum(RdbParser *p);
+
+/* There could be relatively large strings stored within Redis, which are
+ * subsequently also present in the RDB. This is especially true for collections
+ * of strings. In situations like this, if the parser is configured to read
+ * raw data (using RDB_createHandlersRaw), it could potentially lead to memory
+ * problems in data path. By establishing a MaxRawSize threshold, the size of
+ * raw data can be restricted, and if this threshold is exceeded, the parser will
+ * terminate its operation. The default threshold is unlimited. */
+_LIBRDB_API void RDB_setMaxRawSize(RdbParser *p, size_t maxSize);
 
 /* logger */
 _LIBRDB_API void RDB_setLogLevel(RdbParser *p, RdbLogLevel l);

@@ -718,7 +718,7 @@ static RdbStatus aggMakeRoom(RdbParser *p, size_t numBytesRq) {
     if (likely(freeRoomLeft >= numBytesRq))
         return RDB_STATUS_OK;
 
-    if (unlikely(p->maxRawLen < ctx->totalSize + numBytesRq)) {
+    if (unlikely(p->maxRawSize < ctx->totalSize + numBytesRq)) {
         RDB_reportError(p, RDB_ERR_MAX_RAW_LEN_EXCEEDED_FOR_KEY, "Maximum raw length exceeded for key (len=%lu)",
                         ctx->totalSize + numBytesRq);
         return RDB_STATUS_ERROR;

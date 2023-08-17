@@ -6,11 +6,13 @@
 #include "../../deps/redis/endianconv.h"
 #include <sys/uio.h>
 
-#define RETURN_ON_WRITE_ERR(cmd) do {\
-    if (unlikely(0 == (cmd))) return (RdbRes) RDBX_ERR_RESP_WRITE; \
-    } while(0);
+#define _RDB_TYPE_STRING 0
 
-#define WRITE_CONST_STR(wr, str, endCmd) (wr)->write((wr)->ctx, str, sizeof(str) - 1, endCmd)
+typedef enum DelKeyBeforeWrite {
+    DEL_KEY_BEFORE_NONE,
+    DEL_KEY_BEFORE_BY_DEL_CMD,
+    DEL_KEY_BEFORE_BY_RESTORE_REPLACE, /* RESTORE supported */
+} DelKeyBeforeWrite;
 
 void setIov(struct iovec *iov, const char *s, size_t l) {
     iov->iov_base = (void *) s;
@@ -45,6 +47,7 @@ struct RdbxToResp {
 
     uint64_t crc;
     int srcRdbVer;
+    DelKeyBeforeWrite delKeyBeforeWrite;
 };
 
 static void deleteRdbToRespCtx(RdbParser *p, void *context) {
@@ -107,22 +110,32 @@ static int rdbVerFromRedisVer(const char *ver) {
 }
 
 static void resolveSupportRestore(RdbParser *p, RdbxToResp *ctx, int srcRdbVer) {
-    int isRestore = ctx->conf.supportRestore;
     int dstRdbVer = ctx->conf.restore.dstRdbVersion;
 
     ctx->srcRdbVer = srcRdbVer;
 
-    if (isRestore) {
+    ctx->delKeyBeforeWrite = (ctx->conf.delKeyBeforeWrite) ? DEL_KEY_BEFORE_BY_DEL_CMD : DEL_KEY_BEFORE_NONE;
+
+    if (ctx->conf.supportRestore) {
         /* if not configured destination RDB version, then resolve it from
          * configured destination Redis version */
         if (!dstRdbVer)
             dstRdbVer = rdbVerFromRedisVer(ctx->conf.restore.dstRedisVersion);
 
-        if (dstRdbVer < srcRdbVer)
-            isRestore = 0;
+        if (dstRdbVer < srcRdbVer) {
+            RDB_log(p, RDB_LOG_WRN,
+                    "Cannot support RESTORE. SRC version (=%d) is higher than DST version (%d)",
+                    srcRdbVer, dstRdbVer);
+            ctx->conf.supportRestore = 0;
+        } else {
+            if (ctx->conf.delKeyBeforeWrite) {
+                RDB_log(p, RDB_LOG_INF, "As RESTORE is supported, configuration del-key-before-write will be ignored.");
+                ctx->delKeyBeforeWrite = DEL_KEY_BEFORE_BY_RESTORE_REPLACE;
+            }
+        }
     }
 
-    RdbHandlersLevel lvl = (isRestore) ? RDB_LEVEL_RAW : RDB_LEVEL_DATA;
+    RdbHandlersLevel lvl = (ctx->conf.supportRestore) ? RDB_LEVEL_RAW : RDB_LEVEL_DATA;
     for (int i = 0; i < RDB_DATA_TYPE_MAX; ++i) {
         RDB_handleByLevel(p, (RdbDataType) i, lvl, 0);
     }
@@ -173,7 +186,6 @@ static RdbRes toRespStartRdb(RdbParser *p, void *userData, int rdbVersion) {
     return RDB_OK;
 }
 
-/* TODO: support option rdb2resp del key before write */
 /* TODO: support expiry */
 static RdbRes toRespNewKey(RdbParser *p, void *userData, RdbBulk key, RdbKeyInfo *info) {
     UNUSED(info);
@@ -188,6 +200,18 @@ static RdbRes toRespNewKey(RdbParser *p, void *userData, RdbBulk key, RdbKeyInfo
     ctx->keyCtx.keyLen = RDB_bulkLen(p, key);
     if ((ctx->keyCtx.key = RDB_bulkClone(p, key)) == NULL)
         return RDB_ERR_FAIL_ALLOC;
+
+    /* apply del-key-before-write if configured, unless it is 'SET' command where
+     * the key is overridden if it already exists, without encountering any problems. */
+    if ((ctx->delKeyBeforeWrite == DEL_KEY_BEFORE_BY_DEL_CMD) && (info->opcode != _RDB_TYPE_STRING)) {
+        struct iovec iov[4];
+        char keyLenStr[32];
+        IOV_CONST_STR(&iov[0], "*2\r\n$3\r\nDEL\r\n$");
+        iov_stringLen(&iov[1], ctx->keyCtx.keyLen, keyLenStr);
+        IOV_STRING(&iov[2], ctx->keyCtx.key, ctx->keyCtx.keyLen);
+        IOV_CONST_STR(&iov[3], "\r\n");
+        return writevWrap(ctx, iov, 4, 1, 1);
+    }
     return RDB_OK;
 }
 
@@ -207,7 +231,7 @@ static RdbRes toRespEndKey(RdbParser *p, void *userData) {
 static RdbRes toRespString(RdbParser *p, void *userData, RdbBulk string) {
     RdbxToResp *ctx = userData;
 
-    char keyLenStr[64], valLenStr[64];
+    char keyLenStr[32], valLenStr[32];
     int valLen = RDB_bulkLen(p, string);
 
     /*** fillup iovec ***/
@@ -231,7 +255,7 @@ static RdbRes toRespList(RdbParser *p, void *userData, RdbBulk item) {
 
     /*** fillup iovec ***/
 
-    char keyLenStr[64], valLenStr[64];
+    char keyLenStr[32], valLenStr[32];
     int valLen = RDB_bulkLen(p, item);
 
     struct iovec iov[7];
@@ -253,7 +277,7 @@ static RdbRes toRespHash(RdbParser *p, void *userData, RdbBulk field, RdbBulk va
 
     /*** fillup iovec ***/
 
-    char keyLenStr[64], fieldLenStr[64], valueLenStr[64];
+    char keyLenStr[32], fieldLenStr[32], valueLenStr[32];
     int fieldLen = RDB_bulkLen(p, field);
     int valueLen = RDB_bulkLen(p, value);
 
@@ -277,10 +301,8 @@ static RdbRes toRespHash(RdbParser *p, void *userData, RdbBulk field, RdbBulk va
 
 static RdbRes toRespSet(RdbParser *p, void *userData, RdbBulk member) {
     RdbxToResp *ctx = userData;
+    char keyLenStr[32], valLenStr[32];
 
-    /*** fillup iovec ***/
-
-    char keyLenStr[64], valLenStr[64];
     int valLen = RDB_bulkLen(p, member);
 
     struct iovec iov[7];
@@ -301,8 +323,16 @@ static RdbRes toRespEndRdb(RdbParser *p, void *userData) {
     UNUSED(p);
     RdbxToResp *ctx = userData;
     RdbxRespWriter *writer = &ctx->respWriter;
-    writer->flush(writer->ctx);
-    return RDB_OK;
+    if (likely(writer->flush(writer->ctx) == 0))
+        return RDB_OK;
+
+    if (RDB_getErrorCode(p) != RDB_OK)
+        return RDB_getErrorCode(p);
+
+    /* writer didn't take care to report an error */
+    RDB_log(p, RDB_LOG_WRN, "Writer returned error indication but didn't RDB_reportError()");
+    RDB_reportError(p, (RdbRes) RDBX_ERR_RESP_WRITE, "RESP writer returned error on flush()");
+    return (RdbRes) RDBX_ERR_RESP_WRITE;
 }
 
 /*** Handling raw ***/
@@ -317,6 +347,7 @@ static RdbRes toRespRawBegin(RdbParser *p, void *userData, size_t size) {
 }
 
 static RdbRes toRespRawFrag(RdbParser *p, void *userData, RdbBulk frag) {
+    char keyLenStr[32], totalLenStr[32];
     UNUSED(p);
     RdbxToResp *ctx = userData;
     struct iovec iov[10];
@@ -326,10 +357,11 @@ static RdbRes toRespRawFrag(RdbParser *p, void *userData, RdbBulk frag) {
     ctx->crc = crc64(ctx->crc, (unsigned char *) frag , fragLen);
 
     if (likely(!(ctx->rawCtx.sentFirstFrag))) {
-        char keyLenStr[64], totalLenStr[64];
-
         ctx->rawCtx.sentFirstFrag = 1;
-        IOV_CONST_STR(&iov[iovs++], "*4\r\n$7\r\nRESTORE\r\n$");                /* RESTORE */
+        if (ctx->delKeyBeforeWrite == DEL_KEY_BEFORE_BY_RESTORE_REPLACE)
+            IOV_CONST_STR(&iov[iovs++], "*5\r\n$7\r\nRESTORE\r\n$");            /* RESTORE-REPLACE */
+        else
+            IOV_CONST_STR(&iov[iovs++], "*4\r\n$7\r\nRESTORE\r\n$");            /* RESTORE */
         iov_stringLen(&iov[iovs++], ctx->keyCtx.keyLen, keyLenStr);             /* write key len */
         IOV_STRING(&iov[iovs++], ctx->keyCtx.key, ctx->keyCtx.keyLen);          /* write key */
         IOV_CONST_STR(&iov[iovs++], "\r\n$1\r\n0\r\n$");                        /* newline + write TTL */
@@ -353,10 +385,14 @@ static RdbRes toRespRawFragEnd(RdbParser *p, void *userData) {
     memrev64ifbe(crc);
     memcpy(footer + 2, crc, 8);
 
-    struct iovec iov[] = {
-            {footer, 10},
-            {"\r\n", 2}
-    };
+    struct iovec iov[2];
+    int iovs = 0;
+
+    IOV_STRING(&iov[iovs++], footer, 10);
+    if (ctx->delKeyBeforeWrite == DEL_KEY_BEFORE_BY_RESTORE_REPLACE)
+        IOV_CONST_STR(&iov[iovs++], "\r\n$7\r\nREPLACE\r\n");
+    else
+        IOV_CONST_STR(&iov[iovs++], "\r\n");
     return writevWrap(ctx, iov, 2, 0, 1);
 }
 

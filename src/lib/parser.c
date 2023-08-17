@@ -179,7 +179,7 @@ _LIBRDB_API RdbParser *RDB_createParserRdb(RdbMemAlloc *memAlloc) {
     p->appCbCtx.numBulks = 0;
     p->loggerCb = loggerCbDefault;
     p->logLevel = RDB_LOG_DBG;
-    p->maxRawLen = SIZE_MAX;
+    p->maxRawSize = SIZE_MAX;
     p->errorCode = RDB_OK;
     p->handlers[RDB_LEVEL_RAW] = NULL;
     p->handlers[RDB_LEVEL_STRUCT] = NULL;
@@ -364,8 +364,8 @@ _LIBRDB_API void RDB_IgnoreChecksum(RdbParser *p) {
     p->ignoreChecksum = 1;
 }
 
-_LIBRDB_API void RDB_setMaxRawLenHandling(RdbParser *p, size_t size) {
-    p->maxRawLen = size;
+_LIBRDB_API void RDB_setMaxRawSize(RdbParser *p, size_t size) {
+    p->maxRawSize = size;
 }
 
 _LIBRDB_API void RDB_log(RdbParser *p, RdbLogLevel lvl, const char *format, ...) {
@@ -718,12 +718,12 @@ static RdbStatus finalizeConfig(RdbParser *p, int isParseFromBuff) {
 }
 
 static void printParserState(RdbParser *p) {
-    printf ("Parser error message:%s\n", RDB_getErrorMessage(p));
-    printf ("Parser error code:%d\n", RDB_getErrorCode(p));
-    printf ("Parser element func name: %s\n", peInfo[p->parsingElement].funcname);
-    printf ("Parser element func description: %s\n", peInfo[p->parsingElement].funcname);
-    printf ("Parser element state:%d\n", p->elmCtx.state);
-    bulkPoolPrintDbg(p);
+    RDB_log(p, RDB_LOG_ERR, "Parser error message: %s", RDB_getErrorMessage(p));
+    RDB_log(p, RDB_LOG_ERR, "Parser error code: %d", RDB_getErrorCode(p));
+    RDB_log(p, RDB_LOG_ERR, "Parser element func name: %s", peInfo[p->parsingElement].funcname);
+    RDB_log(p, RDB_LOG_ERR, "Parser element func description: %s", peInfo[p->parsingElement].funcname);
+    RDB_log(p, RDB_LOG_ERR, "Parser element state:%d", p->elmCtx.state);
+    //bulkPoolPrintDbg(p);
 }
 
 static void loggerCbDefault(RdbLogLevel l, const char *msg) {
