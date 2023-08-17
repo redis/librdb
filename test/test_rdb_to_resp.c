@@ -78,6 +78,7 @@ static void runWithAndWithoutRestore(const char *rdbfile) {
 
     memset(&r2rConf, 0, sizeof(r2rConf));
     r2rConf.supportRestore = 1;
+    r2rConf.delKeyBeforeWrite = 0;
 
     /* expect not use RESTORE */
     r2rConf.restore.dstRdbVersion = 1;

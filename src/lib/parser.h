@@ -283,7 +283,7 @@ struct RdbParser {
     int ignoreChecksum;
     RdbLoggerCB loggerCb;
     RdbLogLevel logLevel;
-    size_t maxRawLen;
+    size_t maxRawSize;
 
     /*** context ***/
     ElementCtx elmCtx;       /* parsing-element context */
