@@ -15,8 +15,7 @@ typedef struct RdbxReaderFileDesc RdbxReaderFileDesc;
 typedef struct RdbxFilterKey RdbxFilterKey;
 typedef struct RdbxToJson RdbxToJson;
 typedef struct RdbxToResp RdbxToResp;
-typedef struct RdbxRespWriter RdbxRespWriter;
-typedef struct RdbxRespToTcpLoader RdbxRespToTcpLoader;
+typedef struct RdbxRespToRedisLoader RdbxRespToRedisLoader;
 
 /****************************************************************
 * Error codes
@@ -24,6 +23,7 @@ typedef struct RdbxRespToTcpLoader RdbxRespToTcpLoader;
 
 typedef enum {
     RDBX_ERR_READER_FILE_GENERAL_ERROR = _RDB_ERR_EXTENSION_FIRST,
+    RDBX_ERR_RESP_FAILED_ALLOC,
 
     /* rdb2json errors */
     RDBX_ERR_FAILED_OPEN_FILE,
@@ -33,20 +33,17 @@ typedef enum {
     RDBX_ERR_FILTER_FAILED_COMPILE_REGEX,
 
     /* rdb2resp errors */
-    RDBX_ERR_RESP_INVALID_CONN_TYPE,
-    RDBX_ERR_RESP_FAILED_ALLOC,
-    RDBX_ERR_RESP_INIT_CONN_ERROR,
 
     /* resp writer/loader */
     RDBX_ERR_RESP_WRITE,
     RDBX_ERR_RESP_READ,
-    RDBX_ERR_RESP2TCP_CREATE_SOCKET,
-    RDBX_ERR_RESP2TCP_INVALID_ADDRESS,
-    RDBX_ERR_RESP2TCP_FAILED_CONNECT,
-    RDBX_ERR_RESP2TCP_FAILED_READ,
-    RDBX_ERR_RESP2TCP_FAILED_WRITE,
-    RDBX_ERR_RESP2TCP_CONN_CLOSE,
-    RDBX_ERR_RESP2TCP_MAX_RETRIES,
+    RDBX_ERR_RESP2REDIS_CREATE_SOCKET,
+    RDBX_ERR_RESP2REDIS_INVALID_ADDRESS,
+    RDBX_ERR_RESP2REDIS_FAILED_CONNECT,
+    RDBX_ERR_RESP2REDIS_FAILED_READ,
+    RDBX_ERR_RESP2REDIS_FAILED_WRITE,
+    RDBX_ERR_RESP2REDIS_CONN_CLOSE,
+    RDBX_ERR_RESP2REDIS_MAX_RETRIES,
 } RdbxRes;
 
 /****************************************************************
@@ -129,7 +126,8 @@ _LIBRDB_API RdbxToResp *RDBX_createHandlersToResp(RdbParser *, RdbxToRespConf *)
  *
  * Create instance for writing RDB to RESP stream.
  *
- * Used by:  RDBX_createRespToTcpLoader
+ * Used by:  RDBX_createRespToRedisTcp
+ *           RDBX_createRespToRedisFd
  *           RDBX_createRespFileWriter
  *           <user-defined-handlers>
  ****************************************************************/
@@ -158,15 +156,19 @@ _LIBRDB_API RdbxRespFileWriter *RDBX_createRespFileWriter(RdbParser *p,
 /****************************************************************
  * Create RESP to Redis TCP connection
  *
- * If provided path is NULL then write stdout
  * Can configure pipeline depth of transmitted RESP commands. Set
  * to 0 if to use default.
  ****************************************************************/
-_LIBRDB_API RdbxRespToTcpLoader *RDBX_createRespToTcpLoader(RdbParser *p,
+_LIBRDB_API RdbxRespToRedisLoader *RDBX_createRespToRedisTcp(RdbParser *p,
                                                             RdbxToResp *rdbToResp,
-                                                            const char* hostname,
-                                                            int port,
-                                                            int pipelineDepth);
+                                                            const char *hostname,
+                                                            int port);
+
+_LIBRDB_API RdbxRespToRedisLoader *RDBX_createRespToRedisFd(RdbParser *p,
+                                                          RdbxToResp *rdbToResp,
+                                                          int fd);
+
+_LIBRDB_API void RDBX_setPipelineDepth(RdbxRespToRedisLoader *r2r, int depth);
 
 #ifdef __cplusplus
 }

@@ -14,7 +14,7 @@ static int setupTest(void **state) {
 }
 
 /*
- * Testing RESP TCP against live server:
+ * Testing RESP against live server:
  * 1. Run RDB to Json (out1.json)
  * 2. Run RDB against Redis and save DUMP-RDB
  * 3. From DUMP-RDB generate Json (out2.json)
@@ -26,7 +26,7 @@ static int setupTest(void **state) {
  * Note: This test cannot tell if actually run RESTORE command in the background.
  *       test_rdb_to_resp.c verifies that RESTORE command is used only when it should.
  */
-static void test_rdb_to_loader_common(const char *rdbfile, int pipelineDepth, int ignoreListOrder) {
+static void test_rdb_to_redis_common(const char *rdbfile, int pipelineDepth, int ignoreListOrder) {
     RdbParser *parser;
     RdbStatus status;
 
@@ -61,7 +61,13 @@ static void test_rdb_to_loader_common(const char *rdbfile, int pipelineDepth, in
         RDB_setLogLevel(parser, RDB_LOG_ERR);
         assert_non_null(RDBX_createReaderFile(parser, rdbfile));
         assert_non_null(rdbToResp = RDBX_createHandlersToResp(parser, &rdb2respConf));
-        assert_non_null(RDBX_createRespToTcpLoader(parser, rdbToResp, "127.0.0.1", redisPort, pipelineDepth));
+
+        RdbxRespToRedisLoader *r2r = RDBX_createRespToRedisTcp(parser,
+                                                               rdbToResp,
+                                                               "127.0.0.1",
+                                                               redisPort);
+        assert_non_null(r2r);
+        RDBX_setPipelineDepth(r2r, pipelineDepth);
         RDB_setLogLevel(parser, RDB_LOG_ERR);
         while ((status = RDB_parse(parser)) == RDB_STATUS_WAIT_MORE_DATA);
         assert_int_equal(status, RDB_STATUS_OK);
@@ -86,78 +92,78 @@ static void test_rdb_to_loader_common(const char *rdbfile, int pipelineDepth, in
     }
 }
 
-static void test_rdb_to_loader_single_string(void **state) {
+static void test_rdb_to_redis_single_string(void **state) {
     UNUSED(state);
-    test_rdb_to_loader_common(DUMP_FOLDER("single_key.rdb"), 0, 0);
+    test_rdb_to_redis_common(DUMP_FOLDER("single_key.rdb"), 0, 0);
 }
 
-static void test_rdb_to_loader_single_list(void **state) {
+static void test_rdb_to_redis_single_list(void **state) {
     UNUSED(state);
-    test_rdb_to_loader_common(DUMP_FOLDER("quicklist2_v11.rdb"), 0, 0);
+    test_rdb_to_redis_common(DUMP_FOLDER("quicklist2_v11.rdb"), 0, 0);
 }
 
-static void test_rdb_to_loader_multiple_lists_strings(void **state) {
+static void test_rdb_to_redis_multiple_lists_strings(void **state) {
     UNUSED(state);
-    test_rdb_to_loader_common(DUMP_FOLDER("multiple_lists_strings.rdb"), 0, 0);
+    test_rdb_to_redis_common(DUMP_FOLDER("multiple_lists_strings.rdb"), 0, 0);
 }
 
-static void test_rdb_to_loader_multiple_lists_strings_pipeline_depth_1(void **state) {
+static void test_rdb_to_redis_multiple_lists_strings_pipeline_depth_1(void **state) {
     UNUSED(state);
-    test_rdb_to_loader_common(DUMP_FOLDER("multiple_lists_strings.rdb"), 1, 0);
+    test_rdb_to_redis_common(DUMP_FOLDER("multiple_lists_strings.rdb"), 1, 0);
 }
 
-static void test_rdb_to_loader_plain_list(void **state) {
+static void test_rdb_to_redis_plain_list(void **state) {
     UNUSED(state);
-    test_rdb_to_loader_common(DUMP_FOLDER("plain_list_v6.rdb"), 1, 0);
+    test_rdb_to_redis_common(DUMP_FOLDER("plain_list_v6.rdb"), 1, 0);
 }
 
-static void test_rdb_to_loader_quicklist(void **state) {
+static void test_rdb_to_redis_quicklist(void **state) {
     UNUSED(state);
-    test_rdb_to_loader_common(DUMP_FOLDER("quicklist.rdb"), 1, 0);
+    test_rdb_to_redis_common(DUMP_FOLDER("quicklist.rdb"), 1, 0);
 }
 
-static void test_rdb_to_loader_single_ziplist(void **state) {
+static void test_rdb_to_redis_single_ziplist(void **state) {
     UNUSED(state);
-    test_rdb_to_loader_common(DUMP_FOLDER("ziplist_v3.rdb"), 1, 0);
+    test_rdb_to_redis_common(DUMP_FOLDER("ziplist_v3.rdb"), 1, 0);
 }
 
-static void test_rdb_to_loader_plain_hash(void **state) {
+static void test_rdb_to_redis_plain_hash(void **state) {
     UNUSED(state);
-    test_rdb_to_loader_common(DUMP_FOLDER("plain_hash_v3.rdb"), 1, 0);
+    test_rdb_to_redis_common(DUMP_FOLDER("plain_hash_v3.rdb"), 1, 0);
 }
 
-static void test_rdb_to_loader_hash_zl(void **state) {
+static void test_rdb_to_redis_hash_zl(void **state) {
     UNUSED(state);
-    test_rdb_to_loader_common(DUMP_FOLDER("hash_zl_v6.rdb"), 1, 0);
+    test_rdb_to_redis_common(DUMP_FOLDER("hash_zl_v6.rdb"), 1, 0);
 }
 
-static void test_rdb_to_loader_hash_lp(void **state) {
+static void test_rdb_to_redis_hash_lp(void **state) {
     UNUSED(state);
-    test_rdb_to_loader_common(DUMP_FOLDER("hash_lp_v11.rdb"), 1, 0);
+    test_rdb_to_redis_common(DUMP_FOLDER("hash_lp_v11.rdb"), 1, 0);
 }
 
-static void test_rdb_to_loader_hash_zm(void **state) {
+static void test_rdb_to_redis_hash_zm(void **state) {
     UNUSED(state);
-    test_rdb_to_loader_common(DUMP_FOLDER("hash_zm_v2.rdb"), 1, 0);
+    test_rdb_to_redis_common(DUMP_FOLDER("hash_zm_v2.rdb"), 1, 0);
 }
 
-static void test_rdb_to_loader_plain_set(void **state) {
+static void test_rdb_to_redis_plain_set(void **state) {
     UNUSED(state);
-    test_rdb_to_loader_common(DUMP_FOLDER("plain_set_v6.rdb"), 1, 1);
+    test_rdb_to_redis_common(DUMP_FOLDER("plain_set_v6.rdb"), 1, 1);
 }
 
-static void test_rdb_to_loader_set_is(void **state) {
+static void test_rdb_to_redis_set_is(void **state) {
     UNUSED(state);
-    test_rdb_to_loader_common(DUMP_FOLDER("set_is_v11.rdb"), 1, 1);
+    test_rdb_to_redis_common(DUMP_FOLDER("set_is_v11.rdb"), 1, 1);
 }
 
-static void test_rdb_to_loader_set_lp(void **state) {
+static void test_rdb_to_redis_set_lp(void **state) {
     UNUSED(state);
-    test_rdb_to_loader_common(DUMP_FOLDER("set_lp_v11.rdb"), 1, 1);
+    test_rdb_to_redis_common(DUMP_FOLDER("set_lp_v11.rdb"), 1, 1);
 }
 
-/*************************** group_rdb_to_loader *******************************/
-int group_rdb_to_loader() {
+/*************************** group_rdb_to_redis *******************************/
+int group_rdb_to_redis() {
 
     if (!redisInstallFolder) {
         printf("[  SKIPPED ] (Redis installation folder is not configured)\n");
@@ -166,25 +172,25 @@ int group_rdb_to_loader() {
 
     const struct CMUnitTest tests[] = {
             /* string */
-            cmocka_unit_test_setup(test_rdb_to_loader_single_string, setupTest),
+            cmocka_unit_test_setup(test_rdb_to_redis_single_string, setupTest),
             /* list */
-            cmocka_unit_test_setup(test_rdb_to_loader_single_list, setupTest),
-            cmocka_unit_test_setup(test_rdb_to_loader_plain_list, setupTest),
-            cmocka_unit_test_setup(test_rdb_to_loader_quicklist, setupTest),
-            cmocka_unit_test_setup(test_rdb_to_loader_single_ziplist, setupTest),
+            cmocka_unit_test_setup(test_rdb_to_redis_single_list, setupTest),
+            cmocka_unit_test_setup(test_rdb_to_redis_plain_list, setupTest),
+            cmocka_unit_test_setup(test_rdb_to_redis_quicklist, setupTest),
+            cmocka_unit_test_setup(test_rdb_to_redis_single_ziplist, setupTest),
             /* hash */
-            cmocka_unit_test_setup(test_rdb_to_loader_plain_hash, setupTest),
-            cmocka_unit_test_setup(test_rdb_to_loader_hash_zl, setupTest),
-            cmocka_unit_test_setup(test_rdb_to_loader_hash_lp, setupTest),
-            cmocka_unit_test_setup(test_rdb_to_loader_hash_zm, setupTest),
+            cmocka_unit_test_setup(test_rdb_to_redis_plain_hash, setupTest),
+            cmocka_unit_test_setup(test_rdb_to_redis_hash_zl, setupTest),
+            cmocka_unit_test_setup(test_rdb_to_redis_hash_lp, setupTest),
+            cmocka_unit_test_setup(test_rdb_to_redis_hash_zm, setupTest),
             /* set */
-            cmocka_unit_test_setup(test_rdb_to_loader_plain_set, setupTest),
-            cmocka_unit_test_setup(test_rdb_to_loader_set_is, setupTest),
-            cmocka_unit_test_setup(test_rdb_to_loader_set_lp, setupTest),
+            cmocka_unit_test_setup(test_rdb_to_redis_plain_set, setupTest),
+            cmocka_unit_test_setup(test_rdb_to_redis_set_is, setupTest),
+            cmocka_unit_test_setup(test_rdb_to_redis_set_lp, setupTest),
 
             /* misc */
-            cmocka_unit_test_setup(test_rdb_to_loader_multiple_lists_strings, setupTest),
-            cmocka_unit_test_setup(test_rdb_to_loader_multiple_lists_strings_pipeline_depth_1, setupTest),
+            cmocka_unit_test_setup(test_rdb_to_redis_multiple_lists_strings, setupTest),
+            cmocka_unit_test_setup(test_rdb_to_redis_multiple_lists_strings_pipeline_depth_1, setupTest),
 
     };
 
