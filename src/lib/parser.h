@@ -10,7 +10,6 @@
 #define MAX_APP_BULKS 2
 #define NOP /*no-op*/
 #define IF_NOT_OK_RETURN(cmd) do {RdbStatus s; s = cmd; if (unlikely(s!=RDB_STATUS_OK)) return s;} while (0)
-#define IF_NOT_OK_GOTO(cmd, go_to) do {RdbStatus s; s = cmd; if (unlikely(s!=RDB_STATUS_OK)) goto go_to;} while (0)
 
 /* parser internal status value. Not exposed at to the caller.
  * Saves us another stopping condition in main loop. */
@@ -21,11 +20,16 @@
 #define UNUSED(...) unused( (void *) NULL, ##__VA_ARGS__);
 static inline void unused(void *dummy, ...) { (void)(dummy);}
 
-#define CALL_COMMON_HANDLERS_CB(p, callback, ...) \
+/* Used by the parser to call all registered handlers, across levels */
+#define CALL_COMMON_HANDLERS_CB(p, callback, ...)  \
+    __CALL_COMMON_HANDLERS_CB(p, callback, h->userData, ##__VA_ARGS__)
+#define CALL_COMMON_HANDLERS_CB_NO_ARGS(p, callback) \
+    __CALL_COMMON_HANDLERS_CB(p, callback, h->userData)
+#define __CALL_COMMON_HANDLERS_CB(p, callback, ...) \
   do { \
     for (RdbHandlers *h = p->firstHandlers; h ; h = h->next) { \
         if (h->h.common.callback) { \
-            p->errorCode = h->h.common.callback(p, h->userData, ##__VA_ARGS__); \
+            p->errorCode = h->h.common.callback(p, ##__VA_ARGS__); \
             if (unlikely(p->errorCode != RDB_OK)) { \
                 if (p->errorCode == RDB_OK_DONT_PROPAGATE) { \
                     p->errorCode = RDB_OK; \
@@ -41,12 +45,17 @@ static inline void unused(void *dummy, ...) { (void)(dummy);}
     p->appCbCtx.numBulks = 0; \
   } while (0)
 
+/* Used by the parser to call all registered handlers, for given level */
 #define CALL_HANDLERS_CB(p, finalize_cmd, lvl,level_and_callback, ...) \
+    __CALL_HANDLERS_CB(p, finalize_cmd, lvl,level_and_callback, h->userData, ##__VA_ARGS__)
+#define CALL_HANDLERS_CB_NO_ARGS(p, finalize_cmd, lvl,level_and_callback) \
+    __CALL_HANDLERS_CB(p, finalize_cmd, lvl,level_and_callback, h->userData)
+#define __CALL_HANDLERS_CB(p, finalize_cmd, lvl,level_and_callback, ...) \
   do { \
     RdbHandlers *h = p->handlers[lvl]; \
     for (int ii = 0 ; ii < p->numHandlers[lvl] ; ++ii) { \
         if (h->h.level_and_callback) { \
-            p->errorCode = h->h.level_and_callback(p, h->userData, ##__VA_ARGS__);\
+            p->errorCode = h->h.level_and_callback(p, ##__VA_ARGS__);\
             if (unlikely(p->errorCode != RDB_OK)) { \
                 if (p->errorCode == RDB_OK_DONT_PROPAGATE) { \
                     p->errorCode = RDB_OK; \

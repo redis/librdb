@@ -13,7 +13,7 @@ OBJECTS  = $(patsubst %,%.o,$(SOURCES))
 TARGETS  = $(basename $(SOURCES))
 
 CC          = gcc
-STD         = -std=gnu99
+STD         = -std=c99
 STACK       = -fstack-protector-all -Wstack-protector
 WARNS       = -Wall -Wextra -pedantic -Werror
 CFLAGS      = -fPIC -O3 $(STD) $(STACK) $(WARNS)

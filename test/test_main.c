@@ -122,10 +122,10 @@ static void printResPicture(int result) {
 }
 
 
-#define RUN_TEST_GROUP(grp, ...) \
+#define RUN_TEST_GROUP(grp) \
     if ((runGroupPrefix == NULL) || (strncmp(runGroupPrefix, #grp, strlen(runGroupPrefix)) == 0)) { \
         printf ("\n--- Test Group: %s ---\n", #grp); \
-        result |= grp(__VA_ARGS__); \
+        result |= grp(); \
     }
 
 /*************************** group_main *******************************/
@@ -169,7 +169,7 @@ int main(int argc, char *argv[]) {
     //setenv("LIBRDB_DEBUG_DATA", "1", 1); /* << to see parser states printouts */
 
     printf("\n*************** START TESTING *******************\n");
-    setenv("LIBRDB_SIM_WAIT_MORE_DATA", "0", 1);
+    setEnvVar("LIBRDB_SIM_WAIT_MORE_DATA", "0");
     RUN_TEST_GROUP(group_test_resp_reader);
     RUN_TEST_GROUP(group_rdb_to_resp);
     RUN_TEST_GROUP(group_main);
@@ -182,7 +182,7 @@ int main(int argc, char *argv[]) {
 
 
     printf("\n*************** SIMULATING WAIT_MORE_DATA *******************\n");
-    setenv("LIBRDB_SIM_WAIT_MORE_DATA", "1", 1);
+    setEnvVar("LIBRDB_SIM_WAIT_MORE_DATA", "1");
     RUN_TEST_GROUP(group_main);
     RUN_TEST_GROUP(group_rdb_to_resp);
     RUN_TEST_GROUP(group_rdb_to_json);

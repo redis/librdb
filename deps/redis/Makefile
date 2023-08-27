@@ -2,7 +2,7 @@ SOURCES = $(notdir $(basename $(wildcard *.c)))
 OBJECTS = $(patsubst %,%.o,$(SOURCES))
 
 CC             = gcc
-STD            = -std=gnu99
+STD            = -std=c99
 WARNS          = -Wall -Wextra -pedantic -Werror
 CFLAGS         = -fPIC -O3 $(STD) $(WARNS)
 DEBUG          = -g3 -DDEBUG=1

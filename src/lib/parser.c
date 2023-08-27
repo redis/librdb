@@ -1244,7 +1244,7 @@ RdbStatus elementNextRdbType(RdbParser *p) {
 
 RdbStatus elementEndKey(RdbParser *p) {
     /*** ENTER SAFE STATE ***/
-    CALL_HANDLERS_CB(p, NOP, p->elmCtx.key.handleByLevel, common.handleEndKey);
+    CALL_HANDLERS_CB_NO_ARGS(p, NOP, p->elmCtx.key.handleByLevel, common.handleEndKey);
 
     p->elmCtx.key.numItemsHint = -1;
 
@@ -1620,7 +1620,7 @@ RdbStatus elementEndOfFile(RdbParser *p) {
         }
     }
 
-    CALL_COMMON_HANDLERS_CB(p, handleEndRdb);
+    CALL_COMMON_HANDLERS_CB_NO_ARGS(p, handleEndRdb);
     return RDB_STATUS_ENDED; /* THE END */
 }
 

@@ -50,3 +50,4 @@ void *xrealloc(void *ptr, size_t size);
 
 char *readFile(const char *filename, size_t *len);
 void cleanTmpFolder();
+void setEnvVar (const char *name, const char *val);
