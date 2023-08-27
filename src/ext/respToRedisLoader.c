@@ -1,10 +1,15 @@
-#include "common.h"
-#include <string.h>
+/* feature-test-macros POSIX.1-2008 for: nanosleep() */
+#define _POSIX_C_SOURCE 200809L
+
+#include <stdio.h>
+#include <time.h>
 #include <unistd.h>
+#include <string.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <errno.h>
+#include "common.h"
 #include "readerResp.h"
 
 #ifdef USE_OPENSSL
@@ -51,7 +56,7 @@ static int readReplies(RdbxRespToRedisLoader *ctx, int numToRead) {
 
         if (bytesReceived > 0) {
             /* Data was received, process it */
-            if (RESP_REPLY_ERR == readRespReplies(respReader, buff, bytesReceived)) {
+            if (unlikely(RESP_REPLY_ERR == readRespReplies(respReader, buff, bytesReceived))) {
                 char *failedRecord = ctx->pendingCmds.cmdPrefix[ctx->respReader.countReplies % NUM_RECORDED_CMDS];
                 RDB_reportError(ctx->p, (RdbRes) RDBX_ERR_RESP_WRITE,
                                 "\nReceived Server error: \"%s\"\nFailed on command [#%d]:\n%s\n",
@@ -123,7 +128,10 @@ static int redisLoaderWritev(void *context, struct iovec *iov, int count, int st
                                     "Failed to write socket. Exceeded EAGAIN retry limit");
                     return 1;
                 }
-                usleep(1000 * retries); /* Backoff and Retries  */
+
+                /* sleep 1msec */
+                struct timespec req = {0, 1000 * 1000}, rem;
+                nanosleep(&req, &rem);
                 continue;
             } else {
                 RDB_reportError(ctx->p, (RdbRes) RDBX_ERR_RESP2REDIS_FAILED_WRITE,

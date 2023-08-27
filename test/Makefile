@@ -13,7 +13,7 @@ SOURCES  = $(notdir $(basename $(wildcard *.c)))
 OBJECTS  = $(patsubst %,%.o,$(SOURCES))
 
 CC          = gcc
-STD         = -std=gnu99
+STD         = -std=c99
 STACK       = -fstack-protector-all -Wstack-protector
 WARNS       = -Wall -Wextra -pedantic -Werror -Wno-unused-function
 

@@ -1,4 +1,6 @@
-#include "test_common.h"
+/* feature-test-macros POSIX.1-2008 for: kill(), strdup(), setenv() */
+#define _POSIX_C_SOURCE 200809L
+
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
@@ -9,6 +11,7 @@
 #include <sys/types.h>
 #include <sys/wait.h>
 #include <dirent.h>
+#include "test_common.h"
 
 /* server port to allocate for tests against live Redis */
 int redisPort;
@@ -38,7 +41,11 @@ void runSystemCmdRetry(int seconds, const char *cmdFormat, ...) {
     time_t startTime = time(NULL);
     do {
         if (system(cmd) == 0) return;
-        usleep(10000);
+
+        /* sleep 10msec */
+        struct timespec req = {0, 10000*1000}, rem;
+        nanosleep(&req, &rem);
+
     } while (difftime(time(NULL), startTime) < seconds);
 
     printf("\nFailed to run command: %s\n", cmd);
@@ -123,6 +130,10 @@ void cleanTmpFolder() {
     }
 
     closedir(dir);
+}
+
+void setEnvVar (const char *name, const char *val) {
+    setenv(name, val, 1);
 }
 
 /*** setup external Redis Server ***/

@@ -620,7 +620,7 @@ static inline RdbStatus cbHandleBegin(RdbParser *p, size_t size) {
 }
 
 static inline RdbStatus cbHandleEnd(RdbParser *p) {
-    CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_RAW, rdbRaw.handleEnd);
+    CALL_HANDLERS_CB_NO_ARGS(p, NOP, RDB_LEVEL_RAW, rdbRaw.handleEnd);
     return RDB_STATUS_OK;
 }
 
