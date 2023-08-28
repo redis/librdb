@@ -226,18 +226,22 @@ destruction, or when newer block replacing old one.
 
 ### rdb-cli usage
 
-    Usage: rdb-cli /path/to/dump.rdb [OPTIONS] <FORMAT {json|resp|redis}> [FORMAT_OPTIONS]
+    Usage: rdb-cli /path/to/dump.rdb [OPTIONS] {json|resp|redis} [FORMAT_OPTIONS]
     OPTIONS:
     -k, --filter-key <REGEX>      Filter keys using regular expressions
     -l, --log-file <PATH>         Path to the log file (Default: './rdb-cli.log')
     
     FORMAT_OPTIONS ('json'):
     -w, --with-aux-values         Include auxiliary values
+    -f, --flatten                 Print flatten json, without DBs Parenthesis
     -o, --output <FILE>           Specify the output file. If not specified, output goes to stdout
     
     FORMAT_OPTIONS ('resp'):
     -r, --support-restore         Use the RESTORE command when possible
-    -t, --target-redis-ver <VER>  Specify the target Redis version
+    -t, --target-redis-ver <VER>  Specify the target Redis version. Helps determine which commands can
+                                  be applied. Particularly crucial if support-restore being used
+                                  as RESTORE is closely tied to specific RDB versions. If versions not
+                                  aligned the parser will generate higher-level commands instead.
     -o, --output <FILE>           Specify the output file. If not specified, output goes to stdout
     
     FORMAT_OPTIONS ('redis'):

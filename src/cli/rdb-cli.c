@@ -54,7 +54,7 @@ static void loggerWrap(RdbLogLevel l, const char *msg, ...) {
 
 static void printUsage() {
     printf("[v%s] ", RDB_getLibVersion(NULL,NULL,NULL));
-    printf("Usage: rdb-cli /path/to/dump.rdb [OPTIONS] <FORMAT {json|resp|redis}> [FORMAT_OPTIONS]\n");
+    printf("Usage: rdb-cli /path/to/dump.rdb [OPTIONS] {json|resp|redis} [FORMAT_OPTIONS]\n");
     printf("OPTIONS:\n");
     printf("\t-k, --filter-key <REGEX>      Filter keys using regular expressions\n");
     printf("\t-l, --log-file <PATH>         Path to the log file (Default: './rdb-cli.log')\n\n");
@@ -66,7 +66,10 @@ static void printUsage() {
 
     printf("FORMAT_OPTIONS ('resp'):\n");
     printf("\t-r, --support-restore         Use the RESTORE command when possible\n");
-    printf("\t-t, --target-redis-ver <VER>  Specify the target Redis version\n");
+    printf("\t-t, --target-redis-ver <VER>  Specify the target Redis version. Helps determine which commands can\n");
+    printf("\t                              be applied. Particularly crucial if support-restore being used \n");
+    printf("\t                              as RESTORE is closely tied to specific RDB versions. If versions not\n");
+    printf("\t                              aligned the parser will generate higher-level commands instead.\n");
     printf("\t-o, --output <FILE>           Specify the output file. If not specified, output goes to stdout\n\n");
 
     printf("FORMAT_OPTIONS ('redis'):\n");
@@ -74,7 +77,7 @@ static void printUsage() {
     printf("\t-t, --target-redis-ver <VER>  Specify the target Redis version\n");
     printf("\t-h, --hostname <HOSTNAME>     Specify the server hostname (default: 127.0.0.1)\n");
     printf("\t-p, --port <PORT>             Specify the server port (default: 6379)\n");
-    printf("\t-l, --pipeline-depth <value>  Number of pending commands before blocking for responses\n");
+    printf("\t-l, --pipeline-depth <VALUE>  Number of pending commands before blocking for responses\n");
 }
 
 static RdbRes formatJson(RdbParser *parser, char *input, int argc, char **argv) {

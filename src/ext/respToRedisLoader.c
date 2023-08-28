@@ -1,6 +1,3 @@
-/* feature-test-macros POSIX.1-2008 for: nanosleep() */
-#define _POSIX_C_SOURCE 200809L
-
 #include <stdio.h>
 #include <time.h>
 #include <unistd.h>
@@ -25,7 +22,7 @@
 
 #define REPLY_BUFF_SIZE           4096  /* reply buffer size */
 
-#define MAX_EAGAIN_RETRY          3
+#define MAX_EINTR_RETRY          3
 
 
 struct RdbxRespToRedisLoader {
@@ -102,7 +99,6 @@ static inline void recordNewCmd(RdbxRespToRedisLoader *ctx, const struct iovec *
 /* Write the vector of data to the socket with writev() sys-call.
  * Return 0 for success, 1 otherwise. */
 static int redisLoaderWritev(void *context, struct iovec *iov, int count, int startCmd, int endCmd) {
-    int origCount = count;
     ssize_t writeResult;
     int retries = 0;
 
@@ -122,23 +118,16 @@ static int redisLoaderWritev(void *context, struct iovec *iov, int count, int st
 
         /* check for error */
         if (unlikely(writeResult == -1)) {
-            if (errno == EAGAIN || errno == EWOULDBLOCK) {
-                if ((retries++) >= MAX_EAGAIN_RETRY) {
+            if (errno == EINTR) {
+                if ((retries++) >= MAX_EINTR_RETRY) {
                     RDB_reportError(ctx->p, (RdbRes) RDBX_ERR_RESP2REDIS_FAILED_WRITE,
-                                    "Failed to write socket. Exceeded EAGAIN retry limit");
+                                    "Failed to write socket. Exceeded EINTR retry limit");
                     return 1;
                 }
-
-                /* sleep 1msec */
-                struct timespec req = {0, 1000 * 1000}, rem;
-                nanosleep(&req, &rem);
                 continue;
             } else {
                 RDB_reportError(ctx->p, (RdbRes) RDBX_ERR_RESP2REDIS_FAILED_WRITE,
                                 "Failed to write socket (errno=%d)", errno);
-                printf("count=%d origCount=%d\n",count, origCount);for (int i = 0 ; i <  count ; ++i) {
-                    printf ("iov[%d]: base=%p len=%lu\n", i, iov[i].iov_base, iov[i].iov_len );
-                }
                 return 1;
             }
         }

@@ -103,8 +103,8 @@ static void test_mixed_levels_registration(void **state) {
     assert_int_equal( status, RDB_STATUS_OK);
 
     RDB_deleteParser(parser);
-    assert_payload_file(jsonfileRaw, expJsonRaw, " \n");
-    assert_payload_file(jsonfileData, expJsonData, " \n");
+    assert_json_file(jsonfileRaw, expJsonRaw, " \n");
+    assert_json_file(jsonfileData, expJsonData, " \n");
 }
 
 static void printResPicture(int result) {

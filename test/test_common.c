@@ -3,6 +3,7 @@
 
 #include <stdio.h>
 #include <string.h>
+#include <ctype.h>
 #include <stdlib.h>
 #include <time.h>
 #include <unistd.h>
@@ -12,6 +13,7 @@
 #include <sys/wait.h>
 #include <dirent.h>
 #include "test_common.h"
+#include "../src/ext/utils.c" /* for printHexDump() */
 
 /* server port to allocate for tests against live Redis */
 int redisPort;
@@ -97,7 +99,7 @@ char *readFile(const char *filename,  size_t *length) {
     return str;
 }
 
-void assert_payload_file(const char *filename, char *expPayload, char *charsToSkip) {
+void assert_json_file(const char *filename, char *expPayload, char *charsToSkip) {
     char *filedata = readFile(filename, NULL);
     if (strcmp(sanitizeData(expPayload, charsToSkip), sanitizeData(filedata, charsToSkip)) != 0) {
         printf("payload file %s not as expected.\n", filename);
@@ -134,6 +136,52 @@ void cleanTmpFolder() {
 
 void setEnvVar (const char *name, const char *val) {
     setenv(name, val, 1);
+}
+
+void assert_file_payload(const char *filename, char *expData, MatchType matchType, int expMatch) {
+    const char *matchTypeName;
+    size_t filelen;
+    char *filedata = readFile(filename, &filelen);
+    size_t lenCmp;
+    char *dataToCmp;
+    int result;
+
+    switch (matchType) {
+        case M_PREFIX:
+            lenCmp = strlen(expData);
+            dataToCmp = filedata;
+            matchTypeName = "prefix";
+            break;
+        case M_ENTIRE:
+            lenCmp = filelen;
+            dataToCmp = filedata;
+            matchTypeName = "entire";
+            break;
+        case M_SUFFIX:
+            lenCmp = strlen(expData);
+            dataToCmp = filedata + filelen - strlen(expData);
+            matchTypeName = "suffix";
+            break;
+        default:
+            assert_true(0);
+            return;
+    }
+
+    result = strncmp(dataToCmp, expData, lenCmp);
+
+    if (((result != 0) && (expMatch)) || ((result == 0) && (!expMatch))) {
+        char buf[1000];
+        printf("Unexpectd payload of file-%s.\n", matchTypeName);
+        printf("---- %s ----\n", filename);
+        printHexDump(dataToCmp, lenCmp, buf, (int) sizeof(buf));
+        printf("%s", buf);
+        printf("\n---- Expected file-%s ----\n", matchTypeName);
+        printHexDump(expData, strlen(expData), buf, (int) sizeof(buf));
+        printf("%s", buf);
+        printf("\n------------\n");
+        assert_true(0);
+    }
+    free(filedata);
 }
 
 /*** setup external Redis Server ***/
@@ -280,7 +328,6 @@ static void sanitize_json_line(char* line) {
 int compare_json_lines(const void* line1, const void* line2) {
     return strcmp(*(const char**)line1, *(const char**)line2);
 }
-
 
 static unsigned char xorstr(const char *str) {
     unsigned char result = 0;

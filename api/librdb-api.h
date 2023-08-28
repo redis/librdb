@@ -11,6 +11,8 @@ extern "C" {
 #define _LIBRDB_API
 #endif
 
+#define MAX_RDB_VER_SUPPORT 11
+
 /****************************************************************
  * Incomplete structures for compiler checks but opaque access
  ****************************************************************/
@@ -133,9 +135,9 @@ typedef enum RdbBulkAllocType {
 } RdbBulkAllocType;
 
 typedef struct RdbKeyInfo {
-    long long expiretime; /* -1 if not set */
-    uint64_t lru_idle; /* TODO: support lru_idle */
-    int lfu_freq; /* TODO: support lfu_freq */
+    long long expiretime;   /* -1 if not set */
+    long long lruIdle;      /* -1 if not set */
+    int lfuFreq;            /* -1 if not set */
     int opcode;
 } RdbKeyInfo;
 

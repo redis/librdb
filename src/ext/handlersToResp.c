@@ -1,10 +1,12 @@
 #include <string.h>
 #include <assert.h>
+#include <sys/uio.h>
 #include "common.h"
+#include "utils.h"
+
 #include "../../deps/redis/crc64.h"
 #include "../../deps/redis/util.h"
 #include "../../deps/redis/endianconv.h"
-#include <sys/uio.h>
 
 #define _RDB_TYPE_STRING 0
 #define VER_VAL(major,minor) (((unsigned int)(major)<<8) | (unsigned int)(minor))
@@ -380,7 +382,7 @@ static RdbRes toRespRawFrag(RdbParser *p, void *userData, RdbBulk frag) {
     UNUSED(p);
     RdbxToResp *ctx = userData;
     struct iovec iov[10];
-    int iovs = 0;
+    int extra_args = 0, iovs = 0;
     size_t fragLen = RDB_bulkLen(p, frag);
 
     ctx->crc = crc64(ctx->crc, (unsigned char *) frag , fragLen);
@@ -388,7 +390,6 @@ static RdbRes toRespRawFrag(RdbParser *p, void *userData, RdbBulk frag) {
     if (likely(!(ctx->rawCtx.sentFirstFrag))) {
         ctx->rawCtx.sentFirstFrag = 1;
 
-        int extra_args = 0;
         /* this logic must be exactly the same as in toRespRawFragEnd() */
         if (ctx->targetVerValue >= VER_VAL(5,0))
         {
@@ -397,13 +398,16 @@ static RdbRes toRespRawFrag(RdbParser *p, void *userData, RdbBulk frag) {
                 extra_args++; /* ABSTTL */
             }
 
-            /* TODO: lru_idle <idle>, lfu_freq <freq>*/
+            if ((ctx->keyCtx.info.lfuFreq != -1) || (ctx->keyCtx.info.lruIdle != -1)) {
+                extra_args += 2;
+            }
         }
 
         if (ctx->delKeyBeforeWrite == DEL_KEY_BEFORE_BY_RESTORE_REPLACE)
             extra_args++;
 
         char cmd[64];
+
         int len = sprintf(cmd, "*%d\r\n$7\r\nRESTORE\r\n$", 4+extra_args);
 
         IOV_STRING(&iov[iovs++], cmd, len);                             /* RESTORE */
@@ -425,42 +429,61 @@ static RdbRes toRespRawFrag(RdbParser *p, void *userData, RdbBulk frag) {
     return writevWrap(ctx, iov, iovs, 1, 0);
 }
 
-static RdbRes toRespRawFragEnd(RdbParser *p, void *userData) {
+RdbRes toRespRawFragEnd(RdbParser *p, void *userData) {
     UNUSED(p);
+    char cmd[1024]; /* degenerate usage of iov. All copied strings are small */
     RdbxToResp *ctx = userData;
     uint64_t *crc = &(ctx->crc);
 
-    char footer[10];
-    footer[0] = ctx->srcRdbVer & 0xff;
-    footer[1] = (ctx->srcRdbVer >> 8) & 0xff;
-    *crc = crc64(*crc, (unsigned char *) footer, 2);
-    /* CRC64 */
+    /* Add RDB version 2 bytes */
+    cmd[0] = ctx->srcRdbVer & 0xff;
+    cmd[1] = (ctx->srcRdbVer >> 8) & 0xff;
+
+    /* Add CRC64 8 bytes */
+    *crc = crc64(*crc, (unsigned char *) cmd, 2);
     memrev64ifbe(crc);
-    memcpy(footer + 2, crc, 8);
+    memcpy(cmd + 2, crc, 8);
 
-    struct iovec iov[10];
-    int iovs = 0;
+    int len = 10;
 
-    IOV_STRING(&iov[iovs++], footer, 10);
+    /* Add REPLACE if needed */
     if (ctx->delKeyBeforeWrite == DEL_KEY_BEFORE_BY_RESTORE_REPLACE)
-        IOV_CONST(&iov[iovs++], "\r\n$7\r\nREPLACE\r\n");
+        len += sprintf(cmd+len, "\r\n$7\r\nREPLACE\r\n");
     else
-        IOV_CONST(&iov[iovs++], "\r\n");
+        len += sprintf(cmd+len, "\r\n");
 
+    /* This logic must be exactly the same as in toRespRawFrag() */
     if (likely(ctx->targetVerValue >= VER_VAL(5,0))) {
+
+        /* Add ABSTTL */
         if (ctx->keyCtx.info.expiretime != -1) {
-            IOV_CONST(&iov[iovs++], "$6\r\nABSTTL\r\n");
+            len += sprintf(cmd+len, "$6\r\nABSTTL\r\n");
             ctx->keyCtx.info.expiretime = -1; /* take care reset before reach toRespEndKey() */
+        }
+
+        /* Add IDLETIME or FREQ if needed */
+        if (ctx->keyCtx.info.lruIdle != -1) {
+            char buf[128];
+            int l = sprintf(buf, "%lld", ctx->keyCtx.info.lruIdle);
+            len += sprintf(cmd+len, "$8\r\nIDLETIME\r\n$%d\r\n%s\r\n", l, buf);
+        } else if (ctx->keyCtx.info.lfuFreq != -1) {
+            char buf[128];
+            int l = sprintf(buf, "%d", ctx->keyCtx.info.lfuFreq);
+            len += sprintf(cmd+len, "$4\r\nFREQ\r\n$%d\r\n%s\r\n", l, buf);
         }
     }
 
-    return writevWrap(ctx, iov, iovs, 0, 1);
+    struct iovec iov = {cmd, len};
+    return writevWrap(ctx, &iov, 1, 0, 1);
 }
 
 /*** LIB API functions ***/
 
 _LIBRDB_API RdbxToResp *RDBX_createHandlersToResp(RdbParser *p, RdbxToRespConf *conf) {
     RdbxToResp *ctx;
+
+    /* Verify table up-to-date and aligned */
+    assert(redisToRdbVersion[0].rdb == MAX_RDB_VER_SUPPORT);
 
     if ((ctx = RDB_alloc(p, sizeof(RdbxToResp))) == NULL)
         return NULL;

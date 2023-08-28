@@ -16,30 +16,10 @@
 
 /* TODO: support select db, expiry */
 
-void assert_resp_file(const char *filename, char *resp, int isPrefix, int expMatch) {
-    size_t filelen;
-    char *filedata = readFile(filename, &filelen);
-    int result = (isPrefix) ? strncmp(filedata, resp, strlen(resp)) : strncmp(filedata, resp, filelen);
-
-    if ( ((result != 0) && (expMatch)) || ((result == 0) && (!expMatch)) ) {
-        printf("Expected payload %s %s %s match.\n",
-               (isPrefix) ? "prefix" : "file",
-               filename,
-               (expMatch) ? "" : "not to");
-        printf("---- %s ----\n", filename);
-        printf ("%s", filedata);
-        printf("\n---- Expected %s ----\n", (isPrefix) ? "prefix" : "file");
-        printf("%s", resp);
-        printf("\n------------\n");
-        assert_true(0);
-    }
-    free(filedata);
-}
-
 static void testRdbToRespCommon(const char *rdbfilename,
                                 RdbxToRespConf *conf,
                                 char *expResp,
-                                int isPrefix,
+                                MatchType matchType,
                                 int expMatch)
 {
     static int outputs = 0;
@@ -62,7 +42,7 @@ static void testRdbToRespCommon(const char *rdbfilename,
 
     /* verify number of commands counted */
     RDB_deleteParser(p);
-    assert_resp_file(respfile, expResp, isPrefix, expMatch);
+    assert_file_payload(respfile, expResp, matchType, expMatch);
 }
 
 static void runWithAndWithoutRestore(const char *rdbfile) {
@@ -83,11 +63,11 @@ static void runWithAndWithoutRestore(const char *rdbfile) {
 
     /* expect not use RESTORE */
     r2rConf.dstRedisVersion = "0.0.1";
-    testRdbToRespCommon(rdbfile, &r2rConf, (char*)restorePrefix, 1, 0);
+    testRdbToRespCommon(rdbfile, &r2rConf, (char*)restorePrefix, M_PREFIX, 0);
 
     /* expect use RESTORE */
     r2rConf.dstRedisVersion = "45.67.89";
-    testRdbToRespCommon(rdbfile, &r2rConf, (char*)restorePrefix, 1, 1);
+    testRdbToRespCommon(rdbfile, &r2rConf, (char*)restorePrefix, M_PREFIX, 1);
 }
 
 static void test_r2r_string_exact_match(void **state) {
@@ -99,15 +79,15 @@ static void test_r2r_string_exact_match(void **state) {
     /* Avoid RESTORE command because corresponding RDB ver. of given Redis ver. < source RDB ver. */
     r2rConf.supportRestore = 1;
     r2rConf.dstRedisVersion = "7.0";   /* resolved to rdb version 10 */
-    testRdbToRespCommon("single_key.rdb", &r2rConf, (char *) expRespData, 0, 1);
+    testRdbToRespCommon("single_key.rdb", &r2rConf, (char *) expRespData, M_ENTIRE, 1);
 
     /* Configure not to use RESTORE command */
     r2rConf.supportRestore = 0;
-    testRdbToRespCommon("single_key.rdb", &r2rConf, (char *) expRespData, 0, 1);
+    testRdbToRespCommon("single_key.rdb", &r2rConf, (char *) expRespData, M_ENTIRE, 1);
 
     /* Default configuration avoid RESTORE */
     r2rConf.supportRestore = 0;
-    testRdbToRespCommon("single_key.rdb", NULL, (char *) expRespData, 0, 1);
+    testRdbToRespCommon("single_key.rdb", NULL, (char *) expRespData, M_ENTIRE, 1);
 }
 
 static void test_r2r_del_before_write_restore_replace(void **state) {
@@ -140,7 +120,7 @@ static void test_r2r_del_before_write_restore_replace(void **state) {
     /* If `RESTORE` supported, the flag delKeyBeforeWrite will attach `REPLACE` to the
      * `RESTORE` command (rather than sending preceding DEL command) */
     r2rConf.delKeyBeforeWrite = 1;
-    testRdbToRespCommon("single_key.rdb", &r2rConf, (char *) expRespRestore, 0, 1);
+    testRdbToRespCommon("single_key.rdb", &r2rConf, (char *) expRespRestore, M_ENTIRE, 1);
 }
 
 static void test_r2r_list_exact_match(void **state) {
@@ -155,7 +135,31 @@ static void test_r2r_list_exact_match(void **state) {
     memset(&r2rConf, 0, sizeof(r2rConf));
     r2rConf.supportRestore = 1;
     r2rConf.dstRedisVersion = "7.0";
-    testRdbToRespCommon("quicklist2_v11.rdb", &r2rConf, expResp, 0, 1);
+    testRdbToRespCommon("quicklist2_v11.rdb", &r2rConf, expResp, M_ENTIRE, 1);
+}
+
+static void test_r2r_policy_lfu(void **state) {
+    UNUSED(state);
+    RdbxToRespConf r2rConf;
+    char expResp[] = "$4\r\nFREQ\r\n$1\r\n5\r\n";
+
+    /* Use RESTORE command because target RDB ver. == source RDB ver. */
+    memset(&r2rConf, 0, sizeof(r2rConf));
+    r2rConf.supportRestore = 1;
+    r2rConf.dstRedisVersion = "7.2";
+    testRdbToRespCommon("mem_policy_lfu.rdb", &r2rConf, expResp, M_SUFFIX, 1);
+}
+
+static void test_r2r_policy_lru(void **state) {
+    UNUSED(state);
+    RdbxToRespConf r2rConf;
+    char expResp[] = "$8\r\nIDLETIME\r\n$2\r\n24\r\n";
+
+    /* Use RESTORE command because target RDB ver. == source RDB ver. */
+    memset(&r2rConf, 0, sizeof(r2rConf));
+    r2rConf.supportRestore = 1;
+    r2rConf.dstRedisVersion = "7.2";
+    testRdbToRespCommon("mem_policy_lru.rdb", &r2rConf, expResp, M_SUFFIX, 1);
 }
 
 static void test_r2r_plain_list(void **state) {
@@ -247,6 +251,10 @@ int group_rdb_to_resp(void) {
             /* misc */
             cmocka_unit_test(test_r2r_multiple_lists_and_strings),
             cmocka_unit_test(test_r2r_del_before_write_restore_replace),
+
+            /* mem policy */
+            cmocka_unit_test(test_r2r_policy_lfu),
+            cmocka_unit_test(test_r2r_policy_lru),
     };
     return cmocka_run_group_tests(tests, NULL, NULL);
 }

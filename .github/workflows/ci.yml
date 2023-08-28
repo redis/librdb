@@ -26,7 +26,7 @@ jobs:
           sudo make install
           # Install redis for tests against external Redis server
           cd ~
-          git clone --branch 7.2 https://github.com/redis/redis.git
+          git clone https://github.com/redis/redis.git
           cd redis 
           make
 

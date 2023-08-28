@@ -110,6 +110,7 @@ typedef enum {
 } AllocUnmngTypeRq;
 
 typedef enum ParsingElementType {
+    /* Common elements */
     PE_RDB_HEADER,
     PE_NEXT_RDB_TYPE,
     PE_AUX_FIELD,
@@ -117,6 +118,8 @@ typedef enum ParsingElementType {
     PE_RESIZE_DB,
     PE_EXPIRETIME,
     PE_EXPIRETIMEMSEC,
+    PE_FREQ,
+    PE_IDLE,
 
     PE_NEW_KEY,
     PE_END_KEY,
@@ -424,6 +427,9 @@ RdbStatus elementSelectDb(RdbParser *p);
 RdbStatus elementResizeDb(RdbParser *p);
 RdbStatus elementExpireTime(RdbParser *p);
 RdbStatus elementExpireTimeMsec(RdbParser *p);
+RdbStatus elementFreq(RdbParser *p);
+RdbStatus elementIdle(RdbParser *p);
+
 /*** Struct/Data Parsing Elements ***/
 RdbStatus elementString(RdbParser *p);
 RdbStatus elementList(RdbParser *p);

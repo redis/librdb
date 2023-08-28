@@ -39,6 +39,8 @@ struct ParsingElementInfo peInfo[PE_MAX] = {
         [PE_RESIZE_DB]        = {elementResizeDb, "elementResizeDb", "Parsing resize-db"},
         [PE_EXPIRETIME]       = {elementExpireTime, "elementExpireTime", "Parsing expire-time"},
         [PE_EXPIRETIMEMSEC]   = {elementExpireTimeMsec, "elementExpireTimeMsec", "Parsing expire-time-msec"},
+        [PE_FREQ]             = {elementFreq, "elementFreq", "Parsing LFU frequency"},
+        [PE_IDLE]             = {elementIdle, "elementIdle", "Parsing LRU idle time"},
 
         [PE_NEW_KEY]          = {elementNewKey, "elementNewKey", "Parsing new key-value"},
         [PE_END_KEY]          = {elementEndKey, "elementEndKey", "Parsing end key"},
@@ -198,8 +200,8 @@ _LIBRDB_API RdbParser *RDB_createParserRdb(RdbMemAlloc *memAlloc) {
     p->parsingElement = PE_RDB_HEADER;
 
     p->elmCtx.key.info.expiretime = -1;
-    p->elmCtx.key.info.lru_idle = -1;
-    p->elmCtx.key.info.lfu_freq = -1;
+    p->elmCtx.key.info.lruIdle = -1;
+    p->elmCtx.key.info.lfuFreq = -1;
     p->elmCtx.key.numItemsHint = -1;
 
     p->currOpcode = UINT32_MAX;
@@ -1051,7 +1053,7 @@ static RdbHandlers *createHandlersCommon(RdbParser *p,
     return h;
 }
 
-/*** Parsing Elements ***/
+/*** Parsing Common Elements ***/
 
 RdbStatus elementRdbHeader(RdbParser *p) {
     BulkInfo *binfo;
@@ -1069,7 +1071,7 @@ RdbStatus elementRdbHeader(RdbParser *p) {
 
     /* read rdb version */
     p->rdbversion = atoi(((char *) binfo->ref) + 5);
-    if (p->rdbversion < 1 || p->rdbversion > RDB_VERSION) {
+    if (p->rdbversion < 1 || p->rdbversion > MAX_RDB_VER_SUPPORT) {
         RDB_reportError(p, RDB_ERR_UNSUPPORTED_RDB_VERSION,
                         "Can't handle RDB format version: %d", p->rdbversion);
         return RDB_STATUS_ERROR;
@@ -1140,8 +1142,9 @@ RdbStatus elementNewKey(RdbParser *p) {
 
     /* reset values for next key */
     p->elmCtx.key.info.expiretime = -1;
-    p->elmCtx.key.info.lru_idle = -1;
-    p->elmCtx.key.info.lfu_freq = -1;
+    p->elmCtx.key.info.lruIdle = -1;
+    p->elmCtx.key.info.lfuFreq = -1;
+    p->elmCtx.key.numItemsHint = -1;
 
     /* Read value */
     return nextParsingElement(p, p->elmCtx.key.valueType);
@@ -1199,6 +1202,9 @@ RdbStatus elementNextRdbType(RdbParser *p) {
         case RDB_OPCODE_AUX:                return nextParsingElement(p, PE_AUX_FIELD);
         case RDB_OPCODE_SELECTDB:           return nextParsingElement(p, PE_SELECT_DB);
         case RDB_OPCODE_RESIZEDB:           return nextParsingElement(p, PE_RESIZE_DB);
+        case RDB_OPCODE_FREQ:               return nextParsingElement(p, PE_FREQ);
+        case RDB_OPCODE_IDLE:               return nextParsingElement(p, PE_IDLE);
+
 
         case RDB_TYPE_STRING:               return nextParsingElementKeyValue(p, PE_RAW_STRING, PE_STRING);
         /* list */
@@ -1218,10 +1224,6 @@ RdbStatus elementNextRdbType(RdbParser *p) {
 
         case RDB_OPCODE_EOF:                return nextParsingElement(p, PE_END_OF_FILE);
 
-        case RDB_OPCODE_FREQ:
-        case RDB_OPCODE_IDLE:
-        case RDB_OPCODE_GFLAGS:
-        case RDB_OPCODE_GCAS:
         case RDB_OPCODE_MODULE_AUX:
         case RDB_OPCODE_FUNCTION:
         case RDB_OPCODE_FUNCTION2:
@@ -1247,10 +1249,28 @@ RdbStatus elementEndKey(RdbParser *p) {
     /*** ENTER SAFE STATE ***/
     CALL_HANDLERS_CB_NO_ARGS(p, NOP, p->elmCtx.key.handleByLevel, common.handleEndKey);
 
-    p->elmCtx.key.numItemsHint = -1;
-
     return nextParsingElement(p, PE_NEXT_RDB_TYPE);
 }
+
+RdbStatus elementFreq(RdbParser *p) {
+    BulkInfo *binfoFreq;
+    IF_NOT_OK_RETURN(rdbLoad(p, 1, RQ_ALLOC, NULL, &binfoFreq));
+
+    /*** ENTER SAFE STATE ***/
+
+    p->elmCtx.key.info.lfuFreq =  *((int8_t *) binfoFreq->ref);
+    return nextParsingElement(p, PE_NEXT_RDB_TYPE);
+}
+
+RdbStatus elementIdle(RdbParser *p) {
+    uint64_t lruIdle;
+    IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &lruIdle, NULL, NULL));
+    /*** ENTER SAFE STATE ***/
+    p->elmCtx.key.info.lruIdle = lruIdle;
+    return nextParsingElement(p, PE_NEXT_RDB_TYPE);
+}
+
+/*** Parsing data-types Elements ***/
 
 RdbStatus elementString(RdbParser *p) {
     BulkInfo *binfoStr;
