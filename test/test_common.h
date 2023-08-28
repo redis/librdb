@@ -16,13 +16,19 @@ static inline void unused(void *dummy, ...) { (void)(dummy);}
 #define DUMP_FOLDER(file) "./test/dumps/"file
 #define TMP_FOLDER(file) "./test/tmp/"file
 
+typedef enum MatchType {
+    M_PREFIX,
+    M_ENTIRE,
+    M_SUFFIX
+} MatchType;
+
 /* system() commands */
 void runSystemCmd(const char *cmdFormat, ...);
 void runSystemCmdRetry(int seconds, const char *cmdFormat, ...);
 
 /* assert */
 void assert_json_equal(const char *f1, const char *f2, int ignoreListOrder);
-void assert_payload_file(const char *filename, char *expPayload, char *charsToSkip);
+void assert_json_file(const char *filename, char *expPayload, char *charsToSkip);
 
 /* setup external Redis Server */
 extern int redisPort;
@@ -51,3 +57,5 @@ void *xrealloc(void *ptr, size_t size);
 char *readFile(const char *filename, size_t *len);
 void cleanTmpFolder();
 void setEnvVar (const char *name, const char *val);
+
+void assert_file_payload(const char *filename, char *expData, MatchType matchType, int expMatch);

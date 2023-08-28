@@ -1,0 +1,1 @@
+int printHexDump(const char *addr, size_t len, char *output, int outlen);

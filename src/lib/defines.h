@@ -1,8 +1,6 @@
 /* This file should include only RDB related defines. Might be read in the
  * future from Redis repo */
 
-#define RDB_VERSION 11
-
 /* Map object types to RDB object types. Macros starting with OBJ_ are for
  * memory storage and may change. Instead RDB types must be fixed because
  * we store them on disk. */
