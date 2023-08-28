@@ -133,7 +133,7 @@ typedef enum RdbBulkAllocType {
 } RdbBulkAllocType;
 
 typedef struct RdbKeyInfo {
-    long long expiretime;
+    long long expiretime; /* -1 if not set */
     uint64_t lru_idle; /* TODO: support lru_idle */
     int lfu_freq; /* TODO: support lfu_freq */
     int opcode;

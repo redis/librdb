@@ -17,8 +17,9 @@
 /* TODO: support select db, expiry */
 
 void assert_resp_file(const char *filename, char *resp, int isPrefix, int expMatch) {
-    char *filedata = readFile(filename, NULL);
-    int result = (isPrefix) ? strncmp(filedata, resp, strlen(resp)) : strcmp(filedata, resp);
+    size_t filelen;
+    char *filedata = readFile(filename, &filelen);
+    int result = (isPrefix) ? strncmp(filedata, resp, strlen(resp)) : strncmp(filedata, resp, filelen);
 
     if ( ((result != 0) && (expMatch)) || ((result == 0) && (!expMatch)) ) {
         printf("Expected payload %s %s %s match.\n",
@@ -89,7 +90,7 @@ static void runWithAndWithoutRestore(const char *rdbfile) {
     testRdbToRespCommon(rdbfile, &r2rConf, (char*)restorePrefix, 1, 1);
 }
 
-static void test_r2r_single_string_exact_match(void **state) {
+static void test_r2r_string_exact_match(void **state) {
     UNUSED(state);
     unsigned char expRespData[] = "*3\r\n$3\r\nSET\r\n$3\r\nxxx\r\n$3\r\n111\r\n";
     RdbxToRespConf r2rConf;
@@ -109,11 +110,10 @@ static void test_r2r_single_string_exact_match(void **state) {
     testRdbToRespCommon("single_key.rdb", NULL, (char *) expRespData, 0, 1);
 }
 
-static void test_r2r_single_string_exact_match_restore_exact_match(void **state) {
+static void test_r2r_del_before_write_restore_replace(void **state) {
     UNUSED(state);
-    RdbxToRespConf r2rConf;
     unsigned char expRespRestore[] = {
-            0x2a, 0x34, 0x0d, 0x0a,  // *, 4, \r, \n
+            0x2a, 0x35, 0x0d, 0x0a,  // *, 5, \r, \n
             0x24, 0x37, 0x0d, 0x0a,  // $, 7, \r, \n
             0x52, 0x45, 0x53, 0x54,  // R, E, S, T
             0x4f, 0x52, 0x45, 0x0d,  // O, R, E, \r
@@ -125,7 +125,11 @@ static void test_r2r_single_string_exact_match_restore_exact_match(void **state)
             0x0d, 0x0a, 0x00, 0xc0,  // \r, \n, Null, ...
             0x6f, 0x0b, 0x00, 0xa6,  // ... (non printable)
             0x11, 0x98, 0xb1, 0x42,  // ... (non printable)
-            0x3e, 0x16, 0x7d         // ... (non printable)
+            0x3e, 0x16, 0x7d, 0x0d,  // ... (non printable)
+            0x0a, 0x24, 0x37, 0x0d,
+            0x0a, 0x52, 0x45, 0x50,  // .. R, E, P
+            0x4c, 0x41, 0x43, 0x45,  // L, A, C, E
+            0x0d, 0x0a
     };
 
     /* Expected to use RESTORE command because RDB version of file 'single_key.rdb'
@@ -133,10 +137,13 @@ static void test_r2r_single_string_exact_match_restore_exact_match(void **state)
     RdbxToRespConf r2rConf = { 0 };
     r2rConf.supportRestore = 1;
     r2rConf.dstRedisVersion = "7.2";
+    /* If `RESTORE` supported, the flag delKeyBeforeWrite will attach `REPLACE` to the
+     * `RESTORE` command (rather than sending preceding DEL command) */
+    r2rConf.delKeyBeforeWrite = 1;
     testRdbToRespCommon("single_key.rdb", &r2rConf, (char *) expRespRestore, 0, 1);
 }
 
-static void test_r2r_single_list_exact_match(void **state) {
+static void test_r2r_list_exact_match(void **state) {
     UNUSED(state);
     RdbxToRespConf r2rConf;
 
@@ -217,9 +224,8 @@ int group_rdb_to_resp(void) {
 
             /* selected tests to verify entire payload. It is not really required,
              * since the generated RESP will be tested against live server as well */
-            cmocka_unit_test(test_r2r_single_string_exact_match),
-            cmocka_unit_test(test_r2r_single_string_exact_match_restore_exact_match),
-            cmocka_unit_test(test_r2r_single_list_exact_match),
+            cmocka_unit_test(test_r2r_string_exact_match),
+            cmocka_unit_test(test_r2r_list_exact_match),
 
             /*** verify only prefix of generated RESP ***/
 
@@ -240,6 +246,7 @@ int group_rdb_to_resp(void) {
 
             /* misc */
             cmocka_unit_test(test_r2r_multiple_lists_and_strings),
+            cmocka_unit_test(test_r2r_del_before_write_restore_replace),
     };
     return cmocka_run_group_tests(tests, NULL, NULL);
 }
