@@ -1147,6 +1147,7 @@ RdbStatus elementNewKey(RdbParser *p) {
     return nextParsingElement(p, p->elmCtx.key.valueType);
 }
 
+/* load an expire-time, associated with the next key to load. */
 RdbStatus elementExpireTime(RdbParser *p) {
     BulkInfo *binfo;
 
@@ -1177,9 +1178,9 @@ RdbStatus elementExpireTimeMsec(RdbParser *p) {
     /*** ENTER SAFE STATE ***/
 
     if (p->rdbversion >= 9) /* Check the top comment of this function. */
-        memrev64ifbe(((int64_t *) pRead)); /* Convert in big endian if the system is BE. */
+        memrev64ifbe(((int64_t *) binfo->ref)); /* Convert in big endian if the system is BE. */
 
-    p->elmCtx.key.info.expiretime = (long long) binfo->ref;
+    p->elmCtx.key.info.expiretime = *((int64_t *) binfo->ref);
     return nextParsingElement(p, PE_NEXT_RDB_TYPE);
 }
 

@@ -12,7 +12,7 @@
 FILE* logfile = NULL;
 #define LOG_FILE_PATH_DEF "./rdb-cli.log"
 
-static int getOptArg(int argc, char* argv[], int *at,  char *abbrvOpt, char *opt, char *token, int *flag, char **arg) {
+static int getOptArg(int argc, char* argv[], int *at,  char *abbrvOpt, char *opt, char *token, int *flag, const char **arg) {
     if ((strcmp(token, abbrvOpt) == 0) || (strcmp(token, opt) == 0)) {
         if (arg) {
             if ((*at) + 1 == argc) {
@@ -78,7 +78,7 @@ static void printUsage() {
 }
 
 static RdbRes formatJson(RdbParser *parser, char *input, int argc, char **argv) {
-    char *output = NULL;/*default:stdout*/
+    const char *output = NULL;/*default:stdout*/
     int flatten=0, withAuxValues = 0; /*without*/
 
     /* parse specific command options */
@@ -192,8 +192,8 @@ static RdbRes formatResp(RdbParser *parser, char *input, int argc, char **argv) 
 int main(int argc, char **argv)
 {
     RdbStatus status;
-    char *logfilePath = LOG_FILE_PATH_DEF;
-    char *filterKey = NULL;
+    const char *logfilePath = LOG_FILE_PATH_DEF;
+    const char *filterKey = NULL;
     int at;
     RdbRes res;
     RdbRes (*formatFunc)(RdbParser *p, char *input, int argc, char **argv) = formatJson;

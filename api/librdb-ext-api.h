@@ -93,6 +93,9 @@ _LIBRDB_API RdbxFilterKey *RDBX_createHandlersFilterKey(RdbParser *p,
 typedef struct RdbxToRespConf {
     /* TODO: support the option of expire, del, select db */
 
+    int delKeyBeforeWrite;
+    int applySelectDbCmds;  /* if not configured SELECT commands, all keys will be flatten into a single db */
+
     /* If supportRestore, then data-types will be translated to RESTORE with
      * raw data instead of data-types commands. This is a performance optimization
      * that requires to be version aligned. */

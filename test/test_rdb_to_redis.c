@@ -6,6 +6,8 @@
 #include <sys/wait.h>
 #include "test_common.h"
 
+void dummyLogger(RdbLogLevel l, const char *msg) { UNUSED(l, msg); }
+
 static int setupTest(void **state) {
     UNUSED(state);
     runSystemCmd("%s/redis-cli -p %d flushall > /dev/null", redisInstallFolder, redisPort);
@@ -26,7 +28,7 @@ static int setupTest(void **state) {
  * Note: This test cannot tell if actually run RESTORE command in the background.
  *       test_rdb_to_resp.c verifies that RESTORE command is used only when it should.
  */
-static void test_rdb_to_redis_common(const char *rdbfile, int pipelineDepth, int ignoreListOrder) {
+static void test_rdb_to_redis_common(const char *rdbfile, int pipelineDepth, int ignoreListOrder, const char *expJsonFile) {
     RdbParser *parser;
     RdbStatus status;
 
@@ -89,78 +91,99 @@ static void test_rdb_to_redis_common(const char *rdbfile, int pipelineDepth, int
         RDB_deleteParser(parser);
 
         /* Json (from DUMP-RDB) vs. expected Json */
-        assert_json_equal(TMP_FOLDER("out1.json"), TMP_FOLDER("out2.json"), ignoreListOrder);
+        if (expJsonFile)
+            assert_json_equal(expJsonFile, TMP_FOLDER("out2.json"), 0);
+        else
+            assert_json_equal(TMP_FOLDER("out1.json"), TMP_FOLDER("out2.json"), ignoreListOrder);
+
     }
 }
 
 static void test_rdb_to_redis_single_string(void **state) {
     UNUSED(state);
-    test_rdb_to_redis_common(DUMP_FOLDER("single_key.rdb"), 0, 0);
+    test_rdb_to_redis_common(DUMP_FOLDER("single_key.rdb"), 0, 0, NULL);
 }
 
 static void test_rdb_to_redis_single_list(void **state) {
     UNUSED(state);
-    test_rdb_to_redis_common(DUMP_FOLDER("quicklist2_v11.rdb"), 0, 0);
+    test_rdb_to_redis_common(DUMP_FOLDER("quicklist2_v11.rdb"), 0, 0, NULL);
 }
 
 static void test_rdb_to_redis_multiple_lists_strings(void **state) {
     UNUSED(state);
-    test_rdb_to_redis_common(DUMP_FOLDER("multiple_lists_strings.rdb"), 0, 0);
+    test_rdb_to_redis_common(DUMP_FOLDER("multiple_lists_strings.rdb"), 0, 0, NULL);
 }
 
 static void test_rdb_to_redis_multiple_lists_strings_pipeline_depth_1(void **state) {
     UNUSED(state);
-    test_rdb_to_redis_common(DUMP_FOLDER("multiple_lists_strings.rdb"), 1, 0);
+    test_rdb_to_redis_common(DUMP_FOLDER("multiple_lists_strings.rdb"), 1, 0, NULL);
 }
 
 static void test_rdb_to_redis_plain_list(void **state) {
     UNUSED(state);
-    test_rdb_to_redis_common(DUMP_FOLDER("plain_list_v6.rdb"), 1, 0);
+    test_rdb_to_redis_common(DUMP_FOLDER("plain_list_v6.rdb"), 1, 0, NULL);
 }
 
 static void test_rdb_to_redis_quicklist(void **state) {
     UNUSED(state);
-    test_rdb_to_redis_common(DUMP_FOLDER("quicklist.rdb"), 1, 0);
+    test_rdb_to_redis_common(DUMP_FOLDER("quicklist.rdb"), 1, 0, NULL);
 }
 
 static void test_rdb_to_redis_single_ziplist(void **state) {
     UNUSED(state);
-    test_rdb_to_redis_common(DUMP_FOLDER("ziplist_v3.rdb"), 1, 0);
+    test_rdb_to_redis_common(DUMP_FOLDER("ziplist_v3.rdb"), 1, 0, NULL);
 }
 
 static void test_rdb_to_redis_plain_hash(void **state) {
     UNUSED(state);
-    test_rdb_to_redis_common(DUMP_FOLDER("plain_hash_v3.rdb"), 1, 0);
+    test_rdb_to_redis_common(DUMP_FOLDER("plain_hash_v3.rdb"), 1, 0, NULL);
 }
 
 static void test_rdb_to_redis_hash_zl(void **state) {
     UNUSED(state);
-    test_rdb_to_redis_common(DUMP_FOLDER("hash_zl_v6.rdb"), 1, 0);
+    test_rdb_to_redis_common(DUMP_FOLDER("hash_zl_v6.rdb"), 1, 0, NULL);
 }
 
 static void test_rdb_to_redis_hash_lp(void **state) {
     UNUSED(state);
-    test_rdb_to_redis_common(DUMP_FOLDER("hash_lp_v11.rdb"), 1, 0);
+    test_rdb_to_redis_common(DUMP_FOLDER("hash_lp_v11.rdb"), 1, 0, NULL);
 }
 
 static void test_rdb_to_redis_hash_zm(void **state) {
     UNUSED(state);
-    test_rdb_to_redis_common(DUMP_FOLDER("hash_zm_v2.rdb"), 1, 0);
+    test_rdb_to_redis_common(DUMP_FOLDER("hash_zm_v2.rdb"), 1, 0, NULL);
 }
 
 static void test_rdb_to_redis_plain_set(void **state) {
     UNUSED(state);
-    test_rdb_to_redis_common(DUMP_FOLDER("plain_set_v6.rdb"), 1, 1);
+    test_rdb_to_redis_common(DUMP_FOLDER("plain_set_v6.rdb"), 1, 1, NULL);
 }
 
 static void test_rdb_to_redis_set_is(void **state) {
     UNUSED(state);
-    test_rdb_to_redis_common(DUMP_FOLDER("set_is_v11.rdb"), 1, 1);
+    test_rdb_to_redis_common(DUMP_FOLDER("set_is_v11.rdb"), 1, 1, NULL);
 }
 
 static void test_rdb_to_redis_set_lp(void **state) {
     UNUSED(state);
-    test_rdb_to_redis_common(DUMP_FOLDER("set_lp_v11.rdb"), 1, 1);
+    test_rdb_to_redis_common(DUMP_FOLDER("set_lp_v11.rdb"), 1, 1, NULL);
+}
+
+static void test_rdb_to_redis_multiple_dbs(void **state) {
+    UNUSED(state);
+    test_rdb_to_redis_common(DUMP_FOLDER("multiple_dbs.rdb"), 1, 1, NULL);
+}
+
+static void test_rdb_to_redis_set_expired(void **state) {
+    UNUSED(state);
+    test_rdb_to_redis_common(DUMP_FOLDER("set_expired_v11.rdb"), 1, 1,
+                             DUMP_FOLDER("set_expired.json"));
+}
+
+static void test_rdb_to_redis_set_not_expired(void **state) {
+    UNUSED(state);
+    test_rdb_to_redis_common(DUMP_FOLDER("set_not_expired_v11.rdb"), 1, 1,
+                             DUMP_FOLDER("set_not_expired.json"));
 }
 
 /* iff 'delKeyBeforeWrite' is not set, then the parser will return an error on
@@ -177,11 +200,15 @@ static void test_rdb_to_redis_del_before_write(void **state) {
                 .dstRedisVersion = "45.67.89"
         };
 
+        /* create key `mylist62` that goanna appear as well in the RDB file */
         runSystemCmd("%s/redis-cli -p %d set mylist62 1 > /dev/null", redisInstallFolder, redisPort);
         /* RDB to TCP */
         RdbxToResp *rdbToResp;
         parser = RDB_createParserRdb(NULL);
-        RDB_setLogLevel(parser, RDB_LOG_ERR);
+
+        /* set dummy logger. Goanna have expected error */
+        RDB_setLogger(parser, dummyLogger);
+
         assert_non_null(RDBX_createReaderFile(parser, DUMP_FOLDER("100_lists.rdb")));
         assert_non_null(rdbToResp = RDBX_createHandlersToResp(parser, &rdb2respConf));
 
@@ -189,8 +216,6 @@ static void test_rdb_to_redis_del_before_write(void **state) {
                                                   rdbToResp,
                                                   "127.0.0.1",
                                                   redisPort));
-
-        RDB_setLogLevel(parser, RDB_LOG_ERR);
 
         while ((status = RDB_parse(parser)) == RDB_STATUS_WAIT_MORE_DATA);
 
@@ -234,11 +259,15 @@ int group_rdb_to_redis() {
             cmocka_unit_test_setup(test_rdb_to_redis_set_is, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_set_lp, setupTest),
 
+            /* expired keys */
+            cmocka_unit_test_setup(test_rdb_to_redis_set_expired, setupTest),
+            cmocka_unit_test_setup(test_rdb_to_redis_set_not_expired, setupTest),
+
             /* misc */
             cmocka_unit_test_setup(test_rdb_to_redis_multiple_lists_strings, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_multiple_lists_strings_pipeline_depth_1, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_del_before_write, setupTest),
-
+            cmocka_unit_test_setup(test_rdb_to_redis_multiple_dbs, setupTest),
     };
 
     setupRedisServer();
