@@ -34,13 +34,14 @@ static void test_rdb_to_redis_common(const char *rdbfile, int pipelineDepth, int
      * and one time with RESTORE, Playing against new version. */
     for (int isRestore = 0 ; isRestore <= 1 ; ++isRestore) {
 
-        int targetRdbVer = (isRestore == 0) ? 1 : 100; /* old-target (not RESTORE) VS. new-target (RESTORE) */
+        /* old-target (not RESTORE) VS. new-target (RESTORE) */
+        const char *dstRedisVersion = (isRestore == 0) ? "0.0.1" : "45.67.89";
 
         runSystemCmd("%s/redis-cli -p %d flushall > /dev/null", redisInstallFolder, redisPort);
 
         RdbxToRespConf rdb2respConf = {
                 .supportRestore = 1,
-                .restore.dstRdbVersion = targetRdbVer,
+                .dstRedisVersion = dstRedisVersion,
         };
         RdbxToJsonConf rdb2jsonConf = {RDB_LEVEL_DATA, RDBX_CONV_JSON_ENC_PLAIN, 1, 1};
 
@@ -173,7 +174,8 @@ static void test_rdb_to_redis_del_before_write(void **state) {
         RdbxToRespConf rdb2respConf = {
                 .delKeyBeforeWrite = delKeyBeforeWrite,
                 .supportRestore = 1,
-                .restore.dstRdbVersion = 100};
+                .dstRedisVersion = "45.67.89"
+        };
 
         runSystemCmd("%s/redis-cli -p %d set mylist62 1 > /dev/null", redisInstallFolder, redisPort);
         /* RDB to TCP */
