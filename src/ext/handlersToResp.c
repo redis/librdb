@@ -7,6 +7,22 @@
 #include <sys/uio.h>
 
 #define _RDB_TYPE_STRING 0
+#define VER_VAL(major,minor) (((unsigned int)(major)<<8) | (unsigned int)(minor))
+
+typedef struct RedisToRdbVersion {
+    unsigned int redis;
+    unsigned char rdb;
+} RedisToRdbVersion;
+
+const RedisToRdbVersion redisToRdbVersion[] = {
+        {VER_VAL(7,2), 11},
+        {VER_VAL(7,0), 10},
+        {VER_VAL(5,0), 9}, //6 and 6.2 had v9 too
+        {VER_VAL(4,0), 8},
+        {VER_VAL(3,2), 7},
+        {VER_VAL(2,6), 6}, //2.8 had v6 too
+        {VER_VAL(2,4), 5},
+};
 
 typedef enum DelKeyBeforeWrite {
     DEL_KEY_BEFORE_NONE,
@@ -20,7 +36,8 @@ void setIov(struct iovec *iov, const char *s, size_t l) {
 }
 
 #define IOV_CONST_STR(iov, str) setIov(iov, str, sizeof(str)-1)
-#define IOV_STRING(iov, str, len) setIov(iov, str, len)
+#d
+efine IOV_STRING(iov, str, len) setIov(iov, str, len)
 
 struct RdbxToResp {
 
@@ -33,6 +50,8 @@ struct RdbxToResp {
     RdbParser *parser;
     RdbxRespWriter respWriter;
     int respWriterConfigured;
+
+    unsigned int targetVerValue;  /* major << 8 | minor */
 
     struct {
         RdbBulkCopy key;
@@ -82,35 +101,25 @@ static int iov_stringLen(struct iovec *iov, long count, char *buf) {
     return len;
 }
 
-static int rdbVerFromRedisVer(const char *ver) {
+static int rdbVerFromRedisVer(RdbxToResp *ctx) {
+    const char *ver = ctx->conf.dstRedisVersion;
     if (!ver) return 0;
 
-    struct {
-        char redis;
-        char rdb;
-    } redis2rdb[] = {
-            {0x72, 11},
-            {0x70, 10},
-            {0x50, 9}, //6 and 6.2 had v9 too
-            {0x40, 8},
-            {0x32, 7},
-            {0x26, 6}, //2.8 had v6 too
-            {0x24, 5},
-    };
-    int a, b, c, pos1 = 0, pos2 = 0;
-    int scanned = sscanf(ver, "%d.%d%n.%d%n", &a, &b, &pos1, &c, &pos2);
+    int mjr=0, mnr, pch, pos1 = 0, pos2 = 0;
+    int scanned = sscanf(ver, "%d.%d%n.%d%n", &mjr, &mnr, &pos1, &pch, &pos2);
     if ((scanned == 3 && pos2 == (int) strlen(ver)) ||
         (scanned == 2 && pos1 == (int) strlen(ver))) {
-        unsigned char hex = (a << 4) | b;
+
+        ctx->targetVerValue = VER_VAL(mjr, mnr);
         unsigned int i;
-        for (i = 0; i < sizeof(redis2rdb) / sizeof(redis2rdb[0]); i++)
-            if (hex >= redis2rdb[i].redis) return redis2rdb[i].rdb;
+        for (i = 0; i < sizeof(redisToRdbVersion) / sizeof(redisToRdbVersion[0]); i++)
+            if (ctx->targetVerValue >= redisToRdbVersion[i].redis) return redisToRdbVersion[i].rdb;
     }
     return 0;
 }
 
 static void resolveSupportRestore(RdbParser *p, RdbxToResp *ctx, int srcRdbVer) {
-    int dstRdbVer = ctx->conf.restore.dstRdbVersion;
+    int dstRdbVer;
 
     ctx->srcRdbVer = srcRdbVer;
 
@@ -119,12 +128,11 @@ static void resolveSupportRestore(RdbParser *p, RdbxToResp *ctx, int srcRdbVer) 
     if (ctx->conf.supportRestore) {
         /* if not configured destination RDB version, then resolve it from
          * configured destination Redis version */
-        if (!dstRdbVer)
-            dstRdbVer = rdbVerFromRedisVer(ctx->conf.restore.dstRedisVersion);
+        dstRdbVer = rdbVerFromRedisVer(ctx);
 
         if (dstRdbVer < srcRdbVer) {
             RDB_log(p, RDB_LOG_WRN,
-                    "Cannot support RESTORE. SRC version (=%d) is higher than DST version (%d)",
+                    "Cannot support RESTORE. source RDB version (=%d) is higher than destination (=%d)",
                     srcRdbVer, dstRdbVer);
             ctx->conf.supportRestore = 0;
         } else {

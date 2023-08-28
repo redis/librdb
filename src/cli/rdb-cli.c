@@ -113,10 +113,9 @@ static RdbRes formatRedis(RdbParser *parser, char *input, int argc, char **argv)
     int port = 6379;
     int pipeDepthVal=0;
     RdbxToResp *rdbToResp;
-    char *dstRdbVersion=NULL;
-    char *hostname = "127.0.0.1";
-    char *portStr=NULL;
-    char *pipelineDepth=NULL;
+    const char *hostname = "127.0.0.1";
+    const char *portStr=NULL;
+    const char *pipelineDepth=NULL;
 
     RdbxToRespConf conf = { 0 };
 
@@ -126,8 +125,7 @@ static RdbRes formatRedis(RdbParser *parser, char *input, int argc, char **argv)
         if (getOptArg(argc, argv, &at, "-h", "--hostname", opt, NULL, &hostname)) continue;
         if (getOptArg(argc, argv, &at, "-p", "--port", opt, NULL, &portStr)) continue;
         if (getOptArg(argc, argv, &at, "-r", "--support-restore", opt, &(conf.supportRestore), NULL)) continue;
-        if (getOptArg(argc, argv, &at, "-t", "--target-redis-ver", opt, NULL, &(conf.restore.dstRedisVersion))) continue;
-        if (getOptArg(argc, argv, &at, "-x", "--target-rdb-ver", opt, NULL, &dstRdbVersion)) continue;
+        if (getOptArg(argc, argv, &at, "-t", "--target-redis-ver", opt, NULL, &(conf.dstRedisVersion))) continue;
         if (getOptArg(argc, argv, &at, "-l", "--pipeline-depth", opt, NULL, &pipelineDepth)) continue;
 
         fprintf(stderr, "Invalid REDIS [FORMAT_OPTIONS] argument: %s\n", opt);
@@ -148,11 +146,6 @@ static RdbRes formatRedis(RdbParser *parser, char *input, int argc, char **argv)
         }
     }
 
-    if ((dstRdbVersion) && ((conf.restore.dstRdbVersion = atoi(dstRdbVersion)) == 0)) {
-        logger(RDB_LOG_ERR, "Value of '--target-rdb-ver' ('-x') must be positive integer");
-        return RDB_ERR_GENERAL;
-    }
-
     if (RDBX_createReaderFile(parser, input) == NULL)
         return RDB_ERR_GENERAL;
 
@@ -167,8 +160,7 @@ static RdbRes formatRedis(RdbParser *parser, char *input, int argc, char **argv)
 
 static RdbRes formatResp(RdbParser *parser, char *input, int argc, char **argv) {
     RdbxToResp *rdbToResp;
-    char *dstRdbVersion=NULL;
-    char *output = NULL;/*default:stdout*/
+    const char *output = NULL;/*default:stdout*/
 
     RdbxToRespConf conf = { 0 };
 
@@ -177,16 +169,10 @@ static RdbRes formatResp(RdbParser *parser, char *input, int argc, char **argv) 
         char *opt = argv[at];
         if (getOptArg(argc, argv, &at, "-o", "--output", opt, NULL, &output)) continue;
         if (getOptArg(argc, argv, &at, "-r", "--support-restore", opt, &(conf.supportRestore), NULL)) continue;
-        if (getOptArg(argc, argv, &at, "-t", "--target-redis-ver", opt, NULL, &(conf.restore.dstRedisVersion))) continue;
-        if (getOptArg(argc, argv, &at, "-x", "--target-rdb-ver", opt, NULL, &dstRdbVersion)) continue;
+        if (getOptArg(argc, argv, &at, "-t", "--target-redis-ver", opt, NULL, &(conf.dstRedisVersion))) continue;
 
         fprintf(stderr, "Invalid RESP [FORMAT_OPTIONS] argument: %s\n", opt);
         printUsage();
-        return RDB_ERR_GENERAL;
-    }
-
-    if ((dstRdbVersion) && ((conf.restore.dstRdbVersion = atoi(dstRdbVersion)) == 0)) {
-        logger(RDB_LOG_ERR, "Value of '--target-rdb-ver' ('-x') must be positive integer");
         return RDB_ERR_GENERAL;
     }
 

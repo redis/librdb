@@ -81,11 +81,11 @@ static void runWithAndWithoutRestore(const char *rdbfile) {
     r2rConf.delKeyBeforeWrite = 0;
 
     /* expect not use RESTORE */
-    r2rConf.restore.dstRdbVersion = 1;
+    r2rConf.dstRedisVersion = "0.0.1";
     testRdbToRespCommon(rdbfile, &r2rConf, (char*)restorePrefix, 1, 0);
 
     /* expect use RESTORE */
-    r2rConf.restore.dstRdbVersion = 100;
+    r2rConf.dstRedisVersion = "45.67.89";
     testRdbToRespCommon(rdbfile, &r2rConf, (char*)restorePrefix, 1, 1);
 }
 
@@ -95,15 +95,9 @@ static void test_r2r_single_string_exact_match(void **state) {
     RdbxToRespConf r2rConf;
 
     memset(&r2rConf, 0, sizeof(r2rConf));
-    /* Won't use RESTORE command because target RDB ver. < source RDB ver. */
-    r2rConf.supportRestore = 1;
-    r2rConf.restore.dstRdbVersion = 10;
-    testRdbToRespCommon("single_key.rdb", &r2rConf, (char *) expRespData, 0, 1);
-
     /* Avoid RESTORE command because corresponding RDB ver. of given Redis ver. < source RDB ver. */
     r2rConf.supportRestore = 1;
-    r2rConf.restore.dstRdbVersion = 0;
-    r2rConf.restore.dstRedisVersion = "7.0";   /* resolved to rdb version 10 */
+    r2rConf.dstRedisVersion = "7.0";   /* resolved to rdb version 10 */
     testRdbToRespCommon("single_key.rdb", &r2rConf, (char *) expRespData, 0, 1);
 
     /* Configure not to use RESTORE command */
@@ -134,16 +128,11 @@ static void test_r2r_single_string_exact_match_restore_exact_match(void **state)
             0x3e, 0x16, 0x7d         // ... (non printable)
     };
 
-    /* Use RESTORE command because target RDB ver. == source RDB ver. */
-    memset(&r2rConf, 0, sizeof(r2rConf));
+    /* Expected to use RESTORE command because RDB version of file 'single_key.rdb'
+     * is equal to target RDB version (inferred from dstRedisVersion) */
+    RdbxToRespConf r2rConf = { 0 };
     r2rConf.supportRestore = 1;
-    r2rConf.restore.dstRdbVersion = 11;
-    testRdbToRespCommon("single_key.rdb", &r2rConf, (char *) expRespRestore, 0, 1);
-
-    /* Use RESTORE command because corresponding RDB ver. of given Redis ver. == source RDB ver. */
-    r2rConf.supportRestore = 1;
-    r2rConf.restore.dstRdbVersion = 0;
-    r2rConf.restore.dstRedisVersion = "7.2";
+    r2rConf.dstRedisVersion = "7.2";
     testRdbToRespCommon("single_key.rdb", &r2rConf, (char *) expRespRestore, 0, 1);
 }
 
@@ -158,7 +147,7 @@ static void test_r2r_single_list_exact_match(void **state) {
     /* Won't use RESTORE command because target RDB ver. < source RDB ver. */
     memset(&r2rConf, 0, sizeof(r2rConf));
     r2rConf.supportRestore = 1;
-    r2rConf.restore.dstRdbVersion = 6;
+    r2rConf.dstRedisVersion = "7.0";
     testRdbToRespCommon("quicklist2_v11.rdb", &r2rConf, expResp, 0, 1);
 }
 
