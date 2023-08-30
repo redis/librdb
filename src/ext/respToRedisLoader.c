@@ -39,6 +39,34 @@ struct RdbxRespToRedisLoader {
     int fd;
 };
 
+static void onReadRepliesError(RdbxRespToRedisLoader *ctx) {
+    RespReaderCtx *respReader = &ctx->respReader;
+    int currIdx = ctx->respReader.countReplies % NUM_RECORDED_CMDS;
+    char *currCmdRecord = ctx->pendingCmds.cmdPrefix[currIdx];
+
+    /* Print also previous command if available. */
+    if (ctx->respReader.countReplies > 1) {
+        int prevIdx = (currIdx == 0) ? NUM_RECORDED_CMDS - 1 : currIdx - 1;
+        char *prevCmdRecord = ctx->pendingCmds.cmdPrefix[prevIdx];
+        RDB_reportError(ctx->p, (RdbRes) RDBX_ERR_RESP_WRITE,
+            "\nReceived Server error: \"%s\"\nGot failed on command [#%d] (First %d bytes):\n%s\n"
+            "\nPreceding command [#%d] was: \n%s\n",
+            respReader->errorMsg,
+            ctx->respReader.countReplies,
+            RECORDED_DATA_MAX_LEN,
+            currCmdRecord,
+            ctx->respReader.countReplies-1,
+            prevCmdRecord);
+    } else {
+        RDB_reportError(ctx->p, (RdbRes) RDBX_ERR_RESP_WRITE,
+            "\nReceived Server error:\n\"%s\"\n\nGot failed on command [#%d] (First %d bytes):\n%s\n",
+            respReader->errorMsg,
+            ctx->respReader.countReplies,
+            RECORDED_DATA_MAX_LEN,
+            currCmdRecord);
+    }
+}
+
 /* Read 'numToRead' replies from the socket.
  * Return 0 for success, 1 otherwise. */
 static int readReplies(RdbxRespToRedisLoader *ctx, int numToRead) {
@@ -54,12 +82,7 @@ static int readReplies(RdbxRespToRedisLoader *ctx, int numToRead) {
         if (bytesReceived > 0) {
             /* Data was received, process it */
             if (unlikely(RESP_REPLY_ERR == readRespReplies(respReader, buff, bytesReceived))) {
-                char *failedRecord = ctx->pendingCmds.cmdPrefix[ctx->respReader.countReplies % NUM_RECORDED_CMDS];
-                RDB_reportError(ctx->p, (RdbRes) RDBX_ERR_RESP_WRITE,
-                                "\nReceived Server error: \"%s\"\nFailed on command [#%d]:\n%s\n",
-                                respReader->errorMsg,
-                                ctx->respReader.countReplies,
-                                failedRecord);
+                onReadRepliesError(ctx);
                 return 1;
             }
 
@@ -98,7 +121,7 @@ static inline void recordNewCmd(RdbxRespToRedisLoader *ctx, const struct iovec *
 
 /* Write the vector of data to the socket with writev() sys-call.
  * Return 0 for success, 1 otherwise. */
-static int redisLoaderWritev(void *context, struct iovec *iov, int count, int startCmd, int endCmd) {
+static int redisLoaderWritev(void *context, struct iovec *iov, int iovCnt, int startCmd, int endCmd) {
     ssize_t writeResult;
     int retries = 0;
 
@@ -110,11 +133,11 @@ static int redisLoaderWritev(void *context, struct iovec *iov, int count, int st
     }
 
     if (startCmd)
-        recordNewCmd(ctx, iov, count);
+        recordNewCmd(ctx, iov, iovCnt);
 
     while (1)
     {
-        writeResult = writev(ctx->fd, iov, count);
+        writeResult = writev(ctx->fd, iov, iovCnt);
 
         /* check for error */
         if (unlikely(writeResult == -1)) {
@@ -133,14 +156,14 @@ static int redisLoaderWritev(void *context, struct iovec *iov, int count, int st
         }
 
         /* crunch iov entries that were transmitted entirely */
-        while ((count) && (iov->iov_len <= (size_t) writeResult)) {
+        while ((iovCnt) && (iov->iov_len <= (size_t) writeResult)) {
             writeResult -= iov->iov_len;
             ++iov;
-            --count;
+            --iovCnt;
         }
 
         /* if managed to send all iov entries */
-        if (likely(count == 0))
+        if (likely(iovCnt == 0))
             break;
 
         /* Update pointed iov entry. Only partial of its data sent */
@@ -151,7 +174,6 @@ static int redisLoaderWritev(void *context, struct iovec *iov, int count, int st
     ctx->pendingCmds.num += endCmd;
     return 0;
 }
-
 
 /* Flush the pending commands by reading the remaining replies.
  * Return 0 for success, 1 otherwise. */
