@@ -9,8 +9,10 @@
 static inline void unused(void *dummy, ...) { (void)(dummy);}
 #endif
 
+#define MAX_RSP_BULK_SIZE 1024*1024
+
 typedef enum RespReplyType {
-    RESP_REPLY_INIT=0,
+    RESP_REPLY_IDLE=0,
     RESP_REPLY_STRING,
     RESP_REPLY_ARRAY,
     RESP_REPLY_INTEGER,
@@ -75,7 +77,10 @@ static RespRes readRespReplyLine(RespReaderCtx *ctx, RespReplyBuff *buffInfo) {
         PROC_LINE_END
     };
 
-    while (buffInfo->at < buffInfo->len) {
+    while (1) {
+        if (buffInfo->at == buffInfo->len)
+            return RESP_REPLY_PARTIAL;
+
         switch (ctx->typeState) {
 
             case PROC_LINE_START:
@@ -100,10 +105,8 @@ static RespRes readRespReplyLine(RespReaderCtx *ctx, RespReplyBuff *buffInfo) {
                 /* fall-thru */
             case PROC_LINE_END:
                 return RESP_REPLY_OK;
-
         }
     }
-    return RESP_REPLY_PARTIAL;
 }
 
 static RespRes readRespReplyError(RespReaderCtx *ctx, RespReplyBuff *buffInfo) {
@@ -137,13 +140,108 @@ static RespRes readRespReplyError(RespReaderCtx *ctx, RespReplyBuff *buffInfo) {
     return res;
 }
 
-static RespRes readRespReplyBulk(RespReaderCtx *ctx, RespReplyBuff *buffInfo) {
+RespRes readRespReplyBulk(RespReaderCtx *ctx, RespReplyBuff *buffInfo) {
+    char ch;
     UNUSED(buffInfo);
 
-    /* Currently there are no commands, which sent by respToTcpLoader.c, that will cause to
-     * get back bulk replies. Might change in the future */
-    snprintf(ctx->errorMsg,sizeof(ctx->errorMsg),"Unexpected bulk reply");
-    return RESP_REPLY_ERR;
+    enum ProcessBulkReadStates {
+        PROC_BULK_READ_INIT = 0,
+        PROC_BULK_READ_LEN,
+        PROC_BULK_READ_LEN_CR,
+        PROC_BULK_READ_LEN_NL,
+        PROC_BULK_READ,
+        PROC_BULK_READ_CR,
+        PROC_BULK_READ_NL,
+        PROC_BULK_READ_END,
+    };
+
+    while (1) {
+        if (buffInfo->at == buffInfo->len)
+            return RESP_REPLY_PARTIAL;
+
+        switch (ctx->typeState) {
+            case PROC_BULK_READ_INIT:
+                ctx->bulkLen = 0;
+                ctx->bulkAt = 0;
+                ctx->typeState = PROC_BULK_READ_LEN;
+                break;
+
+            case PROC_BULK_READ_LEN:
+                ch = buffInfo->buff[(buffInfo->at)];
+                while ((ch >= '0') && (ch <= '9')) {
+                    ctx->bulkLen = ctx->bulkLen * 10 + (ch - '0');
+
+                    if (ctx->bulkLen > MAX_RSP_BULK_SIZE) {
+                        snprintf(ctx->errorMsg, sizeof(ctx->errorMsg),
+                                 "Response Bulk is bigger than MAX_RSP_BULK_SIZE (=%d)", MAX_RSP_BULK_SIZE);
+                        return RESP_REPLY_ERR;
+                    }
+
+                    ch = buffInfo->buff[(++(buffInfo->at))];
+
+                    if (buffInfo->at == buffInfo->len)
+                        return RESP_REPLY_PARTIAL;
+                }
+
+                ctx->typeState = PROC_BULK_READ_LEN_CR;
+                break;
+
+            case PROC_BULK_READ_LEN_CR:
+                if (buffInfo->buff[buffInfo->at++] != '\r') {
+                    snprintf(ctx->errorMsg, sizeof(ctx->errorMsg), "Invalid Bulk response. Failed to read bulk length");
+                    return RESP_REPLY_ERR;
+                }
+                ctx->typeState = PROC_BULK_READ_LEN_NL;
+                break;
+
+            case PROC_BULK_READ_LEN_NL:
+                if (buffInfo->buff[buffInfo->at++] != '\n') {
+                    snprintf(ctx->errorMsg, sizeof(ctx->errorMsg),
+                             "Invalid Bulk response. Failed to read bulk length");
+                    return RESP_REPLY_ERR;
+                }
+
+                if (ctx->bulkLen == 0) {
+                    snprintf(ctx->errorMsg, sizeof(ctx->errorMsg), "Response Bulk must be bigger than zero");
+                    return RESP_REPLY_ERR;
+                }
+
+                ctx->typeState = PROC_BULK_READ;
+                break;
+
+            case PROC_BULK_READ:
+                while (ctx->bulkAt < ctx->bulkLen) {
+                    if (buffInfo->at == buffInfo->len)
+                        return RESP_REPLY_PARTIAL;
+
+                    ++buffInfo->at; /* Not required to keep bulk. */
+                    ++ctx->bulkAt;
+                }
+
+                ctx->typeState = PROC_BULK_READ_CR;
+                break;
+
+            case PROC_BULK_READ_CR:
+                if (buffInfo->buff[buffInfo->at++] != '\r') {
+                    snprintf(ctx->errorMsg, sizeof(ctx->errorMsg), "Invalid Bulk response");
+                    return RESP_REPLY_ERR;
+                }
+                ctx->typeState = PROC_BULK_READ_NL;
+                break;
+
+            case PROC_BULK_READ_NL:
+                if (buffInfo->buff[buffInfo->at++] != '\n') {
+                    snprintf(ctx->errorMsg, sizeof(ctx->errorMsg), "Invalid Bulk response");
+                    return RESP_REPLY_ERR;
+                }
+
+                ctx->typeState = PROC_BULK_READ_END;
+                /* fall-through */
+
+            case PROC_BULK_READ_END:
+                return RESP_REPLY_OK;
+        }
+    }
 }
 
 static RespRes readRespReplyAggregate(RespReaderCtx *ctx, RespReplyBuff *buffInfo) {
@@ -158,7 +256,7 @@ static RespRes readRespReplyAggregate(RespReaderCtx *ctx, RespReplyBuff *buffInf
 static RespRes readRespReply(RespReaderCtx *ctx, RespReplyBuff *buffInfo) {
 
     /* check if we need to read type */
-    if (ctx->type == RESP_REPLY_INIT) {
+    if (ctx->type == RESP_REPLY_IDLE) {
 
         switch (buffInfo->buff[buffInfo->at]) {
             case '-':
@@ -255,7 +353,7 @@ RespRes readRespReplies(RespReaderCtx *ctx, const char *buff, int buffLen) {
             break;
 
         ctx->countReplies++;
-        ctx->type = RESP_REPLY_INIT;
+        ctx->type = RESP_REPLY_IDLE;
     }
 
     return res;

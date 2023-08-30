@@ -14,8 +14,6 @@
  * either by applying RESTORE or plain Redis RESP commands.
  */
 
-/* TODO: support select db, expiry */
-
 static void testRdbToRespCommon(const char *rdbfilename,
                                 RdbxToRespConf *conf,
                                 char *expResp,
