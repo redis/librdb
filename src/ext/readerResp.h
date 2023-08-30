@@ -9,14 +9,20 @@ typedef enum RespReplyRes {
 } RespRes;
 
 typedef struct {
-/* private: */
-    int type;
-    int typeState;
 
-/* public: read-only */
+/* PUBLIC: read-only */
     size_t countReplies;
     char errorMsg[MAX_RESP_REPLY_ERR_MSG+1];
     int errorMsgLen;
+
+/* PRIVATE: */
+    int type;
+    int typeState;
+
+    /* private bulk response state */
+    unsigned int bulkLen;
+    unsigned int bulkAt;
+
 } RespReaderCtx;
 
 void readRespInit(RespReaderCtx *ctx);
