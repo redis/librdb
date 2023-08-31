@@ -63,6 +63,7 @@ struct ParsingElementInfo peInfo[PE_MAX] = {
         [PE_SET]              = {elementSet, "elementSet", "Parsing set"},
         [PE_SET_IS]           = {elementSetIS, "elementSetIS", "Parsing set Intset"},
         [PE_SET_LP]           = {elementSetLP, "elementSetLP", "Parsing set Listpack"},
+        [PE_FUNCTION]         = {elementFunction, "elementFunction", "Parsing Function"},
 
         /*** parsing raw data (RDB_LEVEL_RAW) ***/
 
@@ -192,7 +193,7 @@ _LIBRDB_API RdbParser *RDB_createParserRdb(RdbMemAlloc *memAlloc) {
     p->totalHandlers = 0;
     p->firstHandlers = NULL;
 
-    for (int i = 0 ; i < RDB_TYPE_MAX ; ++i) {
+    for (int i = 0 ; i < RDB_OPCODE_MAX ; ++i) {
         p->handleTypeObjByLevel[i] = RDB_LEVEL_MAX;
     }
 
@@ -521,6 +522,9 @@ _LIBRDB_API void RDB_handleByLevel(RdbParser *p, RdbDataType type, RdbHandlersLe
             p->handleTypeObjByLevel[RDB_TYPE_STREAM_LISTPACKS_2] = lvl;
             p->handleTypeObjByLevel[RDB_TYPE_STREAM_LISTPACKS_3] = lvl;
             break;
+        case RDB_DATA_TYPE_FUNCTION:
+            p->handleTypeObjByLevel[RDB_OPCODE_FUNCTION2] = lvl;
+            break;
         default:
             assert(0);
     }
@@ -670,7 +674,7 @@ static void resolveMultipleLevelsRegistration(RdbParser *p) {
               (p->numHandlers[1]) ? RDB_LEVEL_STRUCT :
               RDB_LEVEL_DATA ;
 
-    for (int i = 0 ; i < RDB_TYPE_MAX ; ++i) {
+    for (int i = 0 ; i < RDB_OPCODE_MAX ; ++i) {
         /* check if not configured already by app */
         if (p->handleTypeObjByLevel[i] == RDB_LEVEL_MAX)
             p->handleTypeObjByLevel[i] = lvl;
@@ -1205,7 +1209,7 @@ RdbStatus elementNextRdbType(RdbParser *p) {
         case RDB_OPCODE_FREQ:               return nextParsingElement(p, PE_FREQ);
         case RDB_OPCODE_IDLE:               return nextParsingElement(p, PE_IDLE);
 
-
+        /* string */
         case RDB_TYPE_STRING:               return nextParsingElementKeyValue(p, PE_RAW_STRING, PE_STRING);
         /* list */
         case RDB_TYPE_LIST:                 return nextParsingElementKeyValue(p, PE_RAW_LIST, PE_LIST);
@@ -1222,21 +1226,32 @@ RdbStatus elementNextRdbType(RdbParser *p) {
         case RDB_TYPE_SET_LISTPACK:         return nextParsingElementKeyValue(p, PE_RAW_SET_LP, PE_SET_LP);
         case RDB_TYPE_SET_INTSET:           return nextParsingElementKeyValue(p, PE_RAW_SET_IS, PE_SET_IS);
 
+        /* function */
+        case RDB_OPCODE_FUNCTION2:          return nextParsingElement(p, PE_FUNCTION);
+
         case RDB_OPCODE_EOF:                return nextParsingElement(p, PE_END_OF_FILE);
 
-        case RDB_OPCODE_MODULE_AUX:
-        case RDB_OPCODE_FUNCTION:
-        case RDB_OPCODE_FUNCTION2:
+        /* zset (TBD) */
         case RDB_TYPE_ZSET:
         case RDB_TYPE_ZSET_2:
-        case RDB_TYPE_MODULE_2:
         case RDB_TYPE_ZSET_ZIPLIST:
-        case RDB_TYPE_STREAM_LISTPACKS:
         case RDB_TYPE_ZSET_LISTPACK:
+
+        /* module (TBD) */
+        case RDB_OPCODE_MODULE_AUX:
+        case RDB_TYPE_MODULE_2:
+
+        /* stream (TBD) */
+        case RDB_TYPE_STREAM_LISTPACKS:
         case RDB_TYPE_STREAM_LISTPACKS_2:
         case RDB_TYPE_STREAM_LISTPACKS_3:
             RDB_reportError(p, RDB_ERR_NOT_SUPPORTED_RDB_ENCODING_TYPE,
                             "Not supported RDB encoding type: %d", p->currOpcode);
+            return RDB_STATUS_ERROR;
+
+        case RDB_OPCODE_FUNCTION:
+            RDB_reportError(p, RDB_ERR_PRERELEASE_FUNC_FORMAT_NOT_SUPPORTED,
+                            "Pre-release function format not supported.");
             return RDB_STATUS_ERROR;
 
         default:
@@ -1643,6 +1658,24 @@ RdbStatus elementEndOfFile(RdbParser *p) {
 
     CALL_COMMON_HANDLERS_CB_NO_ARGS(p, handleEndRdb);
     return RDB_STATUS_ENDED; /* THE END */
+}
+
+/*** function ***/
+
+RdbStatus elementFunction(RdbParser *p) {
+    BulkInfo *binfoFunc;
+
+    IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC_APP_BULK, NULL, &binfoFunc));
+
+    /*** ENTER SAFE STATE ***/
+
+    registerAppBulkForNextCb(p, binfoFunc);
+    if (p->handleTypeObjByLevel[p->currOpcode] == RDB_LEVEL_DATA)
+        CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_DATA, rdbData.handleFunction, binfoFunc->ref);
+    else
+        CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_STRUCT, rdbStruct.handleFunction, binfoFunc->ref);
+
+    return nextParsingElement(p, PE_NEXT_RDB_TYPE);
 }
 
 /*** Loaders from RDB ***/

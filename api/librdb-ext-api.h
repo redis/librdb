@@ -66,7 +66,8 @@ typedef enum RdbxToJsonEnc {
 typedef struct RdbxToJsonConf {
     RdbHandlersLevel level;
     RdbxToJsonEnc encoding;
-    int skipAuxField;
+    int includeAuxField;
+    int includeFunc;
     int flatten; /* 0=db hirarchy preserved 1=flatten json */
 } RdbxToJsonConf;
 
@@ -91,8 +92,6 @@ _LIBRDB_API RdbxFilterKey *RDBX_createHandlersFilterKey(RdbParser *p,
  ****************************************************************/
 
 typedef struct RdbxToRespConf {
-    /* TODO: support the option of expire, del, select db */
-
     int delKeyBeforeWrite;
     int applySelectDbCmds;  /* if not configured SELECT commands, all keys will be flatten into a single db */
 

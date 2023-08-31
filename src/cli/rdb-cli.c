@@ -60,7 +60,7 @@ static void printUsage() {
     printf("\t-l, --log-file <PATH>         Path to the log file (Default: './rdb-cli.log')\n\n");
 
     printf("FORMAT_OPTIONS ('json'):\n");
-    printf("\t-w, --with-aux-values         Include auxiliary values\n");
+    printf("\t-i, --include <EXTRAS>        To include: {aux-val|func}\n");
     printf("\t-f, --flatten                 Print flatten json, without DBs Parenthesis\n");
     printf("\t-o, --output <FILE>           Specify the output file. If not specified, output goes to stdout\n\n");
 
@@ -81,15 +81,22 @@ static void printUsage() {
 }
 
 static RdbRes formatJson(RdbParser *parser, char *input, int argc, char **argv) {
+    const char *includeArg;
     const char *output = NULL;/*default:stdout*/
-    int flatten=0, withAuxValues = 0; /*without*/
+    int includeFunc=0, includeAuxField=0, flatten=0; /*without*/
 
     /* parse specific command options */
     for (int at = 1; at < argc; ++at) {
         char *opt = argv[at];
         if (getOptArg(argc, argv, &at, "-o", "--output", opt, NULL, &output)) continue;
         if (getOptArg(argc, argv, &at, "-f", "--flatten", opt, &flatten, NULL)) continue;
-        if (getOptArg(argc, argv, &at, "-w", "--with-aux-values", opt, &withAuxValues, NULL)) continue;
+
+        if (getOptArg(argc, argv, &at, "-i", "--include", opt, NULL, &includeArg)) {
+            if (strcmp(includeArg, "aux-val") == 0) { includeAuxField = 1; continue; }
+            if (strcmp(includeArg, "func") == 0) { includeFunc = 1; continue; }
+            fprintf(stderr, "Invalid argument for '--include': %s\n", includeArg);
+            return RDB_ERR_GENERAL;
+        }
 
         fprintf(stderr, "Invalid JSON [FORMAT_OPTIONS] argument: %s\n", opt);
         printUsage();
@@ -99,8 +106,9 @@ static RdbRes formatJson(RdbParser *parser, char *input, int argc, char **argv) 
     RdbxToJsonConf conf = {
             .level = RDB_LEVEL_DATA,
             .encoding = RDBX_CONV_JSON_ENC_PLAIN,
-            .skipAuxField = !(withAuxValues),
             .flatten = flatten,
+            .includeAuxField = includeAuxField,
+            .includeFunc = includeFunc,
     };
 
     if (RDBX_createReaderFile(parser, input) == NULL)

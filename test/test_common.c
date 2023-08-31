@@ -99,22 +99,6 @@ char *readFile(const char *filename,  size_t *length) {
     return str;
 }
 
-void assert_json_file(const char *filename, char *expPayload, char *charsToSkip) {
-    char *filedata = readFile(filename, NULL);
-    if (strcmp(sanitizeData(expPayload, charsToSkip), sanitizeData(filedata, charsToSkip)) != 0) {
-        printf("payload file %s not as expected.\n", filename);
-        printf("---- %s ----\n", filename);
-        char *f1 = readFile(filename, NULL);
-        printf ("%s", f1);
-        free(f1);
-        printf("\n---- Expected ----\n");
-        printf("%s", expPayload);
-        printf("\n------------\n");
-        assert_true(0);
-    }
-    free(filedata);
-}
-
 void cleanTmpFolder() {
     const char *folder_path = "./test/tmp";
 

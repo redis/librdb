@@ -33,7 +33,14 @@ static void test_empty_rdb(void **state) {
     RdbParser *parser = RDB_createParserRdb(NULL);
     RDB_setLogLevel(parser, RDB_LOG_ERR);
     assert_non_null(RDBX_createReaderFile(parser, rdbfile));
-    RdbxToJsonConf r2jConf = {RDB_LEVEL_DATA, RDBX_CONV_JSON_ENC_PLAIN, 0, 1};
+    RdbxToJsonConf r2jConf = {
+            .level = RDB_LEVEL_DATA,
+            .encoding = RDBX_CONV_JSON_ENC_PLAIN,
+            .includeAuxField = 1,
+            .includeFunc = 0,
+            .flatten = 1,
+    };
+
     assert_non_null(RDBX_createHandlersToJson(parser,
                                               jsonfile,
                                               &r2jConf));
@@ -55,7 +62,7 @@ static void test_createHandlersRdbToJson_and_2_FilterKey(void **state) {
     RdbParser *parser = RDB_createParserRdb(NULL);
     RDB_setLogLevel(parser, RDB_LOG_ERR);
     assert_non_null(RDBX_createReaderFile(parser, rdbfile));
-    RdbxToJsonConf r2jConf = {RDB_LEVEL_DATA, RDBX_CONV_JSON_ENC_PLAIN, 0, 1};
+    RdbxToJsonConf r2jConf = {RDB_LEVEL_DATA, RDBX_CONV_JSON_ENC_PLAIN, 0, 0, 1};
     assert_non_null(RDBX_createHandlersToJson(parser,
                                               jsonfile,
                                               &r2jConf));
@@ -73,14 +80,6 @@ static void test_createHandlersRdbToJson_and_2_FilterKey(void **state) {
 
 static void test_mixed_levels_registration(void **state) {
     UNUSED(state);
-    char expJsonRaw[] = QUOTE( "string2":"\x00\tHithere!",
-                               "lzf_compressed":"\x00\xc3\t@v\x01cc\xe0i\x00\x01cc",
-                               "string1":"\x00\x04blaa");
-
-    char expJsonData[] = QUOTE("mylist1":["v1"],
-                               "mylist3":["v3","v2","v1"],
-                               "mylist2":["v2","v1"]);
-
     const char *rdbfile = DUMP_FOLDER("multiple_lists_strings.rdb");
     const char *jsonfileData = TMP_FOLDER("multiple_lists_strings_data.json");
     const char *jsonfileRaw = TMP_FOLDER("multiple_lists_strings_raw.json");
@@ -89,10 +88,10 @@ static void test_mixed_levels_registration(void **state) {
     RdbParser *parser = RDB_createParserRdb(NULL);
     RDB_setLogLevel(parser, RDB_LOG_ERR);
     assert_non_null(RDBX_createReaderFile(parser, rdbfile));
-    RdbxToJsonConf conf1 = {RDB_LEVEL_DATA, RDBX_CONV_JSON_ENC_PLAIN, 1, 1};
+    RdbxToJsonConf conf1 = {RDB_LEVEL_DATA, RDBX_CONV_JSON_ENC_PLAIN, 0, 0, 1};
     assert_non_null(RDBX_createHandlersToJson(parser, jsonfileData, &conf1));
 
-    RdbxToJsonConf conf2 = {RDB_LEVEL_RAW, RDBX_CONV_JSON_ENC_PLAIN, 1, 1};
+    RdbxToJsonConf conf2 = {RDB_LEVEL_RAW, RDBX_CONV_JSON_ENC_PLAIN, 0, 0, 1};
     assert_non_null(RDBX_createHandlersToJson(parser, jsonfileRaw, &conf2));
 
     /* configure at what level of the parser each obj type should be handled and callback */
@@ -103,8 +102,9 @@ static void test_mixed_levels_registration(void **state) {
     assert_int_equal( status, RDB_STATUS_OK);
 
     RDB_deleteParser(parser);
-    assert_json_file(jsonfileRaw, expJsonRaw, " \n");
-    assert_json_file(jsonfileData, expJsonData, " \n");
+
+    assert_json_equal(jsonfileRaw, DUMP_FOLDER("multiple_lists_strings_subset_str.json"), 1);
+    assert_json_equal(jsonfileData, DUMP_FOLDER("multiple_lists_strings_subset_list.json"), 1);
 }
 
 static void printResPicture(int result) {

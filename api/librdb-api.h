@@ -62,6 +62,7 @@ typedef enum RdbRes {
     RDB_ERR_STRING_INVALID_LZF_COMPRESSED,
     RDB_ERR_STRING_UNKNOWN_ENCODING_TYPE,
     RDB_ERR_NOT_SUPPORTED_RDB_ENCODING_TYPE,
+    RDB_ERR_PRERELEASE_FUNC_FORMAT_NOT_SUPPORTED,
     RDB_ERR_UNKNOWN_RDB_ENCODING_TYPE,
     RDB_ERR_QUICK_LIST_INTEG_CHECK,
     RDB_ERR_LIST_ZL_INTEG_CHECK,
@@ -253,6 +254,8 @@ typedef struct RdbHandlersStructCallbacks {
     RdbRes (*handleSetIS)(RdbParser *p, void *userData, RdbBulk intset);
     /* Callback to handle a listpack-based set value */
     RdbRes (*handleSetLP)(RdbParser *p, void *userData, RdbBulk listpack);
+    /* Callback to handle function code */
+    RdbRes (*handleFunction)(RdbParser *p, void *userData, RdbBulk func);
 
     /*** TODO: RdbHandlersStructCallbacks: ***/
 
@@ -260,8 +263,6 @@ typedef struct RdbHandlersStructCallbacks {
     RdbRes (*handleZsetZL)(RdbParser *p, void *userData, RdbBulk ziplist);
     /* Callback to handle a listpack-based sorted set value */
     RdbRes (*handleZsetLP)(RdbParser *p, void *userData, RdbBulk listpack);
-    /* Callback to handle function code */
-    RdbRes (*handleFunction)(RdbParser *p, void *userData, RdbBulk func);
 
     /*** TODO: RdbHandlersStructCallbacks: stream stuff ... ***/
 
@@ -288,6 +289,9 @@ typedef struct RdbHandlersDataCallbacks {
     RdbRes (*handleHashField)(RdbParser *p, void *userData, RdbBulk field, RdbBulk value);
     /* Callback to handle a member within a set */
     RdbRes (*handleSetMember)(RdbParser *p, void *userData, RdbBulk member);
+    /* Callback to handle function code */
+    RdbRes (*handleFunction)(RdbParser *p, void *userData, RdbBulk func);
+
 
     /*** TODO: RdbHandlersDataCallbacks: handleZsetElement ***/
 
@@ -483,7 +487,6 @@ _LIBRDB_API void RDB_reportError(RdbParser *p, RdbRes e, const char *msg, ...);
  * RdbBulk allocation. To decide in this case if given RdbBulk is actually
  * allocated by configured external allocator or only reference another section
  * of memory, the callback will need to assist function `RDB_isRefBulk`.
- * TODO: Mark callbacks that might return referenced bulk
  ****************************************************************/
 struct RdbMemAlloc {
     void *(*malloc)(size_t size);
@@ -564,6 +567,7 @@ typedef enum RdbDataType {
     RDB_DATA_TYPE_HASH,
     RDB_DATA_TYPE_MODULE,
     RDB_DATA_TYPE_STREAM,
+    RDB_DATA_TYPE_FUNCTION,
     RDB_DATA_TYPE_MAX
 } RdbDataType;
 

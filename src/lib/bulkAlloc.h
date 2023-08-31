@@ -35,7 +35,7 @@
  * c) External allocator
  *
  * The Stack Allocator  is specifically designed to work in tandem with the BulkPool
- * and supports the Allocate, Rollback, and Flush commands. When the the pool
+ * and supports the Allocate, Rollback, and Flush commands. When the pool
  * receives small allocation requests and the application has not restricted
  * allocation to a specific type, it prefers to allocate from the stack. If
  * the parser fails to reach a new state, the stack will be rolled back in order

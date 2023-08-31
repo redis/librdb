@@ -21,7 +21,13 @@ static void test_rdb_cli_resp_common(const char *rdbfile) {
     RdbStatus status;
 
     /* Won't use RESTORE command because target RDB ver. < source RDB ver. */
-    RdbxToJsonConf rdb2jsonConf = {RDB_LEVEL_DATA, RDBX_CONV_JSON_ENC_PLAIN, 1, 1};
+    RdbxToJsonConf rdb2jsonConf = {
+            .level = RDB_LEVEL_DATA,
+            .encoding = RDBX_CONV_JSON_ENC_PLAIN,
+            .includeAuxField = 0,
+            .includeFunc = 0,
+            .flatten = 1,
+    };
 
     /* RDB to JSON */
     parser = RDB_createParserRdb(NULL);
@@ -55,8 +61,8 @@ static void test_rdb_cli_resp_common(const char *rdbfile) {
 
 static void test_rdb_cli_json(void **state) {
     UNUSED(state);
-    runSystemCmd("./bin/rdb-cli ./test/dumps/multiple_lists_strings.rdb json -f -w -o ./test/tmp/out.json  > /dev/null ");
-    assert_json_equal(DUMP_FOLDER("multiple_lists_strings_data.json"), "./test/tmp/out.json", 0);
+    runSystemCmd("./bin/rdb-cli ./test/dumps/multiple_lists_strings.rdb json -f -o ./test/tmp/out.json  > /dev/null ");
+    assert_json_equal(DUMP_FOLDER("multiple_lists_strings_no_aux.json"), "./test/tmp/out.json", 0);
 }
 
 static void test_rdb_cli_resp_to_redis(void **state) {

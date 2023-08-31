@@ -34,6 +34,7 @@ struct RdbxToJson {
     } keyCtx;
 
     unsigned int count_keys;
+    unsigned int count_functions;
     unsigned int count_db;
 };
 
@@ -102,11 +103,13 @@ static RdbxToJson *initRdbToJsonCtx(RdbParser *p, const char *filename, RdbxToJs
     ctx->outfile = f;
     ctx->state = R2J_IDLE;
     ctx->count_keys = 0;
+    ctx->count_functions = 0;
 
     /* default configuration */
     ctx->conf.encoding = RDBX_CONV_JSON_ENC_PLAIN;
     ctx->conf.level = RDB_LEVEL_DATA;
-    ctx->conf.skipAuxField = 0;
+    ctx->conf.includeAuxField = 0;
+    ctx->conf.includeFunc = 0;
 
     /* override configuration if provided */
     if (conf) ctx->conf = *conf;
@@ -348,6 +351,15 @@ static RdbRes toJsonHash(RdbParser *p, void *userData, RdbBulk field, RdbBulk va
     return RDB_OK;
 }
 
+static RdbRes toJsonFunction(RdbParser *p, void *userData, RdbBulk func) {
+    RdbxToJson *ctx = userData;
+    /* output json part */
+    ouput_fprintf(ctx, "    \"Function_%d\":", ++ctx->count_functions);
+    outputQuotedEscaping( (RdbxToJson *) userData, func, RDB_bulkLen(p, func));
+    ouput_fprintf(ctx, ",\n");
+    return RDB_OK;
+}
+
 /*** Handling struct ***/
 
 static RdbRes toJsonStruct(RdbParser *p, void *userData, RdbBulk value) {
@@ -394,7 +406,7 @@ RdbxToJson *RDBX_createHandlersToJson(RdbParser *p, const char *filename, RdbxTo
     CallbacksUnion callbacks;
     memset (&callbacks, 0, sizeof(callbacks));
 
-    if (!(ctx->conf.skipAuxField))
+    if (ctx->conf.includeAuxField)
         callbacks.common.handleAuxField = handlingAuxField;
 
     callbacks.common.handleNewKey = toJsonNewKey;
@@ -404,12 +416,16 @@ RdbxToJson *RDBX_createHandlersToJson(RdbParser *p, const char *filename, RdbxTo
     callbacks.common.handleEndRdb = toJsonEndRdb;
 
     if (ctx->conf.level == RDB_LEVEL_DATA) {
+
         callbacks.dataCb.handleStringValue = toJsonString;
         callbacks.dataCb.handleListItem = toJsonList;
         callbacks.dataCb.handleHashField = toJsonHash;
         callbacks.dataCb.handleSetMember = toJsonSet;
+        callbacks.dataCb.handleFunction = (conf->includeFunc) ? toJsonFunction : NULL;
         RDB_createHandlersData(p, &callbacks.dataCb, ctx, deleteRdbToJsonCtx);
+
     } else  if (ctx->conf.level == RDB_LEVEL_STRUCT) {
+
         callbacks.structCb.handleString = toJsonString;
         /* list */
         callbacks.structCb.handleListPlain = toJsonList;
@@ -424,8 +440,12 @@ RdbxToJson *RDBX_createHandlersToJson(RdbParser *p, const char *filename, RdbxTo
         callbacks.structCb.handleSetPlain = toJsonSet;
         callbacks.structCb.handleSetIS = toJsonStruct;
         callbacks.structCb.handleSetLP = toJsonStruct;
+        /* function */
+        callbacks.structCb.handleFunction = (conf->includeFunc) ? toJsonFunction : NULL;
         RDB_createHandlersStruct(p, &callbacks.structCb, ctx, deleteRdbToJsonCtx);
+
     } else if (ctx->conf.level == RDB_LEVEL_RAW) {
+
         callbacks.rawCb.handleFrag = toJsonFrag;
         callbacks.rawCb.handleBegin = toJsonRawBegin;
         callbacks.rawCb.handleEnd = toJsonRawEnd;
