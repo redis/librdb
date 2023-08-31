@@ -17,6 +17,8 @@
 
 #define RAW_AGG_FIRST_STATIC_BUFF_LEN (1024*32)
 
+#define RDB_OPCODE_MAX 255
+
 #define UNUSED(...) unused( (void *) NULL, ##__VA_ARGS__);
 static inline void unused(void *dummy, ...) { (void)(dummy);}
 
@@ -136,6 +138,7 @@ typedef enum ParsingElementType {
     PE_SET,
     PE_SET_IS,
     PE_SET_LP,
+    PE_FUNCTION,
 
     /* parsing raw data types */
     PE_RAW_NEW_KEY,
@@ -287,7 +290,7 @@ struct RdbParser {
     int numHandlers[RDB_LEVEL_MAX];
     int totalHandlers;
     RdbHandlers *firstHandlers;
-    RdbHandlersLevel handleTypeObjByLevel[RDB_TYPE_MAX];
+    RdbHandlersLevel handleTypeObjByLevel[RDB_OPCODE_MAX];
 
     /*** configuration ***/
     RdbMemAlloc mem;
@@ -442,6 +445,7 @@ RdbStatus elementHashZM(RdbParser *p);
 RdbStatus elementSet(RdbParser *p);
 RdbStatus elementSetIS(RdbParser *p);
 RdbStatus elementSetLP(RdbParser *p);
+RdbStatus elementFunction(RdbParser *p);
 
 /*** Raw Parsing Elements ***/
 RdbStatus elementRawNewKey(RdbParser *p);
@@ -457,7 +461,5 @@ RdbStatus elementRawHashZM(RdbParser *p);
 RdbStatus elementRawSet(RdbParser *p);
 RdbStatus elementRawSetIS(RdbParser *p);
 RdbStatus elementRawSetLP(RdbParser *p);
-
-
 
 #endif /*LIBRDB_PARSER_H*/

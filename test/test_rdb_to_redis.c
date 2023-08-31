@@ -15,87 +15,84 @@ static int setupTest(void **state) {
     return 0;
 }
 
+static void rdb_to_tcp(const char *rdbfile, int pipelineDepth, int isRestore) {
+    RdbxRespToRedisLoader *r2r;
+    RdbxToResp *rdbToResp;
+    RdbStatus status;
+
+    RdbxToRespConf rdb2respConf = { .supportRestore = isRestore, .dstRedisVersion = "45.67.89",};
+
+    RdbParser *parser = RDB_createParserRdb(NULL);
+    RDB_setLogLevel(parser, RDB_LOG_ERR);
+    assert_non_null(RDBX_createReaderFile(parser, rdbfile));
+    assert_non_null(rdbToResp = RDBX_createHandlersToResp(parser, &rdb2respConf));
+    r2r = RDBX_createRespToRedisTcp(parser, rdbToResp, "127.0.0.1", redisPort);
+    assert_non_null(r2r);
+    RDBX_setPipelineDepth(r2r, pipelineDepth);
+    RDB_setLogLevel(parser, RDB_LOG_ERR);
+    while ((status = RDB_parse(parser)) == RDB_STATUS_WAIT_MORE_DATA);
+    assert_int_equal(status, RDB_STATUS_OK);
+    RDB_deleteParser(parser);
+}
+
+static void rdb_to_json(const char *rdbfile, const char *outfile) {
+    RdbStatus status;
+    RdbxToJsonConf rdb2jsonConf = {
+            .level = RDB_LEVEL_DATA,
+            .encoding = RDBX_CONV_JSON_ENC_PLAIN,
+            .includeAuxField = 0,
+            .includeFunc = 0,
+            .flatten = 1,
+    };
+
+    RdbParser *parser = RDB_createParserRdb(NULL);
+    RDB_setLogLevel(parser, RDB_LOG_ERR);
+    assert_non_null(RDBX_createReaderFile(parser, rdbfile));
+    assert_non_null(RDBX_createHandlersToJson(parser, outfile, &rdb2jsonConf));
+    while ((status = RDB_parse(parser)) == RDB_STATUS_WAIT_MORE_DATA);
+    assert_int_equal(status, RDB_STATUS_OK);
+    RDB_deleteParser(parser);
+}
+
 /*
  * Testing RESP against live server:
- * 1. Run RDB to Json (out1.json)
- * 2. Run RDB against Redis and save DUMP-RDB
+ * 1. Convert RDB to Json (out1.json)
+ * 2. Upload RDB against Redis and save DUMP-RDB
  * 3. From DUMP-RDB generate Json (out2.json)
  * 4. assert_json_equal(out1.json , out2.json)
  *
  * The test will run twice against:
  * A. old Redis target (no RESTORE)
  * B. new Redis target (RESTORE)
- * Note: This test cannot tell if actually run RESTORE command in the background.
- *       test_rdb_to_resp.c verifies that RESTORE command is used only when it should.
+ *
+ * Note: This test cannot tell if the parser really run RESTORE command in
+ * the background. test_rdb_to_resp.c verifies that RESTORE command is used
+ * only when it should.
  */
 static void test_rdb_to_redis_common(const char *rdbfile, int pipelineDepth, int ignoreListOrder, const char *expJsonFile) {
-    RdbParser *parser;
-    RdbStatus status;
 
     /* test one time without RESTORE, Playing against old version.
      * and one time with RESTORE, Playing against new version. */
     for (int isRestore = 0 ; isRestore <= 1 ; ++isRestore) {
 
-        /* old-target (not RESTORE) VS. new-target (RESTORE) */
-        const char *dstRedisVersion = (isRestore == 0) ? "0.0.1" : "45.67.89";
-
+        /* flushall */
         runSystemCmd("%s/redis-cli -p %d flushall > /dev/null", redisInstallFolder, redisPort);
 
-        RdbxToRespConf rdb2respConf = {
-                .supportRestore = 1,
-                .dstRedisVersion = dstRedisVersion,
-        };
-        RdbxToJsonConf rdb2jsonConf = {RDB_LEVEL_DATA, RDBX_CONV_JSON_ENC_PLAIN, 1, 1};
+        /* 1. Convert RDB to Json (out1.json) */
+        rdb_to_json(rdbfile, TMP_FOLDER("out1.json"));
 
-        /* RDB to JSON */
-        parser = RDB_createParserRdb(NULL);
-        RDB_setLogLevel(parser, RDB_LOG_ERR);
-        assert_non_null(RDBX_createReaderFile(parser, rdbfile));
-        assert_non_null(RDBX_createHandlersToJson(parser,
-                                                  TMP_FOLDER("out1.json"),
-                                                  &rdb2jsonConf));
-        while ((status = RDB_parse(parser)) == RDB_STATUS_WAIT_MORE_DATA);
-        assert_int_equal(status, RDB_STATUS_OK);
-        RDB_deleteParser(parser);
-
-        /* RDB to TCP */
-        RdbxToResp *rdbToResp;
-        parser = RDB_createParserRdb(NULL);
-        RDB_setLogLevel(parser, RDB_LOG_ERR);
-        assert_non_null(RDBX_createReaderFile(parser, rdbfile));
-        assert_non_null(rdbToResp = RDBX_createHandlersToResp(parser, &rdb2respConf));
-
-        RdbxRespToRedisLoader *r2r = RDBX_createRespToRedisTcp(parser,
-                                                               rdbToResp,
-                                                               "127.0.0.1",
-                                                               redisPort);
-        assert_non_null(r2r);
-        RDBX_setPipelineDepth(r2r, pipelineDepth);
-        RDB_setLogLevel(parser, RDB_LOG_ERR);
-        while ((status = RDB_parse(parser)) == RDB_STATUS_WAIT_MORE_DATA);
-        assert_int_equal(status, RDB_STATUS_OK);
-        RDB_deleteParser(parser);
-
-        /* DUMP-RDB from Redis */
+        /* 2. Upload RDB against Redis and save DUMP-RDB */
+        rdb_to_tcp(rdbfile, pipelineDepth, isRestore);
         runSystemCmd("%s/redis-cli -p %d save > /dev/null", redisInstallFolder, redisPort);
 
-        /* DUMP-RDB to JSON */
-        parser = RDB_createParserRdb(NULL);
-        RDB_setLogLevel(parser, RDB_LOG_ERR);
-        assert_non_null(RDBX_createReaderFile(parser, TMP_FOLDER("dump.rdb")));
-        assert_non_null(RDBX_createHandlersToJson(parser,
-                                                  TMP_FOLDER("out2.json"),
-                                                  &rdb2jsonConf));
-        while ((status = RDB_parse(parser)) == RDB_STATUS_WAIT_MORE_DATA);
-        assert_int_equal(status, RDB_STATUS_OK);
-        RDB_deleteParser(parser);
+        /* 3. From DUMP-RDB generate Json (out2.json) */
+        rdb_to_json(TMP_FOLDER("dump.rdb"), TMP_FOLDER("out2.json"));
 
-        /* Json (from DUMP-RDB) vs. expected Json */
+        /* 4. Verify that dumped RDB and converted to json is as expected  */
         if (expJsonFile)
             assert_json_equal(expJsonFile, TMP_FOLDER("out2.json"), 0);
         else
             assert_json_equal(TMP_FOLDER("out1.json"), TMP_FOLDER("out2.json"), ignoreListOrder);
-
     }
 }
 
@@ -194,9 +191,13 @@ static void test_rdb_to_redis_policy_lfu(void **state) {
 
 static void test_rdb_to_redis_policy_lru(void **state) {
     UNUSED(state);
-    UNUSED(state);
     test_rdb_to_redis_common(DUMP_FOLDER("mem_policy_lru.rdb"), 1, 1,
                              DUMP_FOLDER("mem_policy_lru.json"));
+}
+
+static void test_rdb_to_redis_function(void **state) {
+    UNUSED(state);
+    test_rdb_to_redis_common(DUMP_FOLDER("function.rdb"), 1, 1, NULL);
 }
 
 /* iff 'delKeyBeforeWrite' is not set, then the parser will return an error on
@@ -285,6 +286,7 @@ int group_rdb_to_redis() {
             cmocka_unit_test_setup(test_rdb_to_redis_multiple_lists_strings_pipeline_depth_1, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_del_before_write, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_multiple_dbs, setupTest),
+            cmocka_unit_test_setup(test_rdb_to_redis_function, setupTest),
     };
 
     setupRedisServer();

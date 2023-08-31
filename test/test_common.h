@@ -28,7 +28,6 @@ void runSystemCmdRetry(int seconds, const char *cmdFormat, ...);
 
 /* assert */
 void assert_json_equal(const char *f1, const char *f2, int ignoreListOrder);
-void assert_json_file(const char *filename, char *expPayload, char *charsToSkip);
 
 /* setup external Redis Server */
 extern int redisPort;

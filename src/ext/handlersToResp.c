@@ -45,8 +45,7 @@ struct RdbxToResp {
 
     RdbxToRespConf conf;
 
-    /* Init to 2. Attempted to be released twice on termination by
-     * raw handler and data handler */
+    /* Init to 3. Attempted to be released three times on termination */
     int refcount;
 
     RdbParser *parser;
@@ -200,7 +199,6 @@ static RdbRes toRespStartRdb(RdbParser *p, void *userData, int rdbVersion) {
     return RDB_OK;
 }
 
-/* TODO: support expiry */
 static RdbRes toRespNewKey(RdbParser *p, void *userData, RdbBulk key, RdbKeyInfo *info) {
     UNUSED(info);
     RdbxToResp *ctx = userData;
@@ -365,6 +363,21 @@ static RdbRes toRespEndRdb(RdbParser *p, void *userData) {
     return (RdbRes) RDBX_ERR_RESP_WRITE;
 }
 
+static RdbRes toRespFunction(RdbParser *p, void *userData, RdbBulk func) {
+    char funcLenStr[32];
+
+    int funcLen = RDB_bulkLen(p, func);
+
+    struct iovec iov[4];
+    IOV_CONST(&iov[0], "*4\r\n$8\r\nFUNCTION\r\n$4\r\nLOAD\r\n$7\r\nREPLACE\r\n$");
+    /* write member */
+    IOV_VALUE(&iov[1], funcLen, funcLenStr);
+    IOV_STRING(&iov[2], func, funcLen);
+    IOV_CONST(&iov[3], "\r\n");
+    return writevWrap( (RdbxToResp *) userData, iov, 4, 1, 1);
+
+}
+
 /*** Handling raw ***/
 
 static RdbRes toRespRawBegin(RdbParser *p, void *userData, size_t size) {
@@ -489,12 +502,9 @@ _LIBRDB_API RdbxToResp *RDBX_createHandlersToResp(RdbParser *p, RdbxToRespConf *
         return NULL;
 
     memset(ctx, 0, sizeof(RdbxToResp));
-
-    if (conf)
-        ctx->conf = *conf;
-
-    ctx->refcount = 2;
+    if (conf) ctx->conf = *conf;
     ctx->parser = p;
+    ctx->refcount = 2;
 
     RdbHandlersDataCallbacks dataCb;
     memset(&dataCb, 0, sizeof(RdbHandlersDataCallbacks));
@@ -508,6 +518,7 @@ _LIBRDB_API RdbxToResp *RDBX_createHandlersToResp(RdbParser *p, RdbxToRespConf *
     dataCb.handleHashField = toRespHash;
     dataCb.handleSetMember = toRespSet;
     dataCb.handleEndRdb = toRespEndRdb;
+    dataCb.handleFunction = toRespFunction;
     RDB_createHandlersData(p, &dataCb, ctx, deleteRdbToRespCtx);
 
     RdbHandlersRawCallbacks rawCb;
@@ -519,6 +530,7 @@ _LIBRDB_API RdbxToResp *RDBX_createHandlersToResp(RdbParser *p, RdbxToRespConf *
     rawCb.handleBegin = toRespRawBegin;
     rawCb.handleEnd = toRespRawFragEnd;
     RDB_createHandlersRaw(p, &rawCb, ctx, deleteRdbToRespCtx);
+
     return ctx;
 }
 

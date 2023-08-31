@@ -15,7 +15,6 @@ static void deleteFilterKeyCtx(RdbParser *p, void *data) {
     if (ctx->regexInitialized) {
         regfree(&ctx->regex_compiled);
     }
-
     RDB_free(p, ctx);
 }
 
@@ -119,7 +118,7 @@ RdbxFilterKey *RDBX_createHandlersFilterKey(RdbParser *p,
 
     ctx->regexInitialized = 0;
 
-    // compile the regular expression
+    /* compile the regular expression */
     if (regcomp(&ctx->regex_compiled, keyRegex, REG_EXTENDED) != 0) {
         RDB_reportError(p, (RdbRes) RDBX_ERR_FILTER_FAILED_COMPILE_REGEX,
                         "FilterKey: Error compiling regular expression");
@@ -140,6 +139,7 @@ RdbxFilterKey *RDBX_createHandlersFilterKey(RdbParser *p,
     }
 
     if (RDB_getNumHandlers(p, RDB_LEVEL_STRUCT)>0) {
+        /* string */
         callbacks.structCb.handleString = filterString;
         /* list */
         callbacks.structCb.handleListLP = filterListLP;
