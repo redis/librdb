@@ -43,7 +43,7 @@ static void respFileWriteDelete(void *context) {
     }
 }
 
-RdbxRespToFileWriter *RDBX_createRespFileWriter(RdbParser *p, RdbxToResp *rdbToResp, const char *filePath) {
+RdbxRespToFileWriter *RDBX_createRespToFileWriter(RdbParser *p, RdbxToResp *rdbToResp, const char *filePath) {
     RdbxRespToFileWriter *ctx;
     FILE *filePtr;
 

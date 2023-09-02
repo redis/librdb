@@ -9,7 +9,7 @@ extern "C" {
 #endif
 
 /* Incomplete structures */
-typedef struct RdbxRespFileWriter RdbxRespFileWriter;
+typedef struct RdbxRespToFileWriter RdbxRespToFileWriter;
 typedef struct RdbxReaderFile RdbxReaderFile;
 typedef struct RdbxReaderFileDesc RdbxReaderFileDesc;
 typedef struct RdbxFilterKey RdbxFilterKey;
@@ -120,7 +120,7 @@ _LIBRDB_API RdbxToResp *RDBX_createHandlersToResp(RdbParser *, RdbxToRespConf *)
  *
  * Used by:  RDBX_createRespToRedisTcp
  *           RDBX_createRespToRedisFd
- *           RDBX_createRespFileWriter
+ *           RDBX_createRespToFileWriter
  *           <user-defined-handlers>
  ****************************************************************/
 
@@ -137,11 +137,11 @@ _LIBRDB_API void RDBX_attachRespWriter(RdbxToResp *rdbToResp, RdbxRespWriter *wr
 
 
 /****************************************************************
- * Create RESP File Writer
+ * Create RESP to File Writer
  *
  * If provided path is NULL then write stdout
  ****************************************************************/
-_LIBRDB_API RdbxRespFileWriter *RDBX_createRespFileWriter(RdbParser *p,
+_LIBRDB_API RdbxRespToFileWriter *RDBX_createRespToFileWriter(RdbParser *p,
                                                           RdbxToResp *rdbToResp,
                                                           const char* filepath);
 

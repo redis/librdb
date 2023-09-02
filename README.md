@@ -184,7 +184,7 @@ core library vs. extension library ("RDB" vs "RDBX").
       RdbParser *parser = RDB_createParserRdb(NULL);
       RDBX_createReaderFile(parser, rdbfile);
       RdbxToResp *rdbToResp = RDBX_createHandlersToResp(parser, NULL);
-      RDBX_createRespFileWriter(parser, rdbToResp, "./rdbDump.resp");
+      RDBX_createRespToFileWriter(parser, rdbToResp, "./rdbDump.resp");
       RDB_parse(parser);
       RDB_deleteParser(parser);
 

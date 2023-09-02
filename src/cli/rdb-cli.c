@@ -194,7 +194,7 @@ static RdbRes formatResp(RdbParser *parser, char *input, int argc, char **argv) 
         return RDB_ERR_GENERAL;
 
 
-    if (RDBX_createRespFileWriter(parser, rdbToResp, output) == NULL)
+    if (RDBX_createRespToFileWriter(parser, rdbToResp, output) == NULL)
         return RDB_ERR_GENERAL;
 
     return RDB_OK;
