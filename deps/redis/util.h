@@ -1,5 +1,5 @@
-#ifndef LIBRDB_UTILS_H
-#define LIBRDB_UTILS_H
+#ifndef LIBRDB_UTIL_H
+#define LIBRDB_UTIL_H
 
 #include <stdint.h>
 
@@ -19,4 +19,4 @@ int ull2string(char *s, size_t len, unsigned long long value);
 int lpStringToInt64(const char *s, unsigned long slen, int64_t *value);
 unsigned int getEnvVar(const char* varName, unsigned int defaultVal);
 
-#endif /*LIBRDB_UTILS_H*/
+#endif /*LIBRDB_UTIL_H*/
