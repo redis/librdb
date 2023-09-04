@@ -64,11 +64,11 @@ typedef enum RdbxToJsonEnc {
 } RdbxToJsonEnc;
 
 typedef struct RdbxToJsonConf {
-    RdbHandlersLevel level;
-    RdbxToJsonEnc encoding;
-    int includeAuxField;
-    int includeFunc;
-    int flatten; /* 0=db hirarchy preserved 1=flatten json */
+    RdbHandlersLevel level;  /* Parsing depth (raw, structures or data-types) */
+    RdbxToJsonEnc encoding;  /* Encoding format for the resulting JSON */
+    int includeAuxField;     /* Set to include auxiliary fields in JSON output */
+    int includeFunc;         /* Set to include functions in JSON output */
+    int flatten;             /* Set to create a flattened JSON structure */
 } RdbxToJsonConf;
 
 _LIBRDB_API RdbxToJson *RDBX_createHandlersToJson(RdbParser *p,
@@ -92,8 +92,11 @@ _LIBRDB_API RdbxFilterKey *RDBX_createHandlersFilterKey(RdbParser *p,
  ****************************************************************/
 
 typedef struct RdbxToRespConf {
+    /* delKeyBeforeWrite - will add preceding DEL command before each new key. If
+     * the keys are created with RESTORE commands, then instead of sending another
+     * DEL command, it will be optimized by attaching `REPLACE` flag to the
+     * RESTORE command. */
     int delKeyBeforeWrite;
-    int applySelectDbCmds;  /* if not configured SELECT commands, all keys will be flatten into a single db */
 
     /* If supportRestore, then data-types will be translated to RESTORE with
      * raw data instead of data-types commands. This is a performance optimization
@@ -121,7 +124,7 @@ _LIBRDB_API RdbxToResp *RDBX_createHandlersToResp(RdbParser *, RdbxToRespConf *)
  * Used by:  RDBX_createRespToRedisTcp
  *           RDBX_createRespToRedisFd
  *           RDBX_createRespToFileWriter
- *           <user-defined-handlers>
+ *           <user-defined-writer>
  ****************************************************************/
 
 typedef struct RdbxRespWriter {
@@ -129,7 +132,7 @@ typedef struct RdbxRespWriter {
     void (*delete)(void *ctx);
 
     /* return 0 on success. Otherwise 1 */
-    int (*writev) (void *ctx, struct iovec *ioVec, int count, int startCmd, int endCmd);
+    int (*writev) (void *ctx, struct iovec *ioVec, int iovCnt, int startCmd, int endCmd);
     int (*flush) (void *ctx);
 } RdbxRespWriter;
 
@@ -139,17 +142,17 @@ _LIBRDB_API void RDBX_attachRespWriter(RdbxToResp *rdbToResp, RdbxRespWriter *wr
 /****************************************************************
  * Create RESP to File Writer
  *
- * If provided path is NULL then write stdout
+ * If provided path is NULL then write to stdout
  ****************************************************************/
 _LIBRDB_API RdbxRespToFileWriter *RDBX_createRespToFileWriter(RdbParser *p,
                                                           RdbxToResp *rdbToResp,
                                                           const char* filepath);
 
 /****************************************************************
- * Create RESP to Redis TCP connection
+ * Create RESP to Redis TCP/FD connection
  *
  * Can configure pipeline depth of transmitted RESP commands. Set
- * to 0 if to use default.
+ * to 0 to use default.
  ****************************************************************/
 _LIBRDB_API RdbxRespToRedisLoader *RDBX_createRespToRedisTcp(RdbParser *p,
                                                             RdbxToResp *rdbToResp,
