@@ -721,7 +721,7 @@ static void printParserState(RdbParser *p) {
     RDB_log(p, RDB_LOG_ERR, "Parser error message: %s", RDB_getErrorMessage(p));
     RDB_log(p, RDB_LOG_ERR, "Parser error code: %d", RDB_getErrorCode(p));
     RDB_log(p, RDB_LOG_ERR, "Parser element func name: %s", peInfo[p->parsingElement].funcname);
-    RDB_log(p, RDB_LOG_ERR, "Parser element func description: %s", peInfo[p->parsingElement].funcname);
+    RDB_log(p, RDB_LOG_ERR, "Parser element func description: %s", peInfo[p->parsingElement].description);
     RDB_log(p, RDB_LOG_ERR, "Parser element state:%d", p->elmCtx.state);
     //bulkPoolPrintDbg(p);
 }
