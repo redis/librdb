@@ -167,7 +167,6 @@ void cleanupRedisServer() {
 }
 
 void setupRedisServer() {
-    int status = 0;
     pid_t pid = fork();
     assert_int_not_equal (pid, -1);
 
@@ -187,7 +186,6 @@ void setupRedisServer() {
         perror("execl");
         exit(1);
     } else { /* parent */
-        UNUSED(status);
 
         /* wait to server to become available */
         runSystemCmdRetry(5, "%s/redis-cli -p %d ping 2>&1 | grep -i pong > /dev/null ", redisInstallFolder, redisPort);
