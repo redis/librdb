@@ -2,6 +2,16 @@
 #include <malloc.h>
 #include "test_common.h"
 
+ /* To enhance the clarity of our tests and keep expected outputs concise, a
+  * filter is defined to remove the initial SELECT command that precedes all
+  * RESP outputs when parsing RDB to RESP */
+RdbRes dontPropHandleNewDb(RdbParser *p, void *userData,  int dbnum) {
+    UNUSED(p, userData, dbnum);
+    return RDB_OK_DONT_PROPAGATE;
+}
+
+RdbHandlersDataCallbacks filterSelectCmd = {.handleNewDb = dontPropHandleNewDb};
+
 /* This group of tests only partially check the RESP protocol output of
  * the parser by comparing the prefix of the output rather than maintaining
  * hardcoded and non-readable payload in the test. It is sufficient because test
@@ -35,6 +45,8 @@ static void testRdbToRespCommon(const char *rdbfilename,
     assert_non_null(RDBX_createReaderFile(p, rdbfile));
     assert_non_null(rdbToResp = RDBX_createHandlersToResp(p, conf));
     assert_non_null(writer = RDBX_createRespToFileWriter(p, rdbToResp, respfile));
+    assert_non_null(RDB_createHandlersData(p, &filterSelectCmd, NULL, NULL));
+
     while ((status = RDB_parse(p)) == RDB_STATUS_WAIT_MORE_DATA);
     assert_int_equal( status, RDB_STATUS_OK);
 

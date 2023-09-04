@@ -509,7 +509,7 @@ _LIBRDB_API RdbxToResp *RDBX_createHandlersToResp(RdbParser *p, RdbxToRespConf *
     RdbHandlersDataCallbacks dataCb;
     memset(&dataCb, 0, sizeof(RdbHandlersDataCallbacks));
     dataCb.handleStartRdb = toRespStartRdb;
-    dataCb.handleNewDb = (ctx->conf.applySelectDbCmds) ? toRespNewDb : NULL;
+    dataCb.handleNewDb = toRespNewDb;
     dataCb.handleNewKey = toRespNewKey;
     dataCb.handleEndKey = toRespEndKey;
     dataCb.handleStringValue = toRespString;
