@@ -9,7 +9,7 @@
 #include "../api/librdb-ext-api.h" /* RDB library extension header */
 
 #define UNUSED(...) unused( (void *) NULL, ##__VA_ARGS__);
-inline void unused(void *dummy, ...) { (void)(dummy);}
+static inline void unused(void *dummy, ...) { (void)(dummy);}
 
 #define QUOTE(...) #__VA_ARGS__
 

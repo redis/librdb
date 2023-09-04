@@ -6,7 +6,7 @@
 
 #ifndef UNUSED
 #define UNUSED(...) unused( (void *) NULL, ##__VA_ARGS__);
-inline void unused(void *dummy, ...) { (void)(dummy);}
+static inline void unused(void *dummy, ...) { (void)(dummy);}
 #endif
 
 typedef enum RespReplyType {

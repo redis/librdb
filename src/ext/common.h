@@ -9,7 +9,7 @@
 #include "../../api/librdb-ext-api.h"
 
 #define UNUSED(...) unused( (void *) NULL, ##__VA_ARGS__);
-inline void unused(void *dummy, ...) { (void)(dummy);}
+static inline void unused(void *dummy, ...) { (void)(dummy);}
 
 #ifdef __GNUC__
 #define likely(x)       __builtin_expect(!!(x), 1)

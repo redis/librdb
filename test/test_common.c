@@ -167,7 +167,7 @@ void cleanupRedisServer() {
 }
 
 void setupRedisServer() {
-    int status;
+    int status = 0;
     pid_t pid = fork();
     assert_int_not_equal (pid, -1);
 
