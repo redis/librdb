@@ -19,19 +19,19 @@
 
 #define RDB_OPCODE_MAX 255
 
-#define UNUSED(...) unused( (void *) NULL, ##__VA_ARGS__);
+#define UNUSED(...) unused( (void *) NULL, __VA_ARGS__);
 static inline void unused(void *dummy, ...) { (void)(dummy);}
 
 /* Used by the parser to call all registered handlers, across levels */
 #define CALL_COMMON_HANDLERS_CB(p, callback, ...)  \
-    __CALL_COMMON_HANDLERS_CB(p, callback, h->userData, ##__VA_ARGS__)
+    __CALL_COMMON_HANDLERS_CB(p, callback, h->userData, __VA_ARGS__)
 #define CALL_COMMON_HANDLERS_CB_NO_ARGS(p, callback) \
     __CALL_COMMON_HANDLERS_CB(p, callback, h->userData)
 #define __CALL_COMMON_HANDLERS_CB(p, callback, ...) \
   do { \
     for (RdbHandlers *h = p->firstHandlers; h ; h = h->next) { \
         if (h->h.common.callback) { \
-            p->errorCode = h->h.common.callback(p, ##__VA_ARGS__); \
+            p->errorCode = h->h.common.callback(p, __VA_ARGS__); \
             if (unlikely(p->errorCode != RDB_OK)) { \
                 if (p->errorCode == RDB_OK_DONT_PROPAGATE) { \
                     p->errorCode = RDB_OK; \
@@ -49,7 +49,7 @@ static inline void unused(void *dummy, ...) { (void)(dummy);}
 
 /* Used by the parser to call all registered handlers, for given level */
 #define CALL_HANDLERS_CB(p, finalize_cmd, lvl,level_and_callback, ...) \
-    __CALL_HANDLERS_CB(p, finalize_cmd, lvl,level_and_callback, h->userData, ##__VA_ARGS__)
+    __CALL_HANDLERS_CB(p, finalize_cmd, lvl,level_and_callback, h->userData, __VA_ARGS__)
 #define CALL_HANDLERS_CB_NO_ARGS(p, finalize_cmd, lvl,level_and_callback) \
     __CALL_HANDLERS_CB(p, finalize_cmd, lvl,level_and_callback, h->userData)
 #define __CALL_HANDLERS_CB(p, finalize_cmd, lvl,level_and_callback, ...) \
@@ -57,7 +57,7 @@ static inline void unused(void *dummy, ...) { (void)(dummy);}
     RdbHandlers *h = p->handlers[lvl]; \
     for (int ii = 0 ; ii < p->numHandlers[lvl] ; ++ii) { \
         if (h->h.level_and_callback) { \
-            p->errorCode = h->h.level_and_callback(p, ##__VA_ARGS__);\
+            p->errorCode = h->h.level_and_callback(p, __VA_ARGS__);\
             if (unlikely(p->errorCode != RDB_OK)) { \
                 if (p->errorCode == RDB_OK_DONT_PROPAGATE) { \
                     p->errorCode = RDB_OK; \

@@ -8,10 +8,8 @@
 #include "../api/librdb-api.h"  /* RDB library header */
 #include "../api/librdb-ext-api.h" /* RDB library extension header */
 
-#define UNUSED(...) unused( (void *) NULL, ##__VA_ARGS__);
+#define UNUSED(...) unused( (void *) NULL, __VA_ARGS__);
 static inline void unused(void *dummy, ...) { (void)(dummy);}
-
-#define QUOTE(...) #__VA_ARGS__
 
 #define DUMP_FOLDER(file) "./test/dumps/"file
 #define TMP_FOLDER(file) "./test/tmp/"file

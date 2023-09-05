@@ -16,7 +16,7 @@ REDIS_SOURCES = $(notdir $(basename $(wildcard ../../deps/redis/*.c)))
 REDIS_OBJECTS = $(patsubst %,../../deps/redis/%.o,$(REDIS_SOURCES))
 
 EXTERN_RP_CONFIG=
-CC       = gcc
+
 STD      = -std=c99
 STACK    = -fstack-protector-all -Wstack-protector
 WARNS    = -Wall -Wextra -pedantic -Werror

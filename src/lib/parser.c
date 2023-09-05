@@ -16,6 +16,7 @@
 #include <stdarg.h>
 #include <string.h>
 #include <arpa/inet.h>
+#include <time.h>
 #include "../../deps/redis/crc64.h"
 #include "bulkAlloc.h"
 #include "parser.h"

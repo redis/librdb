@@ -232,12 +232,12 @@ void bulkPoolPrintDbg(RdbParser *p) {
     printf("  queue address: %p\n", (void *) pool->queue);
     printf("  queue read address: %p\n", (void *) pool->qread);
     printf("  queue write address: %p\n", (void *) pool->qwrite);
-    printf("  stack start address: %p\n", pool->stack->buf);
-    printf("  stack write address: %p\n", pool->stack->writePtr);
+    printf("  stack start address: %p\n", (void *) pool->stack->buf);
+    printf("  stack write address: %p\n", (void *) pool->stack->writePtr);
 
     printf("BulkPool - Queue items: \n");
     for (BulkInfo *iter = pool->queue ; iter != pool->qwrite ; iter = iter->next)
-        printf(" - [allocType=%d] [written=%lu] %p: \"0x%X 0x%X ...\":\"%s\" (len=%lu) \n",
+        printf(" - [allocType=%d] [written=%zu] %p: \"0x%X 0x%X ...\":\"%s\" (len=%zu) \n",
                iter->bulkType, iter->written, iter->ref,
                ((unsigned char *)iter->ref)[0], ((unsigned char *)iter->ref)[1],
                (unsigned char *)iter->ref, iter->len);
