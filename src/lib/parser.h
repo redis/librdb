@@ -19,7 +19,7 @@
 #define RAW_AGG_FIRST_STATIC_BUFF_LEN (1024*32)
 
 #define UNUSED(...) unused( (void *) NULL, ##__VA_ARGS__);
-inline void unused(void *dummy, ...) { (void)(dummy);}
+static inline void unused(void *dummy, ...) { (void)(dummy);}
 
 #define CALL_COMMON_HANDLERS_CB(p, callback, ...) \
   do { \
@@ -359,27 +359,27 @@ struct RdbHandlers {
 
 /* before each handler's callback with RdbBulk, need to register its corresponding
  * BulkInfo (See comment at struct AppCallbackCtx) */
-inline void registerAppBulkForNextCb(RdbParser *p, BulkInfo *binfo) {
+static inline void registerAppBulkForNextCb(RdbParser *p, BulkInfo *binfo) {
     assert(p->appCbCtx.numBulks < MAX_APP_BULKS);
     p->appCbCtx.bulks[p->appCbCtx.numBulks++] = binfo;
 }
 
 extern void bulkPoolFlush(RdbParser *p); /* avoid cyclic headers inclusion */
 
-inline RdbStatus updateElementState(RdbParser *p, int newState) {
+static inline RdbStatus updateElementState(RdbParser *p, int newState) {
     bulkPoolFlush(p);
     p->elmCtx.state = newState;
     return RDB_STATUS_OK;
 }
 
-inline RdbStatus nextParsingElementState(RdbParser *p, ParsingElementType next, int st) {
+static inline RdbStatus nextParsingElementState(RdbParser *p, ParsingElementType next, int st) {
     bulkPoolFlush(p);
     p->elmCtx.state = st;
     p->parsingElement = next;
     return RDB_STATUS_OK;
 }
 
-inline RdbStatus nextParsingElement(RdbParser *p, ParsingElementType next) {
+static inline RdbStatus nextParsingElement(RdbParser *p, ParsingElementType next) {
     bulkPoolFlush(p);
     p->elmCtx.state = 0;
     p->parsingElement = next;
@@ -396,7 +396,7 @@ RdbStatus rdbLoadLen(RdbParser *p, int *isencoded, uint64_t *lenptr, unsigned ch
 RdbStatus rdbLoadInteger(RdbParser *p, int enctype, AllocTypeRq type, char *refBuf, BulkInfo **out);
 RdbStatus rdbLoadString(RdbParser *p, AllocTypeRq type, char *refBuf, BulkInfo **out);
 RdbStatus rdbLoadLzfString(RdbParser *p, AllocTypeRq type, char *refBuf, BulkInfo **out);
-inline RdbStatus rdbLoad(RdbParser *p, size_t len, AllocTypeRq type, char *refBuf, BulkInfo **out) {
+static inline RdbStatus rdbLoad(RdbParser *p, size_t len, AllocTypeRq type, char *refBuf, BulkInfo **out) {
     return p->readRdbFunc(p, len, type, refBuf, out);
 }
 
