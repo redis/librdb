@@ -1,5 +1,4 @@
 #include <string.h>
-#include <malloc.h>
 #include "test_common.h"
 
  /* To enhance the clarity of our tests and keep expected outputs concise, a

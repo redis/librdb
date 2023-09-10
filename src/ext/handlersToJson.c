@@ -38,32 +38,30 @@ struct RdbxToJson {
     unsigned int count_db;
 };
 
-#define ouput_fprintf(ctx, ...) fprintf(ctx->outfile, ##__VA_ARGS__)
-
 static void outputPlainEscaping(RdbxToJson *ctx, char *p, size_t len) {
     while(len--) {
         switch(*p) {
             case '\\':
             case '"':
-                ouput_fprintf(ctx, "\\%c", *p); break;
-            case '\n': ouput_fprintf(ctx, "\\n"); break;
-            case '\f': ouput_fprintf(ctx, "\\f"); break;
-            case '\r': ouput_fprintf(ctx, "\\r"); break;
-            case '\t': ouput_fprintf(ctx, "\\t"); break;
-            case '\b': ouput_fprintf(ctx, "\\b"); break;
+                fprintf(ctx->outfile, "\\%c", *p); break;
+            case '\n': fprintf(ctx->outfile, "\\n"); break;
+            case '\f': fprintf(ctx->outfile, "\\f"); break;
+            case '\r': fprintf(ctx->outfile, "\\r"); break;
+            case '\t': fprintf(ctx->outfile, "\\t"); break;
+            case '\b': fprintf(ctx->outfile, "\\b"); break;
             default:
                 /* TODO: formalize rdb2json supported outputs */
-                //ouput_fprintf(ctx, (*p >= 0 && *p <= 0x1f) ? "\\u%04x" : "%c",*p);
-                ouput_fprintf(ctx, (isprint(*p)) ? "%c" : "\\x%02x", (unsigned char)*p);
+                //fprintf(ctx->outfile, (*p >= 0 && *p <= 0x1f) ? "\\u%04x" : "%c",*p);
+                fprintf(ctx->outfile, (isprint(*p)) ? "%c" : "\\x%02x", (unsigned char)*p);
         }
         p++;
     }
 }
 
 static void outputQuotedEscaping(RdbxToJson *ctx, char *data, size_t len) {
-    ouput_fprintf(ctx, "\"");
+    fprintf(ctx->outfile, "\"");
     ctx->encfunc(ctx, data, len);
-    ouput_fprintf(ctx, "\"");
+    fprintf(ctx->outfile, "\"");
 }
 
 static void deleteRdbToJsonCtx(RdbParser *p, void *data) {
@@ -131,9 +129,9 @@ static RdbRes handlingAuxField(RdbParser *p, void *userData, RdbBulk auxkey, Rdb
 
     /* output json part */
     outputQuotedEscaping(ctx, auxkey, RDB_bulkLen(p, auxkey));
-    ouput_fprintf(ctx, ":");
+    fprintf(ctx->outfile, ":");
     outputQuotedEscaping(ctx, auxval, RDB_bulkLen(p, auxval));
-    ouput_fprintf(ctx, ",\n");
+    fprintf(ctx->outfile, ",\n");
 
     return RDB_OK;
 }
@@ -145,11 +143,11 @@ static RdbRes toJsonEndKey(RdbParser *p, void *userData) {
     switch(ctx->state) {
         case R2J_IN_LIST:
         case R2J_IN_SET:
-            ouput_fprintf(ctx, "]");
+            fprintf(ctx->outfile, "]");
             break;
         case R2J_IN_HASH:
         case R2J_IN_ZSET:
-            ouput_fprintf(ctx, "}");
+            fprintf(ctx->outfile, "}");
             break;
         case R2J_IN_KEY:
         case R2J_IN_STRING:
@@ -184,9 +182,9 @@ static RdbRes toJsonNewKey(RdbParser *p, void *userData, RdbBulk key, RdbKeyInfo
     ctx->state = R2J_IN_KEY;
 
     /* output json part */
-    ouput_fprintf(ctx, "%s    ", (++ctx->count_keys == 1) ? "" : ",\n");
+    fprintf(ctx->outfile, "%s    ", (++ctx->count_keys == 1) ? "" : ",\n");
     outputQuotedEscaping(ctx, key, RDB_bulkLen(p, key));
-    ouput_fprintf(ctx, ":");
+    fprintf(ctx->outfile, ":");
 
     return RDB_OK;
 }
@@ -196,13 +194,13 @@ static RdbRes toJsonNewDb(RdbParser *p, void *userData, int db) {
     RdbxToJson *ctx = userData;
 
     if (ctx->state == R2J_IDLE) {
-        if (!ctx->conf.flatten) ouput_fprintf(ctx, "{\n");
+        if (!ctx->conf.flatten) fprintf(ctx->outfile, "{\n");
     } else if (ctx->state == R2J_IN_DB) {
         /* output json part */
         if (!ctx->conf.flatten) {
-            ouput_fprintf(ctx, "\n},{\n");
+            fprintf(ctx->outfile, "\n},{\n");
         } else {
-            ouput_fprintf(ctx, ",\n");
+            fprintf(ctx->outfile, ",\n");
         }
     } else {
         RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
@@ -227,7 +225,7 @@ static RdbRes toJsonNewRdb(RdbParser *p, void *userData, int rdbVersion) {
         return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
     }
 
-    if (!ctx->conf.flatten) ouput_fprintf(ctx, "[");
+    if (!ctx->conf.flatten) fprintf(ctx->outfile, "[");
 
     return RDB_OK;
 }
@@ -238,14 +236,14 @@ static RdbRes toJsonEndRdb(RdbParser *p, void *userData) {
     if (ctx->state == R2J_IDLE) {
         RDB_log(p, RDB_LOG_WRN, "RDB is empty.");
     } else if (ctx->state == R2J_IN_DB) {
-        if (!ctx->conf.flatten) ouput_fprintf(ctx, "\n}");
+        if (!ctx->conf.flatten) fprintf(ctx->outfile, "\n}");
     } else {
         RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
                         "toJsonEndRdb(): Invalid state value: %d", ctx->state);
         return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
     }
 
-    if (!ctx->conf.flatten) ouput_fprintf(ctx, "]\n");
+    if (!ctx->conf.flatten) fprintf(ctx->outfile, "]\n");
 
     /* update new state */
     ctx->state = R2J_IDLE;
@@ -271,7 +269,7 @@ static RdbRes toJsonList(RdbParser *p, void *userData, RdbBulk item) {
     if (ctx->state == R2J_IN_KEY) {
 
         /* output json part */
-        ouput_fprintf(ctx, "[");
+        fprintf(ctx->outfile, "[");
         outputQuotedEscaping(ctx, item, RDB_bulkLen(p, item));
 
         /* update new state */
@@ -280,7 +278,7 @@ static RdbRes toJsonList(RdbParser *p, void *userData, RdbBulk item) {
     } else if (ctx->state == R2J_IN_LIST) {
 
         /* output json part */
-        ouput_fprintf(ctx, ",");
+        fprintf(ctx->outfile, ",");
         outputQuotedEscaping(ctx, item, RDB_bulkLen(p, item));
 
         /* state unchanged */
@@ -300,7 +298,7 @@ static RdbRes toJsonSet(RdbParser *p, void *userData, RdbBulk member) {
     if (ctx->state == R2J_IN_KEY) {
 
         /* output json part */
-        ouput_fprintf(ctx, "[");
+        fprintf(ctx->outfile, "[");
         outputQuotedEscaping(ctx, member, RDB_bulkLen(p, member));
 
         /* update new state */
@@ -309,7 +307,7 @@ static RdbRes toJsonSet(RdbParser *p, void *userData, RdbBulk member) {
     } else if (ctx->state == R2J_IN_SET) {
 
         /* output json part */
-        ouput_fprintf(ctx, ",");
+        fprintf(ctx->outfile, ",");
         outputQuotedEscaping(ctx, member, RDB_bulkLen(p, member));
 
         /* state unchanged */
@@ -329,17 +327,17 @@ static RdbRes toJsonHash(RdbParser *p, void *userData, RdbBulk field, RdbBulk va
     if (ctx->state == R2J_IN_KEY) {
 
         /* output json part */
-        ouput_fprintf(ctx, "{");
+        fprintf(ctx->outfile, "{");
         outputQuotedEscaping(ctx, field, RDB_bulkLen(p, field));
-        ouput_fprintf(ctx, ":");
+        fprintf(ctx->outfile, ":");
         outputQuotedEscaping(ctx, value, RDB_bulkLen(p, value));
         /* update new state */
         ctx->state = R2J_IN_HASH;
     } else if (ctx->state == R2J_IN_HASH) {
         /* output json part */
-        ouput_fprintf(ctx, ",");
+        fprintf(ctx->outfile, ",");
         outputQuotedEscaping(ctx, field, RDB_bulkLen(p, field));
-        ouput_fprintf(ctx, ":");
+        fprintf(ctx->outfile, ":");
         outputQuotedEscaping(ctx, field, RDB_bulkLen(p, field));
 
     } else {
@@ -354,9 +352,9 @@ static RdbRes toJsonHash(RdbParser *p, void *userData, RdbBulk field, RdbBulk va
 static RdbRes toJsonFunction(RdbParser *p, void *userData, RdbBulk func) {
     RdbxToJson *ctx = userData;
     /* output json part */
-    ouput_fprintf(ctx, "    \"Function_%d\":", ++ctx->count_functions);
+    fprintf(ctx->outfile, "    \"Function_%d\":", ++ctx->count_functions);
     outputQuotedEscaping( (RdbxToJson *) userData, func, RDB_bulkLen(p, func));
-    ouput_fprintf(ctx, ",\n");
+    fprintf(ctx->outfile, ",\n");
     return RDB_OK;
 }
 
@@ -367,9 +365,9 @@ static RdbRes toJsonStruct(RdbParser *p, void *userData, RdbBulk value) {
     RdbxToJson *ctx = userData;
 
     /* output json part */
-    ouput_fprintf(ctx, "[");
+    fprintf(ctx->outfile, "[");
     outputQuotedEscaping(ctx, value, RDB_bulkLen(p, value));
-    ouput_fprintf(ctx, "]");
+    fprintf(ctx->outfile, "]");
 
     return RDB_OK;
 }
@@ -388,14 +386,14 @@ static RdbRes toJsonRawBegin(RdbParser *p, void *userData, size_t size) {
     UNUSED(p);
     UNUSED(size);
     RdbxToJson *ctx = userData;
-    ouput_fprintf(ctx, "\"");
+    fprintf(ctx->outfile, "\"");
     return RDB_OK;
 }
 
 static RdbRes toJsonRawEnd(RdbParser *p, void *userData) {
     UNUSED(p);
     RdbxToJson *ctx = userData;
-    ouput_fprintf(ctx, "\"");
+    fprintf(ctx->outfile, "\"");
     return RDB_OK;
 }
 

@@ -8,7 +8,7 @@
 #include "../../api/librdb-api.h"
 #include "../../api/librdb-ext-api.h"
 
-#define UNUSED(...) unused( (void *) NULL, ##__VA_ARGS__);
+#define UNUSED(...) unused( (void *) NULL, __VA_ARGS__);
 static inline void unused(void *dummy, ...) { (void)(dummy);}
 
 #ifdef __GNUC__

@@ -33,7 +33,6 @@
 #include <string.h>
 #include <assert.h>
 #include "intset.h"
-#include "malloc.h"
 #include "endianconv.h"
 
 /* Note that these encodings are ordered, so:

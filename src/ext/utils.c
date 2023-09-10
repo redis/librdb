@@ -28,7 +28,7 @@ int printHexDump(const char *input, size_t len, char *obuf, int obuflen) {
                 buff[j] = '\0';
                 iout += snprintf(obuf + iout, obuflen - iout, "  %s\n", buff);
             }
-            iout += snprintf(obuf + iout, obuflen - iout, "%06lx ", i);
+            iout += snprintf(obuf + iout, obuflen - iout, "%06zx ", i);
             j = 0;
         }
 
