@@ -188,7 +188,7 @@
 #include <limits.h>
 #include "util.h"
 #include "ziplist.h"
-//#include "config.h"
+#include "config.h"
 #include "endianconv.h"
 //#include "redisassert.h"
 

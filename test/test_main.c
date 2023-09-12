@@ -143,28 +143,38 @@ int group_main(void) {
 /*************************** MAIN *******************************/
 int main(int argc, char *argv[]) {
     struct timeval st, et;
-    char *runGroupPrefix = NULL;
+    char *testFilter = NULL, *runGroupPrefix = NULL;
     int result = 0;
 
+    char *redisInstallFolder = getenv("LIBRDB_REDIS_FOLDER");
+
+    const char *USAGE ="<cmd> [-h|--help] [f|--redis-folder <folder>] [-g|--run-group <group-prefix>] [-t|--test-filter <filter>]";
     /* Parse command-line arguments */
     for (int i = 1; i < argc; i++) {
-        if ((strcmp(argv[i], "-f") == 0 || strcmp(argv[i], "--redis-folder") == 0) && i+1 < argc) {
+        if ((strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0)) {
+            printf("%s\n", USAGE);
+            exit(EXIT_SUCCESS);
+        } else if ((strcmp(argv[i], "-f") == 0 || strcmp(argv[i], "--redis-folder") == 0) && i+1 < argc) {
             redisInstallFolder = argv[++i];
         } else if ((strcmp(argv[i], "-g") == 0 || strcmp(argv[i], "--run-group") == 0) && i+1 < argc) {
             runGroupPrefix = argv[++i];
+        } else if ((strcmp(argv[i], "-t") == 0 || strcmp(argv[i], "--test-filter") == 0) && i+1 < argc) {
+            testFilter = argv[++i];
         } else {
-            printf("Invalid argument: %s\n", argv[i]);
+            printf("Invalid argument: %s\n%s\n", argv[i], USAGE);
             exit(EXIT_FAILURE);
         }
     }
 
-    /* another way to configure redis installation folder for external testing */
-    if (getenv("LIBRDB_REDIS_FOLDER"))
-        redisInstallFolder = getenv("LIBRDB_REDIS_FOLDER");
+    if (testFilter) cmocka_set_test_filter(testFilter);
 
     gettimeofday(&st,NULL);
 
     cleanTmpFolder();
+
+    /* Setup redis if configured */
+    if (redisInstallFolder)
+        setupRedisServer(redisInstallFolder);
 
     //setenv("LIBRDB_DEBUG_DATA", "1", 1); /* << to see parser states printouts */
 
@@ -197,6 +207,9 @@ int main(int argc, char *argv[]) {
 
     int elapsed = (et.tv_sec - st.tv_sec) * 1000 + (et.tv_usec - st.tv_usec) / 1000;
     printf("Total time: %d milliseconds\n", elapsed);
+
+    /* teardown redis if configured */
+    teardownRedisServer();
 
     printResPicture(result);
 

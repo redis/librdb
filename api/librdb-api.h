@@ -77,6 +77,7 @@ typedef enum RdbRes {
     RDB_ERR_PLAIN_SET_INVALID_STATE,
     RDB_ERR_QUICK_LIST_INVALID_STATE,
     RDB_ERR_SSTYPE_INVALID_STATE,
+    RDB_ERR_MODULE_INVALID_STATE,
     RDB_ERR_INVALID_BULK_ALLOC_TYPE,
     RDB_ERR_INVALID_BULK_CLONE_REQUEST,
     RDB_ERR_INVALID_BULK_LENGTH_REQUEST,
@@ -88,6 +89,7 @@ typedef enum RdbRes {
     RDB_ERR_PARSEBUF_AFTER_PAUSE_NOT_SAME_BUFF,
     RDB_ERR_MAX_RAW_LEN_EXCEEDED_FOR_KEY,
     RDB_ERR_EXCLUSIVE_RAW_HANDLERS,
+    RDB_ERR_MODULE_INVALID_WHEN_OPCODE,
 
     /*** api-ext error codes (see file: rp-ext-api.h) ***/
     _RDB_ERR_EXTENSION_FIRST = 0x1000,
@@ -208,15 +210,14 @@ typedef void (*RdbLoggerCB) (RdbLogLevel l, const char *msg);
 
 typedef struct RdbHandlersRawCallbacks {
     HANDLERS_COMMON_CALLBACKS
+    /* Callback on start of serializing module aux data (alternative to handleBegin) */
+    RdbRes (*handleBeginModuleAux)(RdbParser *p, void *userData, RdbBulk name, int encver, int when, size_t size);
     /* Callback on start of serializing value of a new key */
     RdbRes (*handleBegin)(RdbParser *p, void *userData, size_t size);
     /* Callback on one or more chunks of serialized value of a key */
     RdbRes (*handleFrag)(RdbParser *p, void *userData, RdbBulk frag);
     /* Callback on end of serializing value of a key */
     RdbRes (*handleEnd)(RdbParser *p, void *userData);
-
-    /*** TODO: RdbHandlersRawCallbacks: handleBeginModuleAux ***/
-    RdbRes (*handleBeginModuleAux)(RdbParser *p, void *userData, RdbBulk name, int encver, int when);
 } RdbHandlersRawCallbacks;
 
 /****************************************************************
@@ -256,6 +257,8 @@ typedef struct RdbHandlersStructCallbacks {
     RdbRes (*handleSetLP)(RdbParser *p, void *userData, RdbBulk listpack);
     /* Callback to handle function code */
     RdbRes (*handleFunction)(RdbParser *p, void *userData, RdbBulk func);
+    /* Callback to handle module. Currently only reports about the name & size. */
+    RdbRes (*handleModule)(RdbParser *p, void *userData, RdbBulk moduleName, size_t serializedSize);
 
     /*** TODO: RdbHandlersStructCallbacks: ***/
 
@@ -291,6 +294,9 @@ typedef struct RdbHandlersDataCallbacks {
     RdbRes (*handleSetMember)(RdbParser *p, void *userData, RdbBulk member);
     /* Callback to handle function code */
     RdbRes (*handleFunction)(RdbParser *p, void *userData, RdbBulk func);
+    /* Callback to handle module. Currently only reports about the name & size */
+    RdbRes (*handleModule)(RdbParser *p, void *userData, RdbBulk moduleName, size_t serializedSize);
+
 
 
     /*** TODO: RdbHandlersDataCallbacks: handleZsetElement ***/

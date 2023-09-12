@@ -9,6 +9,7 @@
 #include "../../deps/redis/endianconv.h"
 
 #define _RDB_TYPE_STRING 0
+#define _REDISMODULE_AUX_BEFORE_RDB (1<<0)
 #define VER_VAL(major,minor) (((unsigned int)(major)<<8) | (unsigned int)(minor))
 
 typedef struct RedisToRdbVersion {
@@ -58,16 +59,21 @@ struct RdbxToResp {
         RdbBulkCopy key;
         size_t keyLen;
         RdbKeyInfo info;
+        DelKeyBeforeWrite delBeforeWrite;
     } keyCtx;
 
     struct {
         int sentFirstFrag;
-        size_t valSize;
+        size_t rawSize;
+        int isModuleAux;
+        uint64_t crc;
+        struct {
+            char cmdPrefix[100];
+            int cmdlen;
+        } moduleAux;
     } rawCtx;
 
-    uint64_t crc;
     int srcRdbVer;
-    DelKeyBeforeWrite delKeyBeforeWrite;
 };
 
 static void deleteRdbToRespCtx(RdbParser *p, void *context) {
@@ -128,7 +134,7 @@ static void resolveSupportRestore(RdbParser *p, RdbxToResp *ctx, int srcRdbVer) 
 
     ctx->srcRdbVer = srcRdbVer;
 
-    ctx->delKeyBeforeWrite = (ctx->conf.delKeyBeforeWrite) ? DEL_KEY_BEFORE_BY_DEL_CMD : DEL_KEY_BEFORE_NONE;
+    ctx->keyCtx.delBeforeWrite = (ctx->conf.delKeyBeforeWrite) ? DEL_KEY_BEFORE_BY_DEL_CMD : DEL_KEY_BEFORE_NONE;
 
     if (ctx->conf.supportRestore) {
         /* if not configured destination RDB version, then resolve it from
@@ -142,8 +148,8 @@ static void resolveSupportRestore(RdbParser *p, RdbxToResp *ctx, int srcRdbVer) 
             ctx->conf.supportRestore = 0;
         } else {
             if (ctx->conf.delKeyBeforeWrite) {
-                RDB_log(p, RDB_LOG_INF, "As RESTORE is supported, configuration del-key-before-write will be ignored.");
-                ctx->delKeyBeforeWrite = DEL_KEY_BEFORE_BY_RESTORE_REPLACE;
+                RDB_log(p, RDB_LOG_DBG, "Optimizing 'del-key-before-write' into single command of RESTORE-REPLACE.");
+                ctx->keyCtx.delBeforeWrite = DEL_KEY_BEFORE_BY_RESTORE_REPLACE;
             }
         }
     }
@@ -203,11 +209,7 @@ static RdbRes toRespNewKey(RdbParser *p, void *userData, RdbBulk key, RdbKeyInfo
     UNUSED(info);
     RdbxToResp *ctx = userData;
 
-    if (ctx->keyCtx.key != NULL)
-        RDB_bulkCopyFree(p, ctx->keyCtx.key);
-
     /* handling new key */
-    ctx->crc = 0;
     ctx->keyCtx.info = *info;
     ctx->keyCtx.keyLen = RDB_bulkLen(p, key);
     if ((ctx->keyCtx.key = RDB_bulkClone(p, key)) == NULL)
@@ -215,7 +217,7 @@ static RdbRes toRespNewKey(RdbParser *p, void *userData, RdbBulk key, RdbKeyInfo
 
     /* apply del-key-before-write if configured, unless it is 'SET' command where
      * the key is overridden if it already exists, without encountering any problems. */
-    if ((ctx->delKeyBeforeWrite == DEL_KEY_BEFORE_BY_DEL_CMD) && (info->opcode != _RDB_TYPE_STRING)) {
+    if ((ctx->keyCtx.delBeforeWrite == DEL_KEY_BEFORE_BY_DEL_CMD) && (info->opcode != _RDB_TYPE_STRING)) {
         struct iovec iov[4];
         char keyLenStr[32];
         IOV_CONST(&iov[0], "*2\r\n$3\r\nDEL\r\n$");
@@ -379,74 +381,146 @@ static RdbRes toRespFunction(RdbParser *p, void *userData, RdbBulk func) {
 }
 
 /*** Handling raw ***/
+/* Callback on start of serializing module aux data (alternative to toRespRawBegin).
+ * Following this call, one or more calls will be made to toRespRawFrag() to
+ * stream fragments of the serialized data. And at the end toRespRawFragEnd()
+ * will be called */
+static RdbRes toRespRawBeginModuleAux(RdbParser *p, void *userData, RdbBulk name, int encver, int when, size_t rawSize) {
+    char encstr[10];
+    UNUSED(p);
 
+    /* reset rawCtx */
+    RdbxToResp *ctx = userData;
+    ctx->rawCtx.rawSize = rawSize;
+    ctx->rawCtx.sentFirstFrag = 0;
+    ctx->rawCtx.isModuleAux = 1;
+    ctx->rawCtx.crc = 0;
+
+    /* if target doesn't support module-aux, then skip it */
+    if (!ctx->conf.supportRestoreModuleAux)
+        return RDB_OK;
+
+    /* Build the cmd instead of keeping the values and build it later */
+    size_t enclen = snprintf(encstr, sizeof(encstr), "%d", encver);
+    const char* whenstr = (when==_REDISMODULE_AUX_BEFORE_RDB) ? "before" :"after";
+    ctx->rawCtx.moduleAux.cmdlen = snprintf(ctx->rawCtx.moduleAux.cmdPrefix,
+            sizeof(ctx->rawCtx.moduleAux.cmdPrefix),
+            "*5\r\n$13\r\nRESTOREMODAUX\r\n$%zu\r\n%s\r\n$%zu\r\n%s\r\n$%zu\r\n%s\r\n$",
+            strlen(name), name, enclen, encstr, strlen(whenstr), whenstr);
+    return RDB_OK;
+}
+
+/* Callback on start of serializing value of a key. Following this call, one
+ * or more calls will be made to toRespRawFrag() to stream fragments of the
+ * serialized data. And at the end toRespRawFragEnd() will be called */
 static RdbRes toRespRawBegin(RdbParser *p, void *userData, size_t size) {
     UNUSED(p);
     RdbxToResp *ctx = userData;
 
-    ctx->rawCtx.valSize = size;
+    /* reset rawCtx */
+    ctx->rawCtx.rawSize = size;
     ctx->rawCtx.sentFirstFrag = 0;
+    ctx->rawCtx.isModuleAux = 0;
+    ctx->rawCtx.crc = 0;
     return RDB_OK;
 }
 
-static RdbRes toRespRawFrag(RdbParser *p, void *userData, RdbBulk frag) {
+static inline RdbRes sendFirstRawFrag(RdbxToResp *ctx, RdbBulk frag, size_t fragLen) {
     long long expireTime = 0;
-    char expireTimeStr[32], expireTimeLenStr[32], keyLenStr[32], totalLenStr[32];
-    UNUSED(p);
-    RdbxToResp *ctx = userData;
+    char expireTimeStr[32], expireTimeLenStr[32], keyLenStr[32], lenStr[32];
     struct iovec iov[10];
     int extra_args = 0, iovs = 0;
-    size_t fragLen = RDB_bulkLen(p, frag);
 
-    ctx->crc = crc64(ctx->crc, (unsigned char *) frag , fragLen);
-
-    if (likely(!(ctx->rawCtx.sentFirstFrag))) {
-        ctx->rawCtx.sentFirstFrag = 1;
-
-        /* this logic must be exactly the same as in toRespRawFragEnd() */
-        if (ctx->targetVerValue >= VER_VAL(5,0))
-        {
-            if (ctx->keyCtx.info.expiretime != -1) {
-                expireTime = ctx->keyCtx.info.expiretime;
-                extra_args++; /* ABSTTL */
-            }
-
-            if ((ctx->keyCtx.info.lfuFreq != -1) || (ctx->keyCtx.info.lruIdle != -1)) {
-                extra_args += 2;
-            }
+    /* this logic must be exactly the same as in toRespRawFragEnd() */
+    if (ctx->targetVerValue >= VER_VAL(5,0))
+    {
+        if (ctx->keyCtx.info.expiretime != -1) {
+            expireTime = ctx->keyCtx.info.expiretime;
+            extra_args++; /* ABSTTL */
         }
 
-        if (ctx->delKeyBeforeWrite == DEL_KEY_BEFORE_BY_RESTORE_REPLACE)
-            extra_args++;
-
-        char cmd[64];
-
-        int len = sprintf(cmd, "*%d\r\n$7\r\nRESTORE\r\n$", 4+extra_args);
-
-        IOV_STRING(&iov[iovs++], cmd, len);                             /* RESTORE */
-        IOV_VALUE(&iov[iovs++], ctx->keyCtx.keyLen, keyLenStr);         /* write key len */
-        IOV_STRING(&iov[iovs++], ctx->keyCtx.key, ctx->keyCtx.keyLen);  /* write key */
-
-        if (expireTime) {
-            IOV_CONST(&iov[iovs++], "\r\n$");
-            IOV_LEN_AND_VALUE(&iov[iovs], expireTime, expireTimeLenStr, expireTimeStr);
-            iovs += 2;
-            IOV_CONST(&iov[iovs++], "$");
-        } else {
-            IOV_CONST(&iov[iovs++], "\r\n$1\r\n0\r\n$");
+        if ((ctx->keyCtx.info.lfuFreq != -1) || (ctx->keyCtx.info.lruIdle != -1)) {
+            extra_args += 2;
         }
-        IOV_VALUE(&iov[iovs++], ctx->rawCtx.valSize + 10, totalLenStr); /* write value length */
     }
-    IOV_STRING(&iov[iovs++], frag, fragLen);                            /* write value */
 
+    if (ctx->keyCtx.delBeforeWrite == DEL_KEY_BEFORE_BY_RESTORE_REPLACE)
+        extra_args++;
+
+    char cmd[64];
+
+    int len = snprintf(cmd, sizeof(cmd), "*%d\r\n$7\r\nRESTORE\r\n$", 4+extra_args);
+
+    IOV_STRING(&iov[iovs++], cmd, len);                             /* RESTORE */
+    IOV_VALUE(&iov[iovs++], ctx->keyCtx.keyLen, keyLenStr);         /* write key len */
+    IOV_STRING(&iov[iovs++], ctx->keyCtx.key, ctx->keyCtx.keyLen);  /* write key */
+
+    if (expireTime) {
+        IOV_CONST(&iov[iovs++], "\r\n$");
+        IOV_LEN_AND_VALUE(&iov[iovs], expireTime, expireTimeLenStr, expireTimeStr);
+        iovs += 2;
+        IOV_CONST(&iov[iovs++], "$");
+    } else {
+        IOV_CONST(&iov[iovs++], "\r\n$1\r\n0\r\n$");
+    }
+    IOV_VALUE(&iov[iovs++], ctx->rawCtx.rawSize + 10, lenStr); /* write raw len + trailer */
+    IOV_STRING(&iov[iovs++], frag, fragLen);                   /* write first frag */
     return writevWrap(ctx, iov, iovs, 1, 0);
 }
 
+static inline RdbRes sendFirstRawFragModuleAux(RdbxToResp *ctx, RdbBulk frag, size_t fragLen) {
+    struct iovec iov[3];
+    char lenStr[32];
+    iov[0].iov_base = ctx->rawCtx.moduleAux.cmdPrefix;
+    iov[0].iov_len =  ctx->rawCtx.moduleAux.cmdlen;
+    IOV_VALUE(&iov[1], ctx->rawCtx.rawSize + 10, lenStr); /* write raw len + trailer */
+    IOV_STRING(&iov[2], frag, fragLen);                   /* write first frag */
+    return writevWrap(ctx, iov, 3, 1, 0);
+}
+
+/* Callback for fragments of a serialized value associated with a new key or module
+ * auxiliary data. This callback is invoked after toRespRawBegin() or
+ * toRespRawBeginModuleAux(), and it may be called multiple times until the
+ * serialization is complete. Finally, toRespRawFragEnd() will be called to signal
+ * the registered handlers for the completion of the operation. */
+static RdbRes toRespRawFrag(RdbParser *p, void *userData, RdbBulk frag) {
+    UNUSED(p);
+    RdbxToResp *ctx = userData;
+    struct iovec iov[10];
+    int iovs = 0;
+
+    /* if processing module-aux but target doesn't support, then skip it */
+    if ( (ctx->rawCtx.isModuleAux) && (!ctx->conf.supportRestoreModuleAux))
+        return RDB_OK;
+
+    size_t fragLen = RDB_bulkLen(p, frag);
+    ctx->rawCtx.crc = crc64(ctx->rawCtx.crc, (unsigned char *) frag , fragLen);
+
+    /* if first frag, handled differently */
+    if (likely(!(ctx->rawCtx.sentFirstFrag))) {
+        ctx->rawCtx.sentFirstFrag = 1;
+        if (ctx->rawCtx.isModuleAux)
+            return sendFirstRawFragModuleAux(ctx, frag, fragLen);
+        else
+            return sendFirstRawFrag(ctx, frag, fragLen);
+    }
+
+    IOV_STRING(&iov[iovs++], frag, fragLen);
+    return writevWrap(ctx, iov, iovs, 1, 0);
+}
+
+/* This call will be followed one or more calls to toRespRawFrag() which indicates
+ * for completion of streaming of fragments of serialized value of a new key or
+ * module-aux data. */
 RdbRes toRespRawFragEnd(RdbParser *p, void *userData) {
     UNUSED(p);
     char cmd[1024]; /* degenerate usage of iov. All copied strings are small */
     RdbxToResp *ctx = userData;
-    uint64_t *crc = &(ctx->crc);
+    uint64_t *crc = &(ctx->rawCtx.crc);
+
+    /* if processing module-aux but target doesn't support, then skip it */
+    if ( (ctx->rawCtx.isModuleAux) && (!ctx->conf.supportRestoreModuleAux))
+        return RDB_OK;
 
     /* Add RDB version 2 bytes */
     cmd[0] = ctx->srcRdbVer & 0xff;
@@ -460,29 +534,29 @@ RdbRes toRespRawFragEnd(RdbParser *p, void *userData) {
     int len = 10;
 
     /* Add REPLACE if needed */
-    if (ctx->delKeyBeforeWrite == DEL_KEY_BEFORE_BY_RESTORE_REPLACE)
-        len += sprintf(cmd+len, "\r\n$7\r\nREPLACE\r\n");
+    if (ctx->keyCtx.delBeforeWrite == DEL_KEY_BEFORE_BY_RESTORE_REPLACE)
+        len += snprintf(cmd+len, sizeof(cmd)-len, "\r\n$7\r\nREPLACE\r\n");
     else
-        len += sprintf(cmd+len, "\r\n");
+        len += snprintf(cmd+len, sizeof(cmd)-len, "\r\n");
 
     /* This logic must be exactly the same as in toRespRawFrag() */
     if (likely(ctx->targetVerValue >= VER_VAL(5,0))) {
 
         /* Add ABSTTL */
         if (ctx->keyCtx.info.expiretime != -1) {
-            len += sprintf(cmd+len, "$6\r\nABSTTL\r\n");
+            len += snprintf(cmd+len, sizeof(cmd)-len, "$6\r\nABSTTL\r\n");
             ctx->keyCtx.info.expiretime = -1; /* take care reset before reach toRespEndKey() */
         }
 
         /* Add IDLETIME or FREQ if needed */
         if (ctx->keyCtx.info.lruIdle != -1) {
             char buf[128];
-            int l = sprintf(buf, "%lld", ctx->keyCtx.info.lruIdle);
-            len += sprintf(cmd+len, "$8\r\nIDLETIME\r\n$%d\r\n%s\r\n", l, buf);
+            int l = snprintf(buf, sizeof(buf), "%lld", ctx->keyCtx.info.lruIdle);
+            len += snprintf(cmd+len, sizeof(cmd)-len, "$8\r\nIDLETIME\r\n$%d\r\n%s\r\n", l, buf);
         } else if (ctx->keyCtx.info.lfuFreq != -1) {
             char buf[128];
-            int l = sprintf(buf, "%d", ctx->keyCtx.info.lfuFreq);
-            len += sprintf(cmd+len, "$4\r\nFREQ\r\n$%d\r\n%s\r\n", l, buf);
+            int l = snprintf(buf, sizeof(buf), "%d", ctx->keyCtx.info.lfuFreq);
+            len += snprintf(cmd+len, sizeof(cmd)-len, "$4\r\nFREQ\r\n$%d\r\n%s\r\n", l, buf);
         }
     }
 
@@ -526,6 +600,7 @@ _LIBRDB_API RdbxToResp *RDBX_createHandlersToResp(RdbParser *p, RdbxToRespConf *
     rawCb.handleNewKey = toRespNewKey;
     rawCb.handleEndKey = toRespEndKey;
     rawCb.handleFrag = toRespRawFrag;
+    rawCb.handleBeginModuleAux = toRespRawBeginModuleAux;
     rawCb.handleBegin = toRespRawBegin;
     rawCb.handleEnd = toRespRawFragEnd;
     RDB_createHandlersRaw(p, &rawCb, ctx, deleteRdbToRespCtx);

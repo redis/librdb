@@ -4,6 +4,9 @@ lib/*
 /**/*.o
 /**/*.d
 
+/**/rdb-cli.log
+src/cli/rdb-cli
+
 test/log/*
 test/tmp/*
 test/test_static_lib

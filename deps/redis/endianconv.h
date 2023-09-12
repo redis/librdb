@@ -33,7 +33,7 @@
 #ifndef __ENDIANCONV_H
 #define __ENDIANCONV_H
 
-//#include "config.h"
+#include "config.h"
 #include <stdint.h>
 
 void memrev16(void *p);
@@ -69,6 +69,11 @@ uint64_t intrev64(uint64_t v);
 #else
 #define htonu64(v) intrev64(v)
 #define ntohu64(v) intrev64(v)
+#endif
+
+
+#ifndef BYTE_ORDER
+#error "BYTE_ORDER is not defined. Compilation failed."
 #endif
 
 #ifdef REDIS_TEST

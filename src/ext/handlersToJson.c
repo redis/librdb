@@ -6,6 +6,9 @@
 
 struct RdbxToJson;
 
+#define _RDB_TYPE_MODULE_2 7
+#define _STDOUT_STR "<stdout>"
+
 typedef enum
 {
     R2J_IDLE = 0,
@@ -21,12 +24,13 @@ typedef enum
 } RdbxToJsonState;
 
 struct RdbxToJson {
-    char *filename;
     RdbxToJsonConf conf;
     RdbxToJsonState state;
+
+    char *outfileName;  /* Holds output filename or equals _STDOUT_STR */
     FILE *outfile;
+
     void (*encfunc)(struct RdbxToJson *ctx, char *p, size_t len);
-    //EncodingFunc encfunc;
 
     struct {
         RdbBulkCopy key;
@@ -70,34 +74,34 @@ static void deleteRdbToJsonCtx(RdbParser *p, void *data) {
     if (ctx->keyCtx.key)
         RDB_bulkCopyFree(p, ctx->keyCtx.key);
 
-    RDB_log(p, RDB_LOG_DBG, "handlersToJson: Closing file %s", ctx->filename);
+    RDB_log(p, RDB_LOG_DBG, "handlersToJson: Closing file %s", ctx->outfileName);
 
     if ((ctx->outfile) && (ctx->outfile != stdout))
         fclose(ctx->outfile);
 
-    RDB_free(p, ctx->filename);
+    RDB_free(p, ctx->outfileName);
     RDB_free(p, ctx);
 }
 
-static RdbxToJson *initRdbToJsonCtx(RdbParser *p, const char *filename, RdbxToJsonConf *conf) {
+static RdbxToJson *initRdbToJsonCtx(RdbParser *p, const char *outfilename, RdbxToJsonConf *conf) {
     FILE *f;
 
-    if (filename == NULL) {
+    if (outfilename == NULL) {
         f = stdout;
-        filename = "<stdout>";
-    } else if (!(f = fopen(filename, "w"))) {
+        outfilename = _STDOUT_STR;
+    } else if (!(f = fopen(outfilename, "w"))) {
         RDB_reportError(p, (RdbRes) RDBX_ERR_FAILED_OPEN_FILE,
                         "HandlersRdbToJson: Failed to open file");
         return NULL;
     }
 
-    RDB_log(p, RDB_LOG_DBG, "handlersToJson: Opening file %s", filename);
+    RDB_log(p, RDB_LOG_DBG, "handlersToJson: Opening file %s", outfilename);
 
     /* init RdbToJson context */
     RdbxToJson *ctx = RDB_alloc(p, sizeof(RdbxToJson));
     memset(ctx, 0, sizeof(RdbxToJson));
-    ctx->filename = RDB_alloc(p, strlen(filename)+1);
-    strcpy(ctx->filename, filename);
+    ctx->outfileName = RDB_alloc(p, strlen(outfilename) + 1);
+    strcpy(ctx->outfileName, outfilename);
     ctx->outfile = f;
     ctx->state = R2J_IDLE;
     ctx->count_keys = 0;
@@ -170,11 +174,12 @@ static RdbRes toJsonEndKey(RdbParser *p, void *userData) {
 static RdbRes toJsonNewKey(RdbParser *p, void *userData, RdbBulk key, RdbKeyInfo *info) {
     RdbxToJson *ctx = userData;
 
-    if (ctx->state != R2J_IN_DB) {
+    if (unlikely(ctx->state != R2J_IN_DB)) {
         RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
                         "toJsonNewKey(): Invalid state value: %d", ctx->state);
         return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
     }
+
     ctx->keyCtx.key = RDB_bulkClone(p, key);
     ctx->keyCtx.info = *info;
 
@@ -247,6 +252,23 @@ static RdbRes toJsonEndRdb(RdbParser *p, void *userData) {
 
     /* update new state */
     ctx->state = R2J_IDLE;
+
+    return RDB_OK;
+}
+
+static RdbRes toJsonModule(RdbParser *p, void *userData, RdbBulk moduleName, size_t serializedSize) {
+    RdbxToJson *ctx = userData;
+
+    if (ctx->state != R2J_IN_KEY) {
+        RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
+                        "toJsonNewRdb(): Invalid state value: %d", ctx->state);
+        return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
+    }
+
+    /* output json part */
+    fprintf(ctx->outfile, "\"<Content of Module '%s'. Occupies a serialized size of %ld bytes>\"",
+            moduleName,
+            serializedSize);
 
     return RDB_OK;
 }
@@ -420,6 +442,7 @@ RdbxToJson *RDBX_createHandlersToJson(RdbParser *p, const char *filename, RdbxTo
         callbacks.dataCb.handleHashField = toJsonHash;
         callbacks.dataCb.handleSetMember = toJsonSet;
         callbacks.dataCb.handleFunction = (conf->includeFunc) ? toJsonFunction : NULL;
+        callbacks.dataCb.handleModule = toJsonModule;
         RDB_createHandlersData(p, &callbacks.dataCb, ctx, deleteRdbToJsonCtx);
 
     } else  if (ctx->conf.level == RDB_LEVEL_STRUCT) {
@@ -440,6 +463,8 @@ RdbxToJson *RDBX_createHandlersToJson(RdbParser *p, const char *filename, RdbxTo
         callbacks.structCb.handleSetLP = toJsonStruct;
         /* function */
         callbacks.structCb.handleFunction = (conf->includeFunc) ? toJsonFunction : NULL;
+        /* module */
+        callbacks.structCb.handleModule = toJsonModule;
         RDB_createHandlersStruct(p, &callbacks.structCb, ctx, deleteRdbToJsonCtx);
 
     } else if (ctx->conf.level == RDB_LEVEL_RAW) {

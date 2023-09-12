@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <cmocka.h>
 
+#include "../deps/hiredis/hiredis.h"
 #include "../api/librdb-api.h"  /* RDB library header */
 #include "../api/librdb-ext-api.h" /* RDB library extension header */
 
@@ -14,25 +15,28 @@ static inline void unused(void *dummy, ...) { (void)(dummy);}
 #define DUMP_FOLDER(file) "./test/dumps/"file
 #define TMP_FOLDER(file) "./test/tmp/"file
 
+#define STR_AND_SIZE(str) str, (sizeof(str)-1)
+
 typedef enum MatchType {
     M_PREFIX,
     M_ENTIRE,
-    M_SUFFIX
+    M_SUFFIX,
+    M_SUBSTR
 } MatchType;
 
 /* system() commands */
 void runSystemCmd(const char *cmdFormat, ...);
-void runSystemCmdRetry(int seconds, const char *cmdFormat, ...);
 
 /* assert */
 void assert_json_equal(const char *f1, const char *f2, int ignoreListOrder);
 
-/* setup external Redis Server */
+/* Test against Redis Server */
 extern int redisPort;
-extern const char *redisInstallFolder;
-int isExternalRedisSupported();
-void setupRedisServer();
+void setupRedisServer(const char *installFolder);
 void teardownRedisServer();
+int isSetRedisServer();
+char *sendRedisCmd(char *cmd, int expRetType, char *expRsp);
+int isSupportRestoreModuleAux();
 
 /* test groups */
 int group_rdb_to_redis();
@@ -54,5 +58,5 @@ void *xrealloc(void *ptr, size_t size);
 char *readFile(const char *filename, size_t *len);
 void cleanTmpFolder();
 void setEnvVar (const char *name, const char *val);
-
-void assert_file_payload(const char *filename, char *expData, MatchType matchType, int expMatch);
+char *substring(char *str, size_t len, char *substr);
+void assert_file_payload(const char *filename, char *expData, int expLen, MatchType matchType, int expMatch);

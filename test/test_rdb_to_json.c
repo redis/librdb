@@ -366,6 +366,37 @@ static void test_r2j_function (void **state) {
     testRdbToJsonCommon(DUMP_FOLDER("function.rdb"), DUMP_FOLDER("function.json"), &r2jConf);
 }
 
+static void test_r2j_module_raw(void **state) {
+    UNUSED(state);
+    RdbxToJsonConf r2jConf = {
+        .level = RDB_LEVEL_RAW,
+        .encoding = RDBX_CONV_JSON_ENC_PLAIN,
+        .includeAuxField = 0,
+        .includeFunc = 0,
+        .flatten = 1,
+    };
+    testRdbToJsonCommon(DUMP_FOLDER("module.rdb"), DUMP_FOLDER("module_raw.json"), &r2jConf);
+}
+
+static void test_r2j_module_data(void **state) {
+    UNUSED(state);
+    RdbxToJsonConf r2jConf = {
+        .level = RDB_LEVEL_DATA,
+        .encoding = RDBX_CONV_JSON_ENC_PLAIN,
+        .includeAuxField = 0,
+        .includeFunc = 0,
+        .flatten = 1,
+    };
+    testRdbToJsonCommon(DUMP_FOLDER("module.rdb"), DUMP_FOLDER("module_data.json"), &r2jConf);
+}
+
+static void test_r2j_module_aux_data(void **state) {
+    UNUSED(state);
+    RdbxToJsonConf r2jConf = DEF_CONF(RDB_LEVEL_DATA);
+    r2jConf.includeAuxField = 0;
+    testRdbToJsonCommon(DUMP_FOLDER("module_aux.rdb"), DUMP_FOLDER("module_aux_data.json"), &r2jConf);
+}
+
 /*************************** group_rdb_to_json *******************************/
 int group_rdb_to_json(void) {
     const struct CMUnitTest tests[] = {
@@ -421,12 +452,16 @@ int group_rdb_to_json(void) {
         /* function */
         cmocka_unit_test(test_r2j_function),
 
+        /* module */
+        cmocka_unit_test(test_r2j_module_data),
+        cmocka_unit_test(test_r2j_module_raw),
+        cmocka_unit_test(test_r2j_module_aux_data),
+
         /* misc */
         cmocka_unit_test(test_r2j_multiple_lists_and_strings_data),
         cmocka_unit_test(test_r2j_multiple_lists_and_strings_struct),
         cmocka_unit_test(test_r2j_multiple_lists_and_strings_raw),
         cmocka_unit_test(test_r2j_multiple_dbs),
-
     };
     return cmocka_run_group_tests(tests, NULL, NULL);
 }

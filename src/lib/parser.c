@@ -12,6 +12,7 @@
  * in the README.md file as an introduction to this file implementation.
  */
 
+#include <endian.h>
 #include <assert.h>
 #include <stdarg.h>
 #include <string.h>
@@ -65,6 +66,8 @@ struct ParsingElementInfo peInfo[PE_MAX] = {
         [PE_SET_IS]           = {elementSetIS, "elementSetIS", "Parsing set Intset"},
         [PE_SET_LP]           = {elementSetLP, "elementSetLP", "Parsing set Listpack"},
         [PE_FUNCTION]         = {elementFunction, "elementFunction", "Parsing Function"},
+        [PE_MODULE]           = {elementModule, "elementModule", "Parsing silently Module element"},
+        [PE_MODULE_AUX]       = {elementModule, "elementModule", "Parsing silently Module Auxiliary data"},
 
         /*** parsing raw data (RDB_LEVEL_RAW) ***/
 
@@ -86,6 +89,9 @@ struct ParsingElementInfo peInfo[PE_MAX] = {
         [PE_RAW_SET]          = {elementRawSet, "elementRawSet", "Parsing raw set"},
         [PE_RAW_SET_IS]       = {elementRawSetIS, "elementRawSetIS", "Parsing raw set Intset"},
         [PE_RAW_SET_LP]       = {elementRawSetLP, "elementRawSetLP", "Parsing raw set Listpack"},
+        /* module */
+        [PE_RAW_MODULE]       = {elementRawModule, "elementRawModule", "Parsing raw Module element"},
+        [PE_RAW_MODULE_AUX]   = {elementRawModule, "elementRawModule(aux)", "Parsing Module Auxiliary data"},
 };
 
 /* Strings in ziplist/listpacks are embedded without '\0' termination. To avoid
@@ -517,6 +523,7 @@ _LIBRDB_API void RDB_handleByLevel(RdbParser *p, RdbDataType type, RdbHandlersLe
             break;
         case RDB_DATA_TYPE_MODULE:
             p->handleTypeObjByLevel[RDB_TYPE_MODULE_2] = lvl;
+            p->handleTypeObjByLevel[RDB_OPCODE_MODULE_AUX] = lvl;
             break;
         case RDB_DATA_TYPE_STREAM:
             p->handleTypeObjByLevel[RDB_TYPE_STREAM_LISTPACKS] = lvl;
@@ -596,10 +603,14 @@ static RdbStatus parserMainLoop(RdbParser *p) {
 
     if (unlikely(p->debugData)) {
         while (1) {
-            RDB_log(p, RDB_LOG_DBG, "[State=%d] %-20s ", p->elmCtx.state, peInfo[p->parsingElement].funcname);
+            RDB_log(p, RDB_LOG_DBG, "[Opcode=%d] %s(State=%d)",
+                    p->currOpcode,
+                    peInfo[p->parsingElement].funcname,
+                    p->elmCtx.state);
             status = peInfo[p->parsingElement].func(p);
-            RDB_log(p, RDB_LOG_DBG, "Return status=%s (next=%s)\n", getStatusString(status),
-                    peInfo[p->parsingElement].funcname);
+            RDB_log(p, RDB_LOG_DBG, "Return status=%s next %s(State=%d)\n", getStatusString(status),
+                    peInfo[p->parsingElement].funcname,
+                    p->elmCtx.state);
             if (status != RDB_STATUS_OK) break;
 
             /* if RDB_STATUS_OK then the parser completed a state and the cache is empty */
@@ -759,7 +770,7 @@ static void releaseHandlers(RdbParser *p, RdbHandlers *h) {
     }
 }
 
-static RdbStatus allocFromCache(RdbParser *p,
+RdbStatus allocFromCache(RdbParser *p,
                                 size_t len,
                                 AllocTypeRq type,
                                 char *refBuf,
@@ -1058,6 +1069,23 @@ static RdbHandlers *createHandlersCommon(RdbParser *p,
     return h;
 }
 
+/* Turn module ID into a type name. For more information, lookup file module.c in Redis repo) */
+void moduleTypeNameByID(char *name, uint64_t moduleid) {
+    static const char *ModuleTypeNameCharSet =
+            "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+            "abcdefghijklmnopqrstuvwxyz"
+            "0123456789-_";
+    const char *cset = ModuleTypeNameCharSet;
+
+    name[9] = '\0';
+    char *p = name+8;
+    moduleid >>= 10;
+    for (int j = 0; j < 9; j++) {
+        *p-- = cset[moduleid & 63];
+        moduleid >>= 6;
+    }
+}
+
 /*** Parsing Common Elements ***/
 
 RdbStatus elementRdbHeader(RdbParser *p) {
@@ -1226,7 +1254,13 @@ RdbStatus elementNextRdbType(RdbParser *p) {
         case RDB_TYPE_SET:                  return nextParsingElementKeyValue(p, PE_RAW_SET, PE_SET);
         case RDB_TYPE_SET_LISTPACK:         return nextParsingElementKeyValue(p, PE_RAW_SET_LP, PE_SET_LP);
         case RDB_TYPE_SET_INTSET:           return nextParsingElementKeyValue(p, PE_RAW_SET_IS, PE_SET_IS);
+        /* module */
+        case RDB_TYPE_MODULE_2:             return nextParsingElementKeyValue(p, PE_RAW_MODULE, PE_MODULE);
 
+        case RDB_OPCODE_MODULE_AUX:         if (p->handleTypeObjByLevel[RDB_OPCODE_MODULE_AUX] == RDB_LEVEL_RAW)
+                                                return nextParsingElement(p, PE_RAW_MODULE_AUX);
+                                            else
+                                                return nextParsingElement(p, PE_MODULE_AUX);
         /* function */
         case RDB_OPCODE_FUNCTION2:          return nextParsingElement(p, PE_FUNCTION);
 
@@ -1237,10 +1271,6 @@ RdbStatus elementNextRdbType(RdbParser *p) {
         case RDB_TYPE_ZSET_2:
         case RDB_TYPE_ZSET_ZIPLIST:
         case RDB_TYPE_ZSET_LISTPACK:
-
-        /* module (TBD) */
-        case RDB_OPCODE_MODULE_AUX:
-        case RDB_TYPE_MODULE_2:
 
         /* stream (TBD) */
         case RDB_TYPE_STREAM_LISTPACKS:
@@ -1551,7 +1581,7 @@ RdbStatus elementSet(RdbParser *p) {
         }
         default:
             RDB_reportError(p, RDB_ERR_PLAIN_SET_INVALID_STATE,
-                            "elementList() : invalid parsing element state: %d", ctx->state);
+                            "elementSet() : invalid parsing element state: %d", ctx->state);
             return RDB_STATUS_ERROR;
     }
 }
@@ -1679,7 +1709,133 @@ RdbStatus elementFunction(RdbParser *p) {
     return nextParsingElement(p, PE_NEXT_RDB_TYPE);
 }
 
+/*** module ***/
+
+/* Silently digest module or module-aux. Only level 0 propagates it to handlers */
+RdbStatus elementModule(RdbParser *p) {
+    ElementCtx *ctx = &p->elmCtx;
+    enum MODULE_STATES {
+        ST_MODULE_START=0,
+        /* Following enums are aligned to module-opcodes to save mapping. Static assert below. */
+        ST_MODULE_OPCODE_SINT=RDB_MODULE_OPCODE_SINT,
+        ST_MODULE_OPCODE_UINT=RDB_MODULE_OPCODE_UINT,
+        ST_MODULE_OPCODE_FLOAT=RDB_MODULE_OPCODE_FLOAT,
+        ST_MODULE_OPCODE_DOUBLE=RDB_MODULE_OPCODE_DOUBLE,
+        ST_MODULE_OPCODE_STRING=RDB_MODULE_OPCODE_STRING,
+
+        ST_MODULE_NEXT_OPCODE,
+    };
+
+    while (1)
+    {
+        switch (ctx->state) {
+            case ST_MODULE_START: {
+                int hdrSize = 9;  /* moduleid size 8+1 bytes (Take care to update ctx only in safe state) */
+                uint64_t when_opcode, when;
+                IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &(ctx->module.moduleId), NULL, NULL));
+                if (p->currOpcode == RDB_OPCODE_MODULE_AUX) {
+                    hdrSize += 2; /* when_op and when are of size 1 byte each */
+                    /* Load module data that is not related to the Redis key space. Such data can
+                     * be potentially be stored both before and after the RDB keys-values section. */
+                    IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &when_opcode, NULL, NULL));
+                    IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &when, NULL, NULL));
+                    if (unlikely(when_opcode != RDB_MODULE_OPCODE_UINT)) {
+                        RDB_reportError(p, RDB_ERR_MODULE_INVALID_WHEN_OPCODE,
+                            "elementModule() : Invalid when opcode: %d.", when_opcode);
+                        return RDB_STATUS_ERROR;
+                    }
+                }
+                /*** ENTER SAFE STATE ***/
+                ctx->module.startBytesRead = p->bytesRead - hdrSize ;
+                updateElementState(p, ST_MODULE_NEXT_OPCODE);
+                break;
+            }
+            case ST_MODULE_OPCODE_SINT:
+            case ST_MODULE_OPCODE_UINT: {
+                uint64_t val; /*UNUSED*/
+                IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &val, NULL, NULL));
+                /*** ENTER SAFE STATE ***/
+                updateElementState(p, ST_MODULE_NEXT_OPCODE);
+                break;
+            }
+            case ST_MODULE_OPCODE_FLOAT: {
+                float val; /*UNUSED*/
+                IF_NOT_OK_RETURN(rdbLoadFloatValue(p, &val));
+                /*** ENTER SAFE STATE ***/
+                updateElementState(p, ST_MODULE_NEXT_OPCODE);
+                break;
+            }
+            case ST_MODULE_OPCODE_DOUBLE: {
+                double val; /*UNUSED*/
+                IF_NOT_OK_RETURN(rdbLoadDoubleValue(p, &val));
+                /*** ENTER SAFE STATE ***/
+                updateElementState(p, ST_MODULE_NEXT_OPCODE);
+                break;
+            }
+            case ST_MODULE_OPCODE_STRING: {
+                BulkInfo *bInfo; /*UNUSED*/
+                IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC, NULL, &bInfo));
+                /*** ENTER SAFE STATE ***/
+                updateElementState(p, ST_MODULE_NEXT_OPCODE);
+                break;
+            }
+            case ST_MODULE_NEXT_OPCODE: {
+                uint64_t opcode = 0;
+                IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &opcode, NULL, NULL));
+
+                /*** ENTER SAFE STATE ***/
+
+                if ((int) opcode != RDB_MODULE_OPCODE_EOF) {
+                    /* Valid cast. Took care to align opcode with module states */
+                    updateElementState(p, (int) opcode);
+                    break;
+                }
+
+                /* EOF module/module-aux object */
+                if (p->currOpcode == RDB_OPCODE_MODULE_AUX)
+                    return nextParsingElement(p, PE_NEXT_RDB_TYPE);
+                else {
+                    BulkInfo *bulkName;
+                    IF_NOT_OK_RETURN(allocFromCache(p, 9, RQ_ALLOC_APP_BULK, NULL, &bulkName));
+
+                    moduleTypeNameByID(bulkName->ref, p->elmCtx.module.moduleId);
+                    size_t serializedSize = p->bytesRead - p->elmCtx.module.startBytesRead;
+
+                    registerAppBulkForNextCb(p, bulkName);
+                    if (p->elmCtx.key.handleByLevel == RDB_LEVEL_STRUCT)
+                        CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_STRUCT, rdbStruct.handleModule,
+                                         bulkName->ref, serializedSize);
+                    else
+                        CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_DATA, rdbData.handleModule,
+                                         bulkName->ref, serializedSize);
+
+                    return nextParsingElement(p, PE_END_KEY);
+                }
+            }
+            default:
+                /* if reached here, most probably because read invalid opcode from RDB */
+                RDB_reportError(p, RDB_ERR_MODULE_INVALID_STATE,
+                    "elementModule() : Invalid parsing element state: %d.", ctx->state);
+                return RDB_STATUS_ERROR;
+        }
+    }
+}
+
 /*** Loaders from RDB ***/
+
+RdbStatus rdbLoadFloatValue(RdbParser *p, float *val) {
+    BulkInfo *binfoUnused;
+    IF_NOT_OK_RETURN(rdbLoad(p, sizeof(*val), RQ_ALLOC_REF, (char *) val, &binfoUnused));
+    memrev32ifbe(val);
+    return RDB_STATUS_OK;
+}
+
+RdbStatus rdbLoadDoubleValue(RdbParser *p, double *val) {
+    BulkInfo *binfoUnused;
+    IF_NOT_OK_RETURN(rdbLoad(p, sizeof(*val), RQ_ALLOC_REF, (char *) val, &binfoUnused));
+    memrev64ifbe(val);
+    return RDB_STATUS_OK;
+}
 
 RdbStatus rdbLoadInteger(RdbParser *p, int enctype, AllocTypeRq type, char *refBuf, BulkInfo **binfo) {
     long long val;
@@ -1758,7 +1914,7 @@ RdbStatus rdbLoadLen(RdbParser *p, int *isencoded, uint64_t *lenptr, unsigned ch
     } else if (buf[0] == RDB_64BITLEN) {
         /* Read a 64 bit len. */
         IF_NOT_OK_RETURN(rdbLoad(p, 8, RQ_ALLOC, NULL, &binfo));
-        if (outbuff) memcpy(outbuff+1, &binfo->ref, 8), (*outbufflen)+=8;
+        if (outbuff) memcpy(outbuff+1, binfo->ref, 8), (*outbufflen)+=8;
         *lenptr = ntohu64(*((uint64_t *)binfo->ref));
     } else {
         RDB_reportError(p, RDB_ERR_INVALID_LEN_ENCODING, "Unknown length encoding %d in rdbLoadLen()",type);
