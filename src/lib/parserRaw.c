@@ -35,7 +35,8 @@ static inline RdbStatus cbHandleEnd(RdbParser *p);
 static inline void aggFlushBulks(RdbParser *p);
 static inline void aggAllocFirstBulk(RdbParser *p);
 static RdbStatus aggMakeRoom(RdbParser *p, size_t numBytesRq);
-static RdbStatus aggUpdateWrittenCbFrag(RdbParser *p, size_t bytesWritten);
+static RdbStatus aggUpdateWritten(RdbParser *p, size_t bytesWritten);
+void printAggAraryDbg(RdbParser *p);
 
 static int ziplistValidateIntegrityCb(unsigned char* str, size_t size, RdbParser *p);
 static int listpackValidateIntegrityCb(unsigned char* str, size_t size, RdbParser *p);
@@ -43,6 +44,7 @@ static int zipmapValidateIntegrityCb(unsigned char* str, size_t size, RdbParser 
 static int intsetValidateIntegrityCb(unsigned char* str, size_t size, RdbParser *p);
 typedef int (*singleStringTypeValidateCb)(unsigned char* str, size_t size, RdbParser *p); // return 0 for error
 static RdbStatus singleStringTypeHandling(RdbParser *p, singleStringTypeValidateCb validateCb, char *callerName);
+void moduleTypeNameByID(char *name, uint64_t moduleid);
 
 /*** init & release ***/
 
@@ -120,24 +122,11 @@ RdbStatus elementRawNewKey(RdbParser *p) {
     /* write type of 1 byte. No need to call aggMakeRoom(). First bulk is empty. */
     p->rawCtx.at[0] = p->currOpcode;
 
-    return aggUpdateWrittenCbFrag(p, 1);
+    return aggUpdateWritten(p, 1);
 }
 
 RdbStatus elementRawEndKey(RdbParser *p) {
     /*** ENTER SAFE STATE (no rdb read) ***/
-
-    RawContext *ctx = &p->rawCtx;
-
-    /* if aggregated entire type then only now parser knows to report totalSize */
-    if (ctx->aggType == AGG_TYPE_ENTIRE_DATA) {
-        CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_RAW, rdbRaw.handleBegin, ctx->totalSize);
-    }
-
-    /* report leftover to cb handlers */
-    for(int j = 0 ; j <= ctx->curBulkIndex ; ++j)
-        cbHandleFrag(p, ctx->bulkArray + j);
-
-    aggFlushBulks(p);
 
     IF_NOT_OK_RETURN(cbHandleEnd(p));
 
@@ -169,7 +158,7 @@ RdbStatus elementRawList(RdbParser *p) {
             /*** ENTER SAFE STATE ***/
 
             IF_NOT_OK_RETURN(cbHandleBegin(p, DATA_SIZE_UNKNOWN_AHEAD));
-            IF_NOT_OK_RETURN(aggUpdateWrittenCbFrag(p, headerLen));
+            IF_NOT_OK_RETURN(aggUpdateWritten(p, headerLen));
 
         }
 
@@ -226,7 +215,7 @@ RdbStatus elementRawQuickList(RdbParser *p) {
 
             IF_NOT_OK_RETURN(cbHandleBegin(p, DATA_SIZE_UNKNOWN_AHEAD));
 
-            IF_NOT_OK_RETURN(aggUpdateWrittenCbFrag(p, headerLen));
+            IF_NOT_OK_RETURN(aggUpdateWritten(p, headerLen));
 
         }
 
@@ -240,13 +229,13 @@ RdbStatus elementRawQuickList(RdbParser *p) {
 
             if (p->currOpcode == RDB_TYPE_LIST_QUICKLIST_2) {
                 int headerLen = 0;
-                aggMakeRoom(p, 10); /* 9 bytes for len */
+                IF_NOT_OK_RETURN(aggMakeRoom(p, 10)); /* 9 bytes for len */
                 IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &listCtx->container,
                                            (unsigned char *) rawCtx->at, &headerLen));
 
                 /*** ENTER SAFE STATE ***/
 
-                IF_NOT_OK_RETURN(aggUpdateWrittenCbFrag(p, headerLen));
+                IF_NOT_OK_RETURN(aggUpdateWritten(p, headerLen));
             }
 
             /* call raw string as subelement */
@@ -308,7 +297,7 @@ RdbStatus elementRawString(RdbParser *p) {
         case ST_RAW_STRING_PASS_HEADER: {
             int headerlen = 0;
 
-            aggMakeRoom(p, 16 * 3); /* worse case, 1 byte type + (9 bytes for len) * 3 */
+            IF_NOT_OK_RETURN(aggMakeRoom(p, 16 * 3)); /* worse case, 1 byte type + (9 bytes for len) * 3 */
 
             IF_NOT_OK_RETURN(rdbLoadLen(p, &strCtx->isencoded, &strCtx->len,
                 (unsigned char *) rawCtx->at + headerlen, &headerlen));
@@ -336,7 +325,7 @@ RdbStatus elementRawString(RdbParser *p) {
 
             IF_NOT_OK_RETURN(cbHandleBegin(p, 1 + headerlen + strCtx->len)); /*  type + hdr + string  */
 
-            IF_NOT_OK_RETURN(aggUpdateWrittenCbFrag(p, headerlen));
+            IF_NOT_OK_RETURN(aggUpdateWritten(p, headerlen));
 
             if (p->callSubElm.callerElm != PE_MAX)
                 return updateElementState(p, ST_RAW_STRING_PASS_AND_REPLY_CALLER);
@@ -363,7 +352,7 @@ RdbStatus elementRawString(RdbParser *p) {
                 /*** ENTER SAFE STATE ***/
 
                 /* now safe to update ctx and be ready for another iteration */
-                IF_NOT_OK_RETURN(aggUpdateWrittenCbFrag(p, bulkLen));
+                IF_NOT_OK_RETURN(aggUpdateWritten(p, bulkLen));
 
                 /* update context for next iteration */
                 strCtx->len -= bulkLen;
@@ -382,7 +371,7 @@ RdbStatus elementRawString(RdbParser *p) {
             /* Since String (sub)element is called on behalf another element. it loads the raw string
              * into the common aggregated buffers and optionally decompress the data via the returned value.
              * If `aggType` will only partially aggregate the data, then there is a chance that calling
-             * aggUpdateWrittenCbFrag() will release aggregated data before it will reach back to the
+             * aggUpdateWritten() will release aggregated data before it will reach back to the
              * caller element */
             assert(rawCtx->aggType == AGG_TYPE_ENTIRE_DATA);
 
@@ -394,7 +383,7 @@ RdbStatus elementRawString(RdbParser *p) {
 
             /*** ENTER SAFE STATE ***/
 
-            IF_NOT_OK_RETURN(aggUpdateWrittenCbFrag(p, strCtx->len));
+            IF_NOT_OK_RETURN(aggUpdateWritten(p, strCtx->len));
 
             if (!(strCtx->isencoded)) {
                 BulkInfo binfoEncRef;
@@ -475,7 +464,7 @@ RdbStatus elementRawHash(RdbParser *p) {
             hashCtx->visitField = 0;
 
             IF_NOT_OK_RETURN(cbHandleBegin(p, DATA_SIZE_UNKNOWN_AHEAD));
-            IF_NOT_OK_RETURN(aggUpdateWrittenCbFrag(p, headerLen));
+            IF_NOT_OK_RETURN(aggUpdateWritten(p, headerLen));
         }
         updateElementState(p, ST_RAW_HASH_READ_NEXT_FIELD_STR); /* fall-thru */
 
@@ -554,7 +543,7 @@ RdbStatus elementRawSet(RdbParser *p) {
             /*** ENTER SAFE STATE ***/
 
             IF_NOT_OK_RETURN(cbHandleBegin(p, DATA_SIZE_UNKNOWN_AHEAD));
-            IF_NOT_OK_RETURN(aggUpdateWrittenCbFrag(p, headerLen));
+            IF_NOT_OK_RETURN(aggUpdateWritten(p, headerLen));
         }
         updateElementState(p, ST_RAW_SET_NEXT_ITEM_CALL_STR); /* fall-thru */
 
@@ -582,6 +571,147 @@ RdbStatus elementRawSet(RdbParser *p) {
             return RDB_STATUS_ERROR;
     }
 }
+
+RdbStatus elementRawModule(RdbParser *p) {
+
+    typedef enum RAW_MODULE_STATES {
+        /* Start handling module or module-aux */
+        ST_RAW_MODULE_START=0,
+        /* Following enums are aligned to module-opcodes */
+        ST_RAW_MODULE_OPCODE_SINT=RDB_MODULE_OPCODE_SINT,
+        ST_RAW_MODULE_OPCODE_UINT=RDB_MODULE_OPCODE_UINT,
+        ST_RAW_MODULE_OPCODE_FLOAT=RDB_MODULE_OPCODE_FLOAT,
+        ST_RAW_MODULE_OPCODE_DOUBLE=RDB_MODULE_OPCODE_DOUBLE,
+        ST_RAW_MODULE_OPCODE_STRING_CALL_STR=RDB_MODULE_OPCODE_STRING,
+
+        ST_RAW_MODULE_OPCODE_STRING_STR_RETURN, /* return from sub-element string parsing */
+        ST_RAW_MODULE_NEXT_OPCODE,
+        ST_RAW_MODULE_AUX_START,
+    } RAW_MODULE_STATES;
+
+    RawContext *rawCtx = &p->rawCtx;
+
+    while (1) {
+        switch (p->elmCtx.state) {
+
+            case ST_RAW_MODULE_START: {
+                int len = 0;
+
+                if (p->currOpcode == RDB_TYPE_MODULE_2) {
+                    uint64_t moduleid;
+                    aggMakeRoom(p, 32);
+                    IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &moduleid, (unsigned char *) rawCtx->at, &len));
+                    /*** ENTER SAFE STATE ***/
+                    IF_NOT_OK_RETURN(cbHandleBegin(p, DATA_SIZE_UNKNOWN_AHEAD));
+                    IF_NOT_OK_RETURN(aggUpdateWritten(p, len));
+                    updateElementState(p, ST_RAW_MODULE_NEXT_OPCODE);
+                    break;
+                }
+
+                /* No new-key precedes module aux. Init Aggregator of bulks here.
+                 * Note that the call is made from a safe state */
+                aggAllocFirstBulk(p);
+                updateElementState(p, ST_RAW_MODULE_AUX_START);
+            } /* fall-thru */
+
+            case ST_RAW_MODULE_AUX_START: {
+                int len = 0;
+                ElementRawModuleAux *ma = &p->elmCtx.rawModAux;
+                IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &ma->moduleid, NULL, &len));
+                IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &ma->when_opcode, NULL, NULL));
+                IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &ma->when, NULL, NULL));
+                if (unlikely(ma->when_opcode != RDB_MODULE_OPCODE_UINT)) {
+                    RDB_reportError(p, RDB_ERR_MODULE_INVALID_WHEN_OPCODE,
+                                    "elementRawModule() : Invalid when opcode: %d.", ma->when_opcode);
+                    return RDB_STATUS_ERROR;
+                }
+                /*** ENTER SAFE STATE ***/
+                IF_NOT_OK_RETURN(cbHandleBegin(p, DATA_SIZE_UNKNOWN_AHEAD));
+                IF_NOT_OK_RETURN(aggUpdateWritten(p, len));
+                updateElementState(p, ST_RAW_MODULE_NEXT_OPCODE);
+                break;
+            }
+
+            case ST_RAW_MODULE_OPCODE_SINT:
+            case ST_RAW_MODULE_OPCODE_UINT: {
+                uint64_t val = 0;
+                int len = 0;
+
+                IF_NOT_OK_RETURN(aggMakeRoom(p, 32));
+                IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &val, (unsigned char *) rawCtx->at, &len));
+                /*** ENTER SAFE STATE ***/
+                IF_NOT_OK_RETURN(aggUpdateWritten(p, len));
+                updateElementState(p, ST_RAW_MODULE_NEXT_OPCODE);
+                break;
+            }
+
+            case ST_RAW_MODULE_OPCODE_FLOAT: {
+                IF_NOT_OK_RETURN(aggMakeRoom(p, sizeof(float)));
+                IF_NOT_OK_RETURN(rdbLoadFloatValue(p, (float *) rawCtx->at));
+                /*** ENTER SAFE STATE ***/
+                IF_NOT_OK_RETURN(aggUpdateWritten(p, sizeof(float)));
+                updateElementState(p, ST_RAW_MODULE_NEXT_OPCODE);
+                break;
+            }
+
+            case ST_RAW_MODULE_OPCODE_DOUBLE: {
+                IF_NOT_OK_RETURN(aggMakeRoom(p, sizeof(double)));
+                IF_NOT_OK_RETURN(rdbLoadDoubleValue(p, (double *) rawCtx->at));
+                /*** ENTER SAFE STATE ***/
+                IF_NOT_OK_RETURN(aggUpdateWritten(p, sizeof(double)));
+                updateElementState(p, ST_RAW_MODULE_NEXT_OPCODE);
+                break;
+            }
+
+            case ST_RAW_MODULE_OPCODE_STRING_CALL_STR: {
+                /* call raw string as subelement */
+                return subElementCall(p, PE_RAW_STRING, ST_RAW_MODULE_OPCODE_STRING_STR_RETURN);
+            }
+
+            case ST_RAW_MODULE_OPCODE_STRING_STR_RETURN: {
+                /*** ENTER SAFE STATE (no rdb read)***/
+                size_t len;
+                char *dataRet;
+                subElementCallEnd(p, &dataRet, &len);
+                updateElementState(p, ST_RAW_MODULE_NEXT_OPCODE);
+                break;
+            }
+
+            case ST_RAW_MODULE_NEXT_OPCODE: {
+                int len = 0;
+                uint64_t opcode = 0;
+
+                IF_NOT_OK_RETURN(aggMakeRoom(p, 32));
+                IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &opcode, (unsigned char *) rawCtx->at, &len));
+                /*** ENTER SAFE STATE ***/
+                IF_NOT_OK_RETURN(aggUpdateWritten(p, len));
+
+                if ((int) opcode != RDB_MODULE_OPCODE_EOF) {
+                    /* Valid cast. Took care to align opcode with module states */
+                    updateElementState(p, (RAW_MODULE_STATES) opcode);
+                    break;
+                }
+
+                /* EOF module/module-aux object */
+                if (p->currOpcode == RDB_OPCODE_MODULE_AUX) {
+                    /* module-aux is not stored as a key, thus indicate to end restore
+                     * command here and transition the parser to next rdb type */
+                    IF_NOT_OK_RETURN(cbHandleEnd(p));
+                    return nextParsingElement(p, PE_NEXT_RDB_TYPE);
+                } else {
+                    return nextParsingElement(p, PE_RAW_END_KEY);
+                }
+            }
+
+            default:
+                /* if reached here, most probably because read invalid opcode from RDB */
+                RDB_reportError(p, RDB_ERR_MODULE_INVALID_STATE,
+                    "elementRawModule() : Invalid parsing element state: %d.", p->elmCtx.state);
+                return RDB_STATUS_ERROR;
+        }
+    }
+}
+
 
 /*** various functions ***/
 
@@ -620,6 +750,31 @@ static inline RdbStatus cbHandleBegin(RdbParser *p, size_t size) {
 }
 
 static inline RdbStatus cbHandleEnd(RdbParser *p) {
+    /*** ENTER SAFE STATE (no rdb read) ***/
+    ElementRawModuleAux *ma = &p->elmCtx.rawModAux;
+    RawContext *ctx = &p->rawCtx;
+
+    /* if aggregated entire type then only now parser knows to report totalSize */
+    if (ctx->aggType == AGG_TYPE_ENTIRE_DATA) {
+        if (p->currOpcode == RDB_OPCODE_MODULE_AUX) {
+            BulkInfo *bulkName;
+            IF_NOT_OK_RETURN(allocFromCache(p, 9, RQ_ALLOC_APP_BULK, NULL, &bulkName));
+            moduleTypeNameByID(bulkName->ref,ma->moduleid);
+            registerAppBulkForNextCb(p, bulkName);
+            CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_RAW, rdbRaw.handleBeginModuleAux,
+                             bulkName->ref,
+                             ma->moduleid&1023,
+                             ma->when, ctx->totalSize);
+        } else
+            CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_RAW, rdbRaw.handleBegin, ctx->totalSize);
+    }
+
+    /* report entire/leftover to cb handlers */
+    for(int j = 0 ; j <= ctx->curBulkIndex ; ++j)
+        cbHandleFrag(p, ctx->bulkArray + j);
+
+    aggFlushBulks(p);
+
     CALL_HANDLERS_CB_NO_ARGS(p, NOP, RDB_LEVEL_RAW, rdbRaw.handleEnd);
     return RDB_STATUS_OK;
 }
@@ -687,7 +842,7 @@ static RdbStatus singleStringTypeHandling(RdbParser *p, singleStringTypeValidate
 
 /*** raw aggregator of data ***/
 
-static RdbStatus aggUpdateWrittenCbFrag(RdbParser *p, size_t bytesWritten) {
+static RdbStatus aggUpdateWritten(RdbParser *p, size_t bytesWritten) {
     RawContext *ctx = &p->rawCtx;
 
     p->rawCtx.at += bytesWritten;
@@ -777,4 +932,13 @@ static inline void aggAllocFirstBulk(RdbParser *p) {
     ctx->at = ctx->bulkArray[0].ref;
     ctx->curBulkIndex = 0;
     ctx->totalSize = 0;
+}
+
+void printAggAraryDbg(RdbParser *p) {
+    RawContext *ctx = &p->rawCtx;
+    for (int i = 0; i <= ctx->curBulkIndex ; ++i) {
+        BulkInfo *b = ctx->bulkArray+i;
+        printf("bulkArray[%d]: bulkType=%d ref=%p len=%lu written=%lu next=%p\n",
+               i, b->bulkType, (void *)b->ref, b->len, b->written, (void *)b->next);
+    }
 }

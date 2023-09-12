@@ -4,5 +4,3 @@
 
 /* Keep direct value for external readers */
 #define LIBRDB_VERSION_STRING "0.0.1"
-
-

@@ -17,7 +17,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-export LD_LIBRARY_PATH="`pwd`/lib"${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
+export LD_LIBRARY_PATH="`pwd`/deps/hiredis:`pwd`/lib"${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}
 
 if [[ ${VALGRIND} -ne 0 ]]; then
   valgrind \

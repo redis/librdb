@@ -18,8 +18,11 @@ WARNS       = -Wall -Wextra -pedantic -Werror -Wno-unused-function
 
 CFLAGS      = -fPIC -O3 $(STD) $(STACK) $(WARNS)
 DEBUG       = -g3 -DDEBUG=1
-LIBS        = -l cmocka -L /usr/lib -L $(LIB_DIR) -l $(LIB_NAME) -l $(LIB_NAME_EXT)
-LIBS_STATIC = -l cmocka -L /usr/lib -L $(LIB_DIR) -l:lib$(LIB_NAME_EXT).a
+LIBS        = -l cmocka -L /usr/lib -L $(LIB_DIR) -l $(LIB_NAME) -l $(LIB_NAME_EXT) -L../deps/hiredis -lhiredis
+LIBS_STATIC = -l cmocka -L /usr/lib -L $(LIB_DIR) -l:lib$(LIB_NAME_EXT).a -L../deps/hiredis -lhiredis
+
+LIBHIREDIS=../deps/hiredis/libhiredis.a
+
 
 ifeq ($(BUILD_TLS),yes)
 CFLAGS+=-DUSE_OPENSSL=1
@@ -31,10 +34,10 @@ all: $(TARGET_TEST) $(TARGET_TEST_STATIC)
 	@echo "Done.";
 
 $(TARGET_TEST): $(OBJECTS)
-	$(CC) $(OBJECTS) -o $@ $(DEBUG) $(CFLAGS) $(LIBS)
+	$(CC) $(OBJECTS) -o $@ $(LIBHIREDIS) $(DEBUG) $(CFLAGS) $(LIBS)
 
 $(TARGET_TEST_STATIC): $(OBJECTS)
-	$(CC) $(OBJECTS) -o $@ $(DEBUG) $(CFLAGS) $(LIBS) $(LIBS_STATIC)
+	$(CC) $(OBJECTS) -o $@ $(LIBHIREDIS) $(DEBUG) $(CFLAGS) $(LIBS) $(LIBS_STATIC)
 
 -include $(OBJECTS:.o=.d)
 

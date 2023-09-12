@@ -1,3 +1,6 @@
+#ifndef DEFINES_H
+#define DEFINES_H
+
 /* This file should include only RDB related defines. Might be read in the
  * future from Redis repo */
 
@@ -96,3 +99,13 @@
 /* quicklist node container formats */
 #define QUICKLIST_NODE_CONTAINER_PLAIN 1
 #define QUICKLIST_NODE_CONTAINER_PACKED 2
+
+/* Module serialized values sub opcodes */
+#define RDB_MODULE_OPCODE_EOF   0   /* End of module value. */
+#define RDB_MODULE_OPCODE_SINT  1   /* Signed integer. */
+#define RDB_MODULE_OPCODE_UINT  2   /* Unsigned integer. */
+#define RDB_MODULE_OPCODE_FLOAT 3   /* Float. */
+#define RDB_MODULE_OPCODE_DOUBLE 4  /* Double. */
+#define RDB_MODULE_OPCODE_STRING 5  /* String. */
+
+#endif /*DEFINES_H*/

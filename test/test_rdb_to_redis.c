@@ -10,24 +10,31 @@ void dummyLogger(RdbLogLevel l, const char *msg) { UNUSED(l, msg); }
 
 static int setupTest(void **state) {
     UNUSED(state);
-    runSystemCmd("%s/redis-cli -p %d flushall > /dev/null", redisInstallFolder, redisPort);
-    runSystemCmd("%s/redis-cli -p %d save > /dev/null", redisInstallFolder, redisPort);
+    sendRedisCmd("FLUSHALL", REDIS_REPLY_STATUS, NULL);
+    sendRedisCmd("SAVE", REDIS_REPLY_STATUS, NULL);
     return 0;
 }
 
-static void rdb_to_tcp(const char *rdbfile, int pipelineDepth, int isRestore) {
+void rdb_to_tcp(const char *rdbfile, int pipelineDepth, int isRestore, char *respFileName) {
     RdbxRespToRedisLoader *r2r;
-    RdbxToResp *rdbToResp;
+    RdbxToResp *rdbToResp1, *rdbToResp2;
     RdbStatus status;
 
-    RdbxToRespConf rdb2respConf = { .supportRestore = isRestore, .dstRedisVersion = "45.67.89",};
+    RdbxToRespConf rdb2respConf = {
+        .supportRestore = isRestore,
+        .dstRedisVersion = "45.67.89",
+        .supportRestoreModuleAux = isSupportRestoreModuleAux()
+    };
 
     RdbParser *parser = RDB_createParserRdb(NULL);
     RDB_setLogLevel(parser, RDB_LOG_ERR);
     assert_non_null(RDBX_createReaderFile(parser, rdbfile));
-    assert_non_null(rdbToResp = RDBX_createHandlersToResp(parser, &rdb2respConf));
-    r2r = RDBX_createRespToRedisTcp(parser, rdbToResp, "127.0.0.1", redisPort);
-    assert_non_null(r2r);
+    assert_non_null(rdbToResp1 = RDBX_createHandlersToResp(parser, &rdb2respConf));
+    assert_non_null(r2r = RDBX_createRespToRedisTcp(parser, rdbToResp1, "127.0.0.1", redisPort));
+    if (respFileName) {
+        assert_non_null(rdbToResp2 = RDBX_createHandlersToResp(parser, &rdb2respConf));
+        assert_non_null(RDBX_createRespToFileWriter(parser, rdbToResp2, respFileName));
+    }
     RDBX_setPipelineDepth(r2r, pipelineDepth);
     RDB_setLogLevel(parser, RDB_LOG_ERR);
     while ((status = RDB_parse(parser)) == RDB_STATUS_WAIT_MORE_DATA);
@@ -69,21 +76,26 @@ static void rdb_to_json(const char *rdbfile, const char *outfile) {
  * the background. test_rdb_to_resp.c verifies that RESTORE command is used
  * only when it should.
  */
-static void test_rdb_to_redis_common(const char *rdbfile, int pipelineDepth, int ignoreListOrder, const char *expJsonFile) {
+static void test_rdb_to_redis_common(const char *rdbfile, int ignoreListOrder, char *expRespCmd, const char *expJsonFile) {
 
     /* test one time without RESTORE, Playing against old version.
      * and one time with RESTORE, Playing against new version. */
     for (int isRestore = 0 ; isRestore <= 1 ; ++isRestore) {
 
-        /* flushall */
-        runSystemCmd("%s/redis-cli -p %d flushall > /dev/null", redisInstallFolder, redisPort);
+        sendRedisCmd("FLUSHALL", REDIS_REPLY_STATUS, NULL);
 
         /* 1. Convert RDB to Json (out1.json) */
         rdb_to_json(rdbfile, TMP_FOLDER("out1.json"));
 
         /* 2. Upload RDB against Redis and save DUMP-RDB */
-        rdb_to_tcp(rdbfile, pipelineDepth, isRestore);
-        runSystemCmd("%s/redis-cli -p %d save > /dev/null", redisInstallFolder, redisPort);
+        rdb_to_tcp(rdbfile, 1, isRestore, TMP_FOLDER("cmd.resp"));
+        sendRedisCmd("SAVE", REDIS_REPLY_STATUS, NULL);
+
+        if (expRespCmd) {
+            /* Verify corresponding RESP commands includes `expRespCmd` or `RESTORE` */
+            char *exp = (isRestore) ?  "RESTORE" : expRespCmd;
+             assert_file_payload(TMP_FOLDER("cmd.resp"), exp, strlen(exp), M_SUBSTR, 1);
+        }
 
         /* 3. From DUMP-RDB generate Json (out2.json) */
         rdb_to_json(TMP_FOLDER("dump.rdb"), TMP_FOLDER("out2.json"));
@@ -98,107 +110,141 @@ static void test_rdb_to_redis_common(const char *rdbfile, int pipelineDepth, int
 
 static void test_rdb_to_redis_single_string(void **state) {
     UNUSED(state);
-    test_rdb_to_redis_common(DUMP_FOLDER("single_key.rdb"), 0, 0, NULL);
+    test_rdb_to_redis_common(DUMP_FOLDER("single_key.rdb"), 0, "SET", NULL);
 }
 
 static void test_rdb_to_redis_single_list(void **state) {
     UNUSED(state);
-    test_rdb_to_redis_common(DUMP_FOLDER("quicklist2_v11.rdb"), 0, 0, NULL);
+    test_rdb_to_redis_common(DUMP_FOLDER("quicklist2_v11.rdb"), 0, "$5\r\nRPUSH", NULL);
 }
 
 static void test_rdb_to_redis_multiple_lists_strings(void **state) {
     UNUSED(state);
-    test_rdb_to_redis_common(DUMP_FOLDER("multiple_lists_strings.rdb"), 0, 0, NULL);
+    test_rdb_to_redis_common(DUMP_FOLDER("multiple_lists_strings.rdb"), 0, "$5\r\nRPUSH", NULL);
 }
 
 static void test_rdb_to_redis_multiple_lists_strings_pipeline_depth_1(void **state) {
     UNUSED(state);
-    test_rdb_to_redis_common(DUMP_FOLDER("multiple_lists_strings.rdb"), 1, 0, NULL);
+    test_rdb_to_redis_common(DUMP_FOLDER("multiple_lists_strings.rdb"), 0, "$5\r\nRPUSH", NULL);
 }
 
 static void test_rdb_to_redis_plain_list(void **state) {
     UNUSED(state);
-    test_rdb_to_redis_common(DUMP_FOLDER("plain_list_v6.rdb"), 1, 0, NULL);
+    test_rdb_to_redis_common(DUMP_FOLDER("plain_list_v6.rdb"), 0, "$5\r\nRPUSH", NULL);
 }
 
 static void test_rdb_to_redis_quicklist(void **state) {
     UNUSED(state);
-    test_rdb_to_redis_common(DUMP_FOLDER("quicklist.rdb"), 1, 0, NULL);
+    test_rdb_to_redis_common(DUMP_FOLDER("quicklist.rdb"), 0, "$5\r\nRPUSH", NULL);
 }
 
 static void test_rdb_to_redis_single_ziplist(void **state) {
     UNUSED(state);
-    test_rdb_to_redis_common(DUMP_FOLDER("ziplist_v3.rdb"), 1, 0, NULL);
+    test_rdb_to_redis_common(DUMP_FOLDER("ziplist_v3.rdb"), 0, "$5\r\nRPUSH", NULL);
 }
 
 static void test_rdb_to_redis_plain_hash(void **state) {
     UNUSED(state);
-    test_rdb_to_redis_common(DUMP_FOLDER("plain_hash_v3.rdb"), 1, 0, NULL);
+    test_rdb_to_redis_common(DUMP_FOLDER("plain_hash_v3.rdb"), 0, "$4\r\nHSET", NULL);
 }
 
 static void test_rdb_to_redis_hash_zl(void **state) {
     UNUSED(state);
-    test_rdb_to_redis_common(DUMP_FOLDER("hash_zl_v6.rdb"), 1, 0, NULL);
+    test_rdb_to_redis_common(DUMP_FOLDER("hash_zl_v6.rdb"), 0, "$4\r\nHSET", NULL);
 }
 
 static void test_rdb_to_redis_hash_lp(void **state) {
     UNUSED(state);
-    test_rdb_to_redis_common(DUMP_FOLDER("hash_lp_v11.rdb"), 1, 0, NULL);
+    test_rdb_to_redis_common(DUMP_FOLDER("hash_lp_v11.rdb"), 0, "$4\r\nHSET", NULL);
 }
 
 static void test_rdb_to_redis_hash_zm(void **state) {
     UNUSED(state);
-    test_rdb_to_redis_common(DUMP_FOLDER("hash_zm_v2.rdb"), 1, 0, NULL);
+    test_rdb_to_redis_common(DUMP_FOLDER("hash_zm_v2.rdb"), 0, "$4\r\nHSET", NULL);
 }
 
 static void test_rdb_to_redis_plain_set(void **state) {
     UNUSED(state);
-    test_rdb_to_redis_common(DUMP_FOLDER("plain_set_v6.rdb"), 1, 1, NULL);
+    test_rdb_to_redis_common(DUMP_FOLDER("plain_set_v6.rdb"), 1, "$4\r\nSADD", NULL);
 }
 
 static void test_rdb_to_redis_set_is(void **state) {
     UNUSED(state);
-    test_rdb_to_redis_common(DUMP_FOLDER("set_is_v11.rdb"), 1, 1, NULL);
+    test_rdb_to_redis_common(DUMP_FOLDER("set_is_v11.rdb"), 1, "$4\r\nSADD", NULL);
 }
 
 static void test_rdb_to_redis_set_lp(void **state) {
     UNUSED(state);
-    test_rdb_to_redis_common(DUMP_FOLDER("set_lp_v11.rdb"), 1, 1, NULL);
+    test_rdb_to_redis_common(DUMP_FOLDER("set_lp_v11.rdb"), 1, "$4\r\nSADD", NULL);
 }
 
 static void test_rdb_to_redis_multiple_dbs(void **state) {
     UNUSED(state);
-    test_rdb_to_redis_common(DUMP_FOLDER("multiple_dbs.rdb"), 1, 1, NULL);
+    test_rdb_to_redis_common(DUMP_FOLDER("multiple_dbs.rdb"), 1, NULL, NULL);
 }
 
 static void test_rdb_to_redis_set_expired(void **state) {
     UNUSED(state);
-    test_rdb_to_redis_common(DUMP_FOLDER("set_expired_v11.rdb"), 1, 1,
+    test_rdb_to_redis_common(DUMP_FOLDER("set_expired_v11.rdb"), 1, "$9\r\nPEXPIREAT",
                              DUMP_FOLDER("set_expired.json"));
 }
 
 static void test_rdb_to_redis_set_not_expired(void **state) {
     UNUSED(state);
-    test_rdb_to_redis_common(DUMP_FOLDER("set_not_expired_v11.rdb"), 1, 1,
+    test_rdb_to_redis_common(DUMP_FOLDER("set_not_expired_v11.rdb"), 1,"$9\r\nPEXPIREAT",
                              DUMP_FOLDER("set_not_expired.json"));
 }
 
 static void test_rdb_to_redis_policy_lfu(void **state) {
     UNUSED(state);
-    test_rdb_to_redis_common(DUMP_FOLDER("mem_policy_lfu.rdb"), 1, 1,
+    test_rdb_to_redis_common(DUMP_FOLDER("mem_policy_lfu.rdb"), 1, NULL,
                              DUMP_FOLDER("mem_policy_lfu.json"));
 }
 
 static void test_rdb_to_redis_policy_lru(void **state) {
     UNUSED(state);
-    test_rdb_to_redis_common(DUMP_FOLDER("mem_policy_lru.rdb"), 1, 1,
+    test_rdb_to_redis_common(DUMP_FOLDER("mem_policy_lru.rdb"), 1, NULL,
                              DUMP_FOLDER("mem_policy_lru.json"));
 }
 
 static void test_rdb_to_redis_function(void **state) {
     UNUSED(state);
-    test_rdb_to_redis_common(DUMP_FOLDER("function.rdb"), 1, 1, NULL);
+    test_rdb_to_redis_common(DUMP_FOLDER("function.rdb"), 1, NULL, NULL);
 }
+
+/* test relied on rdbtest module within redis repo, if available */
+void test_rdb_to_redis_module(void **state) {
+    UNUSED(state);
+
+    /* Skip test if testrdb is not loaded */
+    if (! strstr( sendRedisCmd("MODULE LIST", REDIS_REPLY_ARRAY, NULL), "testrdb" ) )
+        skip();
+
+    /* 1. Apply testrdb SET module command on Redis */
+    sendRedisCmd("testrdb.set.key key1 value1", REDIS_REPLY_INTEGER, NULL);
+    sendRedisCmd("testrdb.set.key 123456 7890", REDIS_REPLY_INTEGER, NULL);
+
+    /* 2. Save rdb aside */
+    sendRedisCmd("SAVE", REDIS_REPLY_STATUS, NULL);
+    runSystemCmd("cp %s %s > /dev/null", TMP_FOLDER("dump.rdb"), TMP_FOLDER("test_rdb_to_redis_module.rdb"));
+
+    /* 3. Flushall Redis database */
+    sendRedisCmd("FLUSHALL", REDIS_REPLY_STATUS, NULL);
+
+    /* 4. Run the parser against Redis and also let it output RESP to a file */
+    rdb_to_tcp(TMP_FOLDER("test_rdb_to_redis_module.rdb"), 1, 1, TMP_FOLDER("rdb_to_tcp.resp"));
+
+    /* 5. Verify resp file contains "RESTOREMODAUX & RESTORE key1" */
+    assert_file_payload(TMP_FOLDER("rdb_to_tcp.resp"), STR_AND_SIZE("RESTORE\r\n$4\r\nkey1"), M_SUBSTR, 1);
+    if (isSupportRestoreModuleAux())
+        assert_file_payload(TMP_FOLDER("rdb_to_tcp.resp"), STR_AND_SIZE("RESTOREMODAUX"), M_SUBSTR, 1);
+
+
+    /* 5. Now, verify testrdb GET module command returns expected values from Redis */
+    sendRedisCmd("testrdb.get.key key1", REDIS_REPLY_STRING, "value1");
+    sendRedisCmd("testrdb.get.key 123456", REDIS_REPLY_STRING, "7890");
+}
+
 
 /* iff 'delKeyBeforeWrite' is not set, then the parser will return an error on
  * loading 100_lists.rdb ("mylist1 mylist2 ... mylist100") on key 'mylist62'
@@ -215,7 +261,8 @@ static void test_rdb_to_redis_del_before_write(void **state) {
         };
 
         /* create key `mylist62` that goanna appear as well in the RDB file */
-        runSystemCmd("%s/redis-cli -p %d set mylist62 1 > /dev/null", redisInstallFolder, redisPort);
+        sendRedisCmd("set mylist62 1", REDIS_REPLY_STATUS, NULL);
+
         /* RDB to TCP */
         RdbxToResp *rdbToResp;
         parser = RDB_createParserRdb(NULL);
@@ -250,7 +297,7 @@ static void test_rdb_to_redis_del_before_write(void **state) {
 /*************************** group_rdb_to_redis *******************************/
 int group_rdb_to_redis() {
 
-    if (!redisInstallFolder) {
+    if (!isSetRedisServer()) {
         printf("[  SKIPPED ] (Redis installation folder is not configured)\n");
         return 0;
     }
@@ -287,11 +334,9 @@ int group_rdb_to_redis() {
             cmocka_unit_test_setup(test_rdb_to_redis_del_before_write, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_multiple_dbs, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_function, setupTest),
+            cmocka_unit_test_setup(test_rdb_to_redis_module, setupTest),
     };
 
-    setupRedisServer();
     int res = cmocka_run_group_tests(tests, NULL, NULL);
-    teardownRedisServer();
-
     return res;
 }

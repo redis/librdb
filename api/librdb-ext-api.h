@@ -112,6 +112,11 @@ typedef struct RdbxToRespConf {
      * workaround. */
      const char *dstRedisVersion; /* "<major>.<minor>[.<patch>]" */
 
+    /* Redis OSS does not support restoring module auxiliary data. This feature
+     * is currently available only in Redis Enterprise. There are plans to bring
+     * this functionality to Redis OSS in the near future. */
+     int supportRestoreModuleAux;
+
 } RdbxToRespConf;
 
 _LIBRDB_API RdbxToResp *RDBX_createHandlersToResp(RdbParser *, RdbxToRespConf *);

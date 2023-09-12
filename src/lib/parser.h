@@ -138,7 +138,9 @@ typedef enum ParsingElementType {
     PE_SET,
     PE_SET_IS,
     PE_SET_LP,
+    PE_MODULE,
     PE_FUNCTION,
+    PE_MODULE_AUX,
 
     /* parsing raw data types */
     PE_RAW_NEW_KEY,
@@ -154,6 +156,8 @@ typedef enum ParsingElementType {
     PE_RAW_SET,
     PE_RAW_SET_IS,
     PE_RAW_SET_LP,
+    PE_RAW_MODULE,
+    PE_RAW_MODULE_AUX,
 
     PE_END_OF_FILE,
     PE_MAX
@@ -184,6 +188,11 @@ typedef struct {
 } ElementHashCtx;
 
 typedef struct {
+    uint64_t moduleId;
+    size_t startBytesRead; /* to evaluate how many bytes in total of current module */
+} ElementModuleCtx;
+
+typedef struct {
     RdbKeyInfo info;
     ParsingElementType valueType;
     RdbHandlersLevel handleByLevel;
@@ -210,17 +219,25 @@ typedef struct {
     uint64_t  visitField;
 } ElementRawHashCtx;
 
+typedef struct {
+    uint64_t moduleid;
+    uint64_t when_opcode;
+    uint64_t when;
+} ElementRawModuleAux;
+
 typedef struct ElementCtx {
     ElementKeyCtx key;
     ElementListCtx list;
     ElementSetCtx set;
     ElementHashCtx hash;
+    ElementModuleCtx module;
 
     /* raw elements context */
     ElementRawStringCtx rawString;
     ElementRawListCtx rawList;
     ElementRawSetCtx rawSet;
     ElementRawHashCtx rawHash;
+    ElementRawModuleAux rawModAux;
 
     int state;  /* parsing-element state */
 } ElementCtx;
@@ -407,6 +424,8 @@ RdbStatus subElementReturn(RdbParser *p, BulkInfo *bulkResult);
 void subElementCallEnd(RdbParser *p, RdbBulk *bulkResult, size_t *len);
 
 /*** Loaders from RDB ***/
+RdbStatus rdbLoadFloatValue(RdbParser *p, float *val);
+RdbStatus rdbLoadDoubleValue(RdbParser *p, double *val);
 RdbStatus rdbLoadLen(RdbParser *p, int *isencoded, uint64_t *lenptr, unsigned char* outbuff, int *outbufflen);
 RdbStatus rdbLoadInteger(RdbParser *p, int enctype, AllocTypeRq type, char *refBuf, BulkInfo **out);
 RdbStatus rdbLoadString(RdbParser *p, AllocTypeRq type, char *refBuf, BulkInfo **out);
@@ -414,6 +433,15 @@ RdbStatus rdbLoadLzfString(RdbParser *p, AllocTypeRq type, char *refBuf, BulkInf
 static inline RdbStatus rdbLoad(RdbParser *p, size_t len, AllocTypeRq type, char *refBuf, BulkInfo **out) {
     return p->readRdbFunc(p, len, type, refBuf, out);
 }
+
+/*** misc ***/
+void moduleTypeNameByID(char *name, uint64_t moduleid);
+
+RdbStatus allocFromCache(RdbParser *p,
+                         size_t len,
+                         AllocTypeRq type,
+                         char *refBuf,
+                         BulkInfo **binfo);
 
 /*** raw data parsing ***/
 void parserRawInit(RdbParser *p);
@@ -446,6 +474,7 @@ RdbStatus elementSet(RdbParser *p);
 RdbStatus elementSetIS(RdbParser *p);
 RdbStatus elementSetLP(RdbParser *p);
 RdbStatus elementFunction(RdbParser *p);
+RdbStatus elementModule(RdbParser *p);
 
 /*** Raw Parsing Elements ***/
 RdbStatus elementRawNewKey(RdbParser *p);
@@ -461,5 +490,6 @@ RdbStatus elementRawHashZM(RdbParser *p);
 RdbStatus elementRawSet(RdbParser *p);
 RdbStatus elementRawSetIS(RdbParser *p);
 RdbStatus elementRawSetLP(RdbParser *p);
+RdbStatus elementRawModule(RdbParser *p);
 
 #endif /*LIBRDB_PARSER_H*/

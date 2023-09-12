@@ -4,8 +4,8 @@
 
 static int setupTest(void **state) {
     UNUSED(state);
-    runSystemCmd("%s/redis-cli -p %d flushall > /dev/null", redisInstallFolder, redisPort);
-    runSystemCmd("%s/redis-cli -p %d save > /dev/null", redisInstallFolder, redisPort);
+    sendRedisCmd("FLUSHALL", REDIS_REPLY_STATUS, NULL);
+    sendRedisCmd("SAVE", REDIS_REPLY_STATUS, NULL);
     return 0;
 }
 
@@ -42,7 +42,7 @@ static void test_rdb_cli_resp_common(const char *rdbfile) {
     runSystemCmd("./bin/rdb-cli %s redis -h %s -p %d", rdbfile, "127.0.0.1", redisPort);
 
     /* DUMP-RDB from Redis */
-    runSystemCmd("%s/redis-cli -p %d save > /dev/null", redisInstallFolder, redisPort);
+    sendRedisCmd("SAVE", REDIS_REPLY_STATUS, NULL);
 
     /* DUMP-RDB to JSON */
     parser = RDB_createParserRdb(NULL);
@@ -73,7 +73,7 @@ static void test_rdb_cli_resp_to_redis(void **state) {
 /*************************** group_test_rdb_cli *******************************/
 int group_test_rdb_cli(void) {
 
-    if (!redisInstallFolder) {
+    if (!isSetRedisServer()) {
         printf("[  SKIPPED ] (Redis installation folder is not configured)\n");
         return 0;
     }
@@ -83,8 +83,6 @@ int group_test_rdb_cli(void) {
             cmocka_unit_test_setup(test_rdb_cli_resp_to_redis, setupTest),
     };
 
-    setupRedisServer();
     int res = cmocka_run_group_tests(tests, NULL, NULL);
-    teardownRedisServer();
     return res;
 }

@@ -11,6 +11,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v3
+        with:
+          submodules: 'recursive'
 
       - name: Install Prerequisites
         run: |
@@ -25,17 +27,18 @@ jobs:
           ctest
           sudo make install
           # Install redis for tests against external Redis server
-          cd ~
-          git clone https://github.com/redis/redis.git
-          cd redis 
-          make -j 4
-
+                              
+          # Build Redis to run it against librdb tests
+          git clone https://github.com/redis/redis.git ~/redis
+          make -j 4 -C ~/redis
+          make -C ~/redis/tests/modules
+          
         shell: bash
 
       - name: Build and run project
         run: |
-          export LD_LIBRARY_PATH=/usr/local/lib/
           export LIBRDB_REDIS_FOLDER=~/redis/src
+          export LD_LIBRARY_PATH=/usr/local/lib/
           make all valgrind
         working-directory: ${{github.workspace}}
 
@@ -46,6 +49,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v3
+        with:
+          submodules: 'recursive'
 
       - name: Install Prerequisites
         run: |
@@ -59,15 +64,18 @@ jobs:
           make
           sudo make install
           # Install redis for tests against external Redis server
-          cd ~
-          git clone https://github.com/redis/redis.git
-          cd redis 
-          make -j 4
+
+          # Build Redis to run it against librdb tests
+          git clone https://github.com/redis/redis.git ~/redis
+          make -j 4 -C ~/redis
+          make -C ~/redis/tests/modules
 
         shell: bash
 
       - name: Build and run project
         run: |
+          # clang is more strict to shared-obj versioning. Satisfy its needs.
+          (cd ./deps/hiredis ; ln -s ./libhiredis.so ./libhiredis.so.1.2.1-dev)
           export LD_LIBRARY_PATH=/usr/local/lib/
           export LIBRDB_REDIS_FOLDER=~/redis/src
           make all test

@@ -236,7 +236,7 @@ int main(int argc, char **argv)
         return RDB_ERR_GENERAL;
     }
 
-    if (at == argc) { /* didn't find any subcommand (json / resp) */
+    if (at == argc) {
         logger(RDB_LOG_ERR, "Missing <FORMAT> value.");
         printUsage();
         return RDB_ERR_GENERAL;
@@ -252,10 +252,11 @@ int main(int argc, char **argv)
     RDB_setLogLevel(parser, RDB_LOG_INF);
     RDB_setLogger(parser, logger);
 
-    res = formatFunc(parser, input, argc - at, argv + at);
+    if (RDB_OK != (res = formatFunc(parser, input, argc - at, argv + at)))
+        return res;
 
     if (RDB_OK != RDB_getErrorCode(parser))
-        goto perror;
+        return RDB_getErrorCode(parser);
 
     if (filterKey)
         RDBX_createHandlersFilterKey(parser, filterKey, 0);
@@ -263,12 +264,9 @@ int main(int argc, char **argv)
     while ((status = RDB_parse(parser)) == RDB_STATUS_WAIT_MORE_DATA);
 
     if (status != RDB_STATUS_OK)
-        goto perror;
+        return RDB_getErrorCode(parser);
 
     RDB_deleteParser(parser);
     fclose(logfile);
-    return res;
-
-perror:
-    return RDB_getErrorCode(parser);
+    return 0;
 }

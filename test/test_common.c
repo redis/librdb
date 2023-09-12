@@ -3,78 +3,36 @@
 
 #include <stdio.h>
 #include <string.h>
-#include <ctype.h>
 #include <stdlib.h>
 #include <signal.h>
 #include <time.h>
 #include <unistd.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
-#include <sys/types.h>
 #include <sys/wait.h>
 #include <dirent.h>
+#include "../deps/hiredis/hiredis.h"
 #include "test_common.h"
 #include "../src/ext/utils.c" /* for printHexDump() */
 
-/* server port to allocate for tests against live Redis */
-int redisPort;
-const char *redisInstallFolder;
-pid_t redis_pid = 0;
+/* Live Redis server for some of the tests (Optional) */
+redisContext *redisConnContext = NULL;
+int          redisPort=0;
+pid_t        redisPID = 0;
 
 void runSystemCmd(const char *cmdFormat, ...) {
-    char cmd[256];
+    char cmd[1024];
     va_list args;
     va_start(args, cmdFormat);
     vsnprintf(cmd, sizeof(cmd)-1, cmdFormat, args);
     va_end(args);
 
+    //printf ("runSystemCmd(): %s\n", cmd);
     int res = system(cmd);
     if (res) {
         printf("\nFailed to run command: %s\n", cmd);
         assert_true(0);
     }
-}
-
-void runSystemCmdRetry(int seconds, const char *cmdFormat, ...) {
-    char cmd[256];
-    va_list args;
-    va_start(args, cmdFormat);
-    vsnprintf(cmd, sizeof(cmd)-1, cmdFormat, args);
-    va_end(args);
-    time_t startTime = time(NULL);
-    do {
-        if (system(cmd) == 0) return;
-
-        /* sleep 10msec */
-        struct timespec req = {0, 10000*1000}, rem;
-        nanosleep(&req, &rem);
-
-    } while (difftime(time(NULL), startTime) < seconds);
-
-    printf("\nFailed to run command: %s\n", cmd);
-    exit(1);
-}
-
-static char* sanitizeData(char* str, char* charsToSkip) {
-    int i, j;
-    int len = strlen(str);
-    char* output = str;
-
-    if (!charsToSkip) charsToSkip = "";
-
-    for (i = 0, j = 0; i < len; i++) {
-        int skipChar = 0;
-
-        for (int k = 0; charsToSkip[k] != '\0'; k++) {
-            if (str[i] == charsToSkip[k])
-                skipChar = 1;
-        }
-        if (!skipChar)
-            output[j++] = str[i];
-    }
-
-    output[j] = '\0';
-    return output;
 }
 
 char *readFile(const char *filename,  size_t *length) {
@@ -108,7 +66,9 @@ void cleanTmpFolder() {
 
     struct dirent *entry;
     while ((entry = readdir(dir)) != NULL) {
-            if (strcmp(entry->d_name, ".") == 0 || strcmp(entry->d_name, "..") == 0)
+            if (strcmp(entry->d_name, ".") == 0 ||
+            strcmp(entry->d_name, "..") == 0 ||
+            (strcmp(entry->d_name, ".gitkeep") == 0))
             continue;
 
         char file_path[1024];
@@ -123,45 +83,59 @@ void setEnvVar (const char *name, const char *val) {
     setenv(name, val, 1);
 }
 
-void assert_file_payload(const char *filename, char *expData, MatchType matchType, int expMatch) {
-    const char *matchTypeName;
+char *substring(char *str, size_t len, char *substr) {
+    size_t sublen = strlen(substr);
+
+    if (sublen > len)
+        return NULL;
+
+    for (size_t cmpFromOffest = 0; cmpFromOffest < len - sublen; cmpFromOffest++) {
+        if (strncmp(&str[cmpFromOffest], substr, sublen) == 0) {
+            return &str[cmpFromOffest];
+        }
+    }
+    return NULL;
+}
+
+void assert_file_payload(const char *filename, char *expData, int expLen, MatchType matchType, int expMatch) {
+    const char *matchTypeName, *errMsg;
     size_t filelen;
     char *filedata = readFile(filename, &filelen);
-    size_t lenCmp;
-    char *dataToCmp;
-    int result;
+    int result=1;
 
     switch (matchType) {
         case M_PREFIX:
-            lenCmp = strlen(expData);
-            dataToCmp = filedata;
             matchTypeName = "prefix";
+            errMsg = "Error: Prefix of file is not as expected";
+            result = strncmp(filedata, expData, expLen);
             break;
         case M_ENTIRE:
-            lenCmp = filelen;
-            dataToCmp = filedata;
-            matchTypeName = "entire";
+            errMsg = "Error: File payload is not as expected";
+            matchTypeName = "payload";
+            result = strncmp(filedata, expData, expLen);
             break;
         case M_SUFFIX:
-            lenCmp = strlen(expData);
-            dataToCmp = filedata + filelen - strlen(expData);
+            errMsg = "Error: Suffix of file is not as expected";
             matchTypeName = "suffix";
+            result = strncmp(filedata + filelen - expLen, expData, expLen);
+            break;
+        case M_SUBSTR:
+            errMsg = "Error: File does not contains expected substring";
+            matchTypeName = "substr";
+            result = (substring(filedata, filelen, expData)) ? 0 : 1;
             break;
         default:
             assert_true(0);
             return;
     }
 
-    result = strncmp(dataToCmp, expData, lenCmp);
-
     if (((result != 0) && (expMatch)) || ((result == 0) && (!expMatch))) {
-        char buf[1000];
-        printf("Unexpectd payload of file-%s.\n", matchTypeName);
-        printf("---- %s ----\n", filename);
-        printHexDump(dataToCmp, lenCmp, buf, (int) sizeof(buf));
+        char buf[10000];
+        printf("%s\n---- file [%s] ----\n", errMsg, filename);
+        printHexDump(filedata, filelen, buf, (int) sizeof(buf));
         printf("%s", buf);
-        printf("\n---- Expected file (%s-match) ----\n", matchTypeName);
-        printHexDump(expData, strlen(expData), buf, (int) sizeof(buf));
+        printf("\n---- Expected %s ----\n", matchTypeName);
+        printHexDump(expData, expLen, buf, (int) sizeof(buf));
         printf("%s", buf);
         printf("\n------------\n");
         assert_true(0);
@@ -169,7 +143,7 @@ void assert_file_payload(const char *filename, char *expData, MatchType matchTyp
     free(filedata);
 }
 
-/*** setup external Redis Server ***/
+/*** Setup Redis Server ***/
 
 int findFreePort(int startPort, int endPort) {
     int reuse = 1;
@@ -206,35 +180,125 @@ int findFreePort(int startPort, int endPort) {
 }
 
 void cleanupRedisServer() {
-    if (redis_pid)
-        kill(redis_pid, SIGTERM);
+    if (redisPID)
+        kill(redisPID, SIGTERM);
 }
 
-void setupRedisServer() {
+size_t serializeRedisReply(const redisReply *reply, char *buffer, size_t bsize) {
+    size_t written = 0;
+
+    switch (reply->type) {
+        case REDIS_REPLY_STRING:
+        case REDIS_REPLY_STATUS:
+        case REDIS_REPLY_ERROR:
+            return snprintf(buffer, bsize, "%s", reply->str);
+            break;
+        case REDIS_REPLY_INTEGER:
+            return snprintf(buffer, bsize, "%lld", reply->integer);
+        case REDIS_REPLY_ARRAY:
+            for (size_t i = 0; i < reply->elements; i++) {
+                written += serializeRedisReply(reply->element[i], buffer + written, bsize - written);
+                if (written + 1 >= bsize)
+                    return written;
+                if (i < reply->elements - 1)
+                    written += snprintf(buffer + written, bsize - written, " ");
+            }
+            return written;
+        default:
+            assert_true(0);
+            return 0;
+    }
+}
+
+/*
+ * For array-responses check 'expRsp' is a substring. Otherwise check match entirely.
+ *
+ * Return the response serialized
+ */
+char *sendRedisCmd(char *cmd, int expRetType, char *expRsp) {
+    static char rspbuf[1000];
+
+    assert_non_null(redisConnContext);
+
+    redisReply *reply = redisCommand(redisConnContext, cmd);
+
+    //printf ("Command:%s\n", cmd);
+
+    assert_non_null(reply);
+    assert_int_equal(reply->type, expRetType);
+
+    size_t written = serializeRedisReply(reply, rspbuf, sizeof(rspbuf)-1);
+
+    if (expRsp) {
+        /* For complex responses, check `expRsp` is a substring. Otherwise, exact match */
+        if (expRetType != REDIS_REPLY_ARRAY)
+            assert_string_equal(reply->str, expRsp);
+        else
+            assert_non_null(substring(rspbuf, written, expRsp));
+    }
+
+    freeReplyObject(reply);
+    return rspbuf;
+}
+
+void setupRedisServer(const char *installFolder) {
     pid_t pid = fork();
     assert_int_not_equal (pid, -1);
 
     redisPort = findFreePort(6500, 6600);
 
     if (pid == 0) { /* child */
-        char redisPortStr[10];
-        char fullpath[256];
+        char redisPortStr[10], fullpath[256], testrdbModulePath[256];
 
-        printf ("Found free port to run Redis: %d\n", redisPort);
+        printf("Found free port to run Redis: %d\n", redisPort);
 
-        snprintf(fullpath, 255, "%s/%s", redisInstallFolder, "redis-server");
+        snprintf(fullpath, sizeof(fullpath), "%s/redis-server", installFolder);
+        snprintf(testrdbModulePath, sizeof(testrdbModulePath), "%s/../tests/modules/testrdb.so", installFolder);
         snprintf(redisPortStr, sizeof(redisPortStr), "%d", redisPort);
-        execl(fullpath, fullpath, "--port", redisPortStr , "--dir", "./test/tmp/", "--logfile", "./redis.log", (char*)NULL);
+
+        /* if module testrdb.so exists (ci.yaml takes care to build testrdb), part
+         * of redis repo testing, then load it for test_rdb_to_redis_module. The
+         * test will run only if testrdb appear in the server "MODULE LIST",
+         * otherwise skipped gracefully. */
+        if (access(testrdbModulePath, F_OK) != -1) {
+            execl(fullpath, fullpath,
+                  "--port", redisPortStr,
+                  "--dir", "./test/tmp/",
+                  "--logfile", "./redis.log",
+                  "--loadmodule", testrdbModulePath, "4",
+                  (char *) NULL);
+        } else {
+            execl(fullpath, fullpath,
+                  "--port", redisPortStr,
+                  "--dir", "./test/tmp/",
+                  "--logfile", "./redis.log",
+                  (char *) NULL);
+       }
 
         /* If execl returns, an error occurred! */
         perror("execl");
         exit(1);
     } else { /* parent */
+        int retryCount = 3;
 
-        /* wait to server to become available */
-        runSystemCmdRetry(5, "%s/redis-cli -p %d ping 2>&1 | grep -i pong > /dev/null ", redisInstallFolder, redisPort);
+        redisConnContext = redisConnect("localhost", redisPort);
+        while ((!redisConnContext) || (redisConnContext->err)) {
 
-        redis_pid = pid;
+            if (redisConnContext) redisFree(redisConnContext);
+
+            if (--retryCount == 0) {
+                perror("Failed to run Redis Server");
+                exit(1);
+            }
+
+            /* Sleep 50msec */
+            struct timespec req = {0, 50000*1000}, rem;
+            nanosleep(&req, &rem);
+
+            redisConnContext = redisConnect("localhost", redisPort);
+        }
+
+        redisPID = pid;
 
         /* Close any subprocess in case of exit due to error flow */
         atexit(cleanupRedisServer);
@@ -242,8 +306,29 @@ void setupRedisServer() {
 }
 
 void teardownRedisServer() {
-    runSystemCmd("%s/redis-cli -p %d shutdown > /dev/null 2>&1", redisInstallFolder, redisPort);
-    wait(NULL);
+    if (redisConnContext) {
+        assert_non_null(redisConnContext);
+        assert_null(redisCommand(redisConnContext, "SHUTDOWN"));
+        redisFree(redisConnContext);
+        redisConnContext = NULL;
+        wait(NULL);
+    }
+}
+
+int isSetRedisServer() {
+    return (redisConnContext != NULL);
+}
+
+/* Redis OSS does not support restoring module auxiliary data. This feature
+ * is currently available only in Redis Enterprise. There are plans to bring
+ * this functionality to Redis OSS in the near future. */
+int isSupportRestoreModuleAux() {
+    static int supported = -1;   /* -1=UNINIT, 0=NO, 1=YES */
+    if (supported == -1) {
+        char *res = sendRedisCmd("RESTOREMODAUX", REDIS_REPLY_ERROR, NULL);
+        supported = (strstr( res, "wrong number of arguments" ) ) ? 1 : 0;
+    }
+    return supported;
 }
 
 /*** simulate external malloc with verification ***/
