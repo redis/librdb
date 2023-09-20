@@ -138,6 +138,10 @@ typedef enum ParsingElementType {
     PE_SET,
     PE_SET_IS,
     PE_SET_LP,
+    PE_ZSET,
+    PE_ZSET_2,
+    PE_ZSET_ZL,
+    PE_ZSET_LP,
     PE_MODULE,
     PE_FUNCTION,
     PE_MODULE_AUX,
@@ -156,6 +160,10 @@ typedef enum ParsingElementType {
     PE_RAW_SET,
     PE_RAW_SET_IS,
     PE_RAW_SET_LP,
+    PE_RAW_ZSET,
+    PE_RAW_ZSET_2,
+    PE_RAW_ZSET_ZL,
+    PE_RAW_ZSET_LP,
     PE_RAW_MODULE,
     PE_RAW_MODULE_AUX,
 
@@ -181,6 +189,10 @@ typedef struct {
 typedef struct {
     uint64_t left;
 } ElementSetCtx;
+
+typedef struct {
+    uint64_t left;
+} ElementZsetCtx;
 
 typedef struct {
     uint64_t numFields;
@@ -215,6 +227,10 @@ typedef struct {
 } ElementRawSetCtx;
 
 typedef struct {
+    uint64_t numItems;
+} ElementRawZsetCtx;
+
+typedef struct {
     uint64_t numFields;
     uint64_t  visitField;
 } ElementRawHashCtx;
@@ -229,6 +245,7 @@ typedef struct ElementCtx {
     ElementKeyCtx key;
     ElementListCtx list;
     ElementSetCtx set;
+    ElementZsetCtx zset;
     ElementHashCtx hash;
     ElementModuleCtx module;
 
@@ -236,6 +253,7 @@ typedef struct ElementCtx {
     ElementRawStringCtx rawString;
     ElementRawListCtx rawList;
     ElementRawSetCtx rawSet;
+    ElementRawZsetCtx rawZset;
     ElementRawHashCtx rawHash;
     ElementRawModuleAux rawModAux;
 
@@ -473,6 +491,9 @@ RdbStatus elementHashZM(RdbParser *p);
 RdbStatus elementSet(RdbParser *p);
 RdbStatus elementSetIS(RdbParser *p);
 RdbStatus elementSetLP(RdbParser *p);
+RdbStatus elementZset(RdbParser *p);
+RdbStatus elementZsetZL(RdbParser *p);
+RdbStatus elementZsetLP(RdbParser *p);
 RdbStatus elementFunction(RdbParser *p);
 RdbStatus elementModule(RdbParser *p);
 
@@ -490,6 +511,9 @@ RdbStatus elementRawHashZM(RdbParser *p);
 RdbStatus elementRawSet(RdbParser *p);
 RdbStatus elementRawSetIS(RdbParser *p);
 RdbStatus elementRawSetLP(RdbParser *p);
+RdbStatus elementRawZset(RdbParser *p);
+RdbStatus elementRawZsetLP(RdbParser *p);
+RdbStatus elementRawZsetZL(RdbParser *p);
 RdbStatus elementRawModule(RdbParser *p);
 
 #endif /*LIBRDB_PARSER_H*/

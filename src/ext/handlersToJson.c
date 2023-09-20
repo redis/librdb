@@ -4,6 +4,8 @@
 #include <ctype.h>
 #include "common.h"
 
+#include "../../deps/redis/util.h"
+
 struct RdbxToJson;
 
 #define _RDB_TYPE_MODULE_2 7
@@ -343,6 +345,38 @@ static RdbRes toJsonSet(RdbParser *p, void *userData, RdbBulk member) {
     return RDB_OK;
 }
 
+static RdbRes toJsonZset(RdbParser *p, void *userData, RdbBulk member, double score) {
+    RdbxToJson *ctx = userData;
+
+    char score_str[64];
+    int len = ld2string(score_str, sizeof(score_str), score, LD_STR_HUMAN);
+
+    if (ctx->state == R2J_IN_KEY) {
+        /* output json part */
+        fprintf(ctx->outfile, "{");
+        outputQuotedEscaping(ctx, member, RDB_bulkLen(p, member));
+        fprintf(ctx->outfile,  ":\"%.*s\"", len, score_str);
+
+        /* update new state */
+        ctx->state = R2J_IN_ZSET;
+
+    } else if (ctx->state == R2J_IN_ZSET) {
+        /* output json part */
+        fprintf(ctx->outfile, ",");
+        outputQuotedEscaping(ctx, member, RDB_bulkLen(p, member));
+        fprintf(ctx->outfile,  ":\"%.*s\"", len, score_str);
+
+        /* state unchanged */
+
+    } else {
+        RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
+                        "toJsonZset(): Invalid state value: %d", ctx->state);
+        return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
+    }
+
+    return RDB_OK;
+}
+
 static RdbRes toJsonHash(RdbParser *p, void *userData, RdbBulk field, RdbBulk value) {
     RdbxToJson *ctx = userData;
 
@@ -441,6 +475,7 @@ RdbxToJson *RDBX_createHandlersToJson(RdbParser *p, const char *filename, RdbxTo
         callbacks.dataCb.handleListItem = toJsonList;
         callbacks.dataCb.handleHashField = toJsonHash;
         callbacks.dataCb.handleSetMember = toJsonSet;
+        callbacks.dataCb.handleZsetMember = toJsonZset;
         callbacks.dataCb.handleFunction = (conf->includeFunc) ? toJsonFunction : NULL;
         callbacks.dataCb.handleModule = toJsonModule;
         RDB_createHandlersData(p, &callbacks.dataCb, ctx, deleteRdbToJsonCtx);
@@ -461,6 +496,10 @@ RdbxToJson *RDBX_createHandlersToJson(RdbParser *p, const char *filename, RdbxTo
         callbacks.structCb.handleSetPlain = toJsonSet;
         callbacks.structCb.handleSetIS = toJsonStruct;
         callbacks.structCb.handleSetLP = toJsonStruct;
+        /* zset */
+        callbacks.structCb.handleZsetPlain = toJsonZset;
+        callbacks.structCb.handleZsetZL = toJsonStruct;
+        callbacks.structCb.handleZsetLP = toJsonStruct;
         /* function */
         callbacks.structCb.handleFunction = (conf->includeFunc) ? toJsonFunction : NULL;
         /* module */

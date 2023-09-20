@@ -219,6 +219,26 @@ static void test_r2r_set_lp(void **state) {
     runWithAndWithoutRestore("set_is_v11.rdb");
 }
 
+static void test_r2r_plain_zset(void **state) {
+    UNUSED(state);
+    runWithAndWithoutRestore("plain_zset_v6.rdb");
+}
+
+static void test_r2r_plain_zset_2(void **state) {
+    UNUSED(state);
+    runWithAndWithoutRestore("plain_zset_2_v11.rdb");
+}
+
+static void test_r2r_zset_lp(void **state) {
+    UNUSED(state);
+    runWithAndWithoutRestore("zset_lp_v11.rdb");
+}
+
+static void test_r2r_zset_zl(void **state) {
+    UNUSED(state);
+    runWithAndWithoutRestore("zset_zl_v6.rdb");
+}
+
 static void test_r2r_module(void **state) {
     UNUSED(state);
     unsigned char expRespData[] = {
@@ -280,6 +300,11 @@ int group_rdb_to_resp(void) {
             cmocka_unit_test(test_r2r_plain_set),
             cmocka_unit_test(test_r2r_set_is),
             cmocka_unit_test(test_r2r_set_lp),
+            /* zset */
+            cmocka_unit_test(test_r2r_plain_zset),
+            cmocka_unit_test(test_r2r_plain_zset_2),
+            cmocka_unit_test(test_r2r_zset_lp),
+            cmocka_unit_test(test_r2r_zset_zl),
 
             /* misc */
             cmocka_unit_test(test_r2r_multiple_lists_and_strings),

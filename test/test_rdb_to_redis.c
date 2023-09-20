@@ -178,6 +178,26 @@ static void test_rdb_to_redis_set_lp(void **state) {
     test_rdb_to_redis_common(DUMP_FOLDER("set_lp_v11.rdb"), 1, "$4\r\nSADD", NULL);
 }
 
+static void test_rdb_to_redis_plain_zset(void **state) {
+    UNUSED(state);
+    test_rdb_to_redis_common(DUMP_FOLDER("plain_zset_v6.rdb"), 1, "$4\r\nZADD", NULL);
+}
+
+static void test_rdb_to_redis_plain_zset_2(void **state) {
+    UNUSED(state);
+    test_rdb_to_redis_common(DUMP_FOLDER("plain_zset_2_v11.rdb"), 1, "$4\r\nZADD", NULL);
+}
+
+static void test_rdb_to_redis_zset_lp(void **state) {
+    UNUSED(state);
+    test_rdb_to_redis_common(DUMP_FOLDER("zset_lp_v11.rdb"), 1, "$4\r\nZADD", NULL);
+}
+
+static void test_rdb_to_redis_zset_zl(void **state) {
+    UNUSED(state);
+    test_rdb_to_redis_common(DUMP_FOLDER("zset_zl_v6.rdb"), 1, "$4\r\nZADD", NULL);
+}
+
 static void test_rdb_to_redis_multiple_dbs(void **state) {
     UNUSED(state);
     test_rdb_to_redis_common(DUMP_FOLDER("multiple_dbs.rdb"), 1, NULL, NULL);
@@ -319,6 +339,11 @@ int group_rdb_to_redis() {
             cmocka_unit_test_setup(test_rdb_to_redis_plain_set, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_set_is, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_set_lp, setupTest),
+            /* zset */
+            cmocka_unit_test_setup(test_rdb_to_redis_plain_zset, setupTest),
+            cmocka_unit_test_setup(test_rdb_to_redis_plain_zset_2, setupTest),
+            cmocka_unit_test_setup(test_rdb_to_redis_zset_lp, setupTest),
+            cmocka_unit_test_setup(test_rdb_to_redis_zset_zl, setupTest),
 
             /* expired keys */
             cmocka_unit_test_setup(test_rdb_to_redis_set_expired, setupTest),

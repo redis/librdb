@@ -572,6 +572,97 @@ RdbStatus elementRawSet(RdbParser *p) {
     }
 }
 
+RdbStatus elementRawZsetLP(RdbParser *p) {
+    return singleStringTypeHandling(p, listpackValidateIntegrityCb, "elementRawZsetLP");
+}
+
+RdbStatus elementRawZsetZL(RdbParser *p) {
+    return singleStringTypeHandling(p, ziplistValidateIntegrityCb, "elementRawZsetZL");
+}
+
+RdbStatus elementRawZset(RdbParser *p) {
+    enum RAW_ZSET_STATES {
+        ST_RAW_ZSET_HEADER=0,
+        ST_RAW_ZSET_READ_MEMBER_STR,
+        ST_RAW_ZSET_READ_MEMBER_STR_RETURN,
+        ST_RAW_ZSET_READ_SCORE_DOUBLE,
+        ST_RAW_ZSET_READ_SCORE_STR,
+        ST_RAW_ZSET_READ_SCORE_STR_RETURN,
+    };
+
+    ElementRawZsetCtx *zsetCtx = &p->elmCtx.rawZset;
+    RawContext *rawCtx = &p->rawCtx;
+
+    switch (p->elmCtx.state) {
+
+        case ST_RAW_ZSET_HEADER: {
+            int headerLen = 0;
+
+            aggMakeRoom(p, 10); /* worse case 9 bytes for len */
+
+            IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &zsetCtx->numItems,
+                                        (unsigned char *) rawCtx->at, &headerLen));
+
+            /*** ENTER SAFE STATE ***/
+
+            IF_NOT_OK_RETURN(cbHandleBegin(p, DATA_SIZE_UNKNOWN_AHEAD));
+            IF_NOT_OK_RETURN(aggUpdateWritten(p, headerLen));
+        }
+            updateElementState(p, ST_RAW_ZSET_READ_MEMBER_STR); /* fall-thru */
+
+        case ST_RAW_ZSET_READ_MEMBER_STR:
+            return subElementCall(p, PE_RAW_STRING, ST_RAW_ZSET_READ_MEMBER_STR_RETURN);
+
+        case ST_RAW_ZSET_READ_MEMBER_STR_RETURN: {
+            /*** ENTER SAFE STATE (no rdb read)***/
+
+            size_t len;
+            unsigned char *encodedItem;
+
+            /* return from sub-element string parsing */
+            subElementCallEnd(p, (char **) &encodedItem, &len);
+
+            if (p->currOpcode == RDB_TYPE_ZSET_2) {
+                return updateElementState(p, ST_RAW_ZSET_READ_SCORE_DOUBLE);
+            } else {
+                return updateElementState(p, ST_RAW_ZSET_READ_SCORE_STR);
+            }
+        }
+        case ST_RAW_ZSET_READ_SCORE_DOUBLE: {
+            IF_NOT_OK_RETURN(aggMakeRoom(p, sizeof(double)));
+            IF_NOT_OK_RETURN(rdbLoadDoubleValue(p, (double *) rawCtx->at));
+            /*** ENTER SAFE STATE ***/
+            IF_NOT_OK_RETURN(aggUpdateWritten(p, sizeof(double)));
+
+            if (--zsetCtx->numItems == 0)
+                return nextParsingElement(p, PE_RAW_END_KEY); /* done */
+
+            return updateElementState(p, ST_RAW_ZSET_READ_MEMBER_STR);
+        }
+        case ST_RAW_ZSET_READ_SCORE_STR:
+            return subElementCall(p, PE_RAW_STRING, ST_RAW_ZSET_READ_SCORE_STR_RETURN);
+
+        case ST_RAW_ZSET_READ_SCORE_STR_RETURN: {
+            /*** ENTER SAFE STATE (no rdb read)***/
+
+            size_t len;
+            unsigned char *encodedItem;
+
+            /* return from sub-element string parsing */
+            subElementCallEnd(p, (char **) &encodedItem, &len);
+            if (--zsetCtx->numItems == 0)
+                return nextParsingElement(p, PE_RAW_END_KEY); /* done */
+
+            return updateElementState(p, ST_RAW_ZSET_READ_MEMBER_STR);
+        }
+
+        default:
+            RDB_reportError(p, RDB_ERR_PLAIN_ZSET_INVALID_STATE,
+                            "elementRawZset(): invalid parsing element state: %d", p->elmCtx.state);
+            return RDB_STATUS_ERROR;
+    }
+}
+
 RdbStatus elementRawModule(RdbParser *p) {
 
     typedef enum RAW_MODULE_STATES {

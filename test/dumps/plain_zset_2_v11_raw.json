@@ -1,0 +1,6 @@
+"redis-ver":"255.255.255",
+"redis-bits":"64",
+"ctime":"1694535571",
+"used-mem":"965512",
+"aof-base":"0",
+"myzset":"\x05\x03\x05three\xa4p=\n\xd7\xa3\n@\x03two\x00\x00\x00\x00\x00\x00\x00@\x03one\xc3\xf5(\\\x8f\xc2\xf1?"
