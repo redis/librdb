@@ -295,7 +295,7 @@ static void test_rdb_to_redis_del_before_write(void **state) {
 }
 
 /*************************** group_rdb_to_redis *******************************/
-int group_rdb_to_redis() {
+int group_rdb_to_redis(void) {
 
     if (!isSetRedisServer()) {
         printf("[  SKIPPED ] (Redis installation folder is not configured)\n");

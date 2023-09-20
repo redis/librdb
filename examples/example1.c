@@ -27,7 +27,7 @@ void logger(RdbLogLevel l, const char *msg) {
  * Example of RDB to Json file conversion. It also shows the usage
  * of two FilterKey.
  *******************************************************************/
-int main() {
+int main(void) {
     RdbParser *parser;
     RdbxReaderFile *reader;
     RdbxToJson *rdbToJson;

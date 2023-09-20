@@ -45,7 +45,7 @@ jobs:
   build-clang:
     runs-on: ubuntu-latest
     env:
-      CC: clang
+      CC: clang-15
     steps:
       - name: Checkout
         uses: actions/checkout@v3
