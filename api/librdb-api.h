@@ -258,12 +258,6 @@ typedef struct RdbHandlersStructCallbacks {
     RdbRes (*handleSetIS)(RdbParser *p, void *userData, RdbBulk intset);
     /* Callback to handle a listpack-based set value */
     RdbRes (*handleSetLP)(RdbParser *p, void *userData, RdbBulk listpack);
-    /* Callback to handle function code */
-    RdbRes (*handleFunction)(RdbParser *p, void *userData, RdbBulk func);
-    /* Callback to handle module. Currently only reports about the name & size. */
-    RdbRes (*handleModule)(RdbParser *p, void *userData, RdbBulk moduleName, size_t serializedSize);
-
-    /*** TODO: RdbHandlersStructCallbacks: ***/
 
     /* Callback to handle an item from a plain sorted set */
     RdbRes (*handleZsetPlain)(RdbParser *p, void *userData, RdbBulk item, double score);
@@ -271,6 +265,13 @@ typedef struct RdbHandlersStructCallbacks {
     RdbRes (*handleZsetZL)(RdbParser *p, void *userData, RdbBulk ziplist);
     /* Callback to handle a listpack-based sorted set value */
     RdbRes (*handleZsetLP)(RdbParser *p, void *userData, RdbBulk listpack);
+
+    /* Callback to handle function code */
+    RdbRes (*handleFunction)(RdbParser *p, void *userData, RdbBulk func);
+    /* Callback to handle module. Currently only reports about the name & size. */
+    RdbRes (*handleModule)(RdbParser *p, void *userData, RdbBulk moduleName, size_t serializedSize);
+
+    /*** TODO: RdbHandlersStructCallbacks: ***/
 
     /*** TODO: RdbHandlersStructCallbacks: stream stuff ... ***/
 

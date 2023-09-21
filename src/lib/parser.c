@@ -1096,6 +1096,62 @@ void moduleTypeNameByID(char *name, uint64_t moduleid) {
     }
 }
 
+/* return either RDB_STATUS_OK or RDB_STATUS_ERROR */
+static RdbStatus zsetZiplistItem(RdbParser *p, BulkInfo *ziplistBulk) {
+
+    int ret = ziplistValidateIntegrity(ziplistBulk->ref, ziplistBulk->len, p->deepIntegCheck, NULL, NULL);
+
+    if (unlikely(!ret)) {
+        RDB_reportError(p, RDB_ERR_ZSET_ZL_INTEG_CHECK, "zsetZiplistItem(): Ziplist integrity check failed");
+        return RDB_STATUS_ERROR;
+    }
+
+    if (p->elmCtx.key.handleByLevel == RDB_LEVEL_STRUCT) {
+        registerAppBulkForNextCb(p, ziplistBulk);
+        CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_STRUCT, rdbStruct.handleZsetZL, ziplistBulk->ref);
+        return RDB_STATUS_OK;
+    }
+
+    unsigned char *offsetZL = ziplistIndex(ziplistBulk->ref, 0);
+    while (offsetZL != NULL) {
+        unsigned char *item1, *item2;
+        unsigned int item1Len, item2Len;
+        long long item1Val, item2Val;
+        EmbeddedBulk embBulk;
+
+        ziplistGet(offsetZL, &item1, &item1Len, &item1Val);
+        offsetZL = ziplistNext(ziplistBulk->ref, offsetZL);
+
+        ziplistGet(offsetZL, &item2, &item2Len, &item2Val);
+        offsetZL = ziplistNext(ziplistBulk->ref, offsetZL);
+
+        double score;
+        if (item2) {
+            if (!string2d((const char*) item2, item2Len, &score)) {
+                RDB_reportError(p, RDB_ERR_ZSET_ZL_INTEG_CHECK,
+                                "elementZsetZL(): failed to parse string to double: %.*s",
+                                item2Len, item2);
+
+                return RDB_STATUS_ERROR;
+            }
+        } else {
+            score = (double) item2Val;
+        }
+
+        if (!allocEmbeddedBulk(p, item1, item1Len, item1Val, &embBulk))
+            return RDB_STATUS_ERROR;
+
+        registerAppBulkForNextCb(p, embBulk.binfo);
+        CALL_HANDLERS_CB(p,
+                         restoreEmbeddedBulk(&embBulk);, /*finalize*/
+                         RDB_LEVEL_DATA,
+                         rdbData.handleZsetMember,
+                         embBulk.binfo->ref,
+                         score);
+    }
+    return RDB_STATUS_OK;
+}
+
 /*** Parsing Common Elements ***/
 
 RdbStatus elementRdbHeader(RdbParser *p) {
@@ -1729,62 +1785,6 @@ RdbStatus elementZset(RdbParser *p) {
     }
 }
 
-/* return either RDB_STATUS_OK or RDB_STATUS_ERROR */
-static RdbStatus zsetZiplistItem(RdbParser *p, BulkInfo *ziplistBulk) {
-
-    int ret = ziplistValidateIntegrity(ziplistBulk->ref, ziplistBulk->len, p->deepIntegCheck, NULL, NULL);
-
-    if (unlikely(!ret)) {
-        RDB_reportError(p, RDB_ERR_ZSET_ZL_INTEG_CHECK, "zsetZiplistItem(): Ziplist integrity check failed");
-        return RDB_STATUS_ERROR;
-    }
-
-    if (p->elmCtx.key.handleByLevel == RDB_LEVEL_STRUCT) {
-        registerAppBulkForNextCb(p, ziplistBulk);
-        CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_STRUCT, rdbStruct.handleZsetZL, ziplistBulk->ref);
-        return RDB_STATUS_OK;
-    }
-
-    unsigned char *offsetZL = ziplistIndex(ziplistBulk->ref, 0);
-    while (offsetZL != NULL) {
-        unsigned char *item1, *item2;
-        unsigned int item1Len, item2Len;
-        long long item1Val, item2Val;
-        EmbeddedBulk embBulk;
-
-        ziplistGet(offsetZL, &item1, &item1Len, &item1Val);
-        offsetZL = ziplistNext(ziplistBulk->ref, offsetZL);
-
-        ziplistGet(offsetZL, &item2, &item2Len, &item2Val);
-        offsetZL = ziplistNext(ziplistBulk->ref, offsetZL);
-
-        double score;
-        if (item2) {
-            if (!string2d((const char*) item2, item2Len, &score)) {
-                RDB_reportError(p, RDB_ERR_ZSET_ZL_INTEG_CHECK,
-                                "elementZsetZL(): failed to parse string to double: %.*s",
-                                item2Len, item2);
-
-                return RDB_STATUS_ERROR;
-            }
-        } else {
-            score = (double) item2Val;
-        }
-
-        if (!allocEmbeddedBulk(p, item1, item1Len, item1Val, &embBulk))
-            return RDB_STATUS_ERROR;
-
-        registerAppBulkForNextCb(p, embBulk.binfo);
-        CALL_HANDLERS_CB(p,
-                         restoreEmbeddedBulk(&embBulk);, /*finalize*/
-                         RDB_LEVEL_DATA,
-                         rdbData.handleZsetMember,
-                         embBulk.binfo->ref,
-                         score);
-    }
-    return RDB_STATUS_OK;
-}
-
 RdbStatus elementZsetZL(RdbParser *p) {
     BulkInfo *ziplistBulk;
 
@@ -1814,7 +1814,6 @@ RdbStatus elementZsetLP(RdbParser *p) {
         return RDB_STATUS_ERROR;
     }
 
-    /* TODO: handle empty listpack */
     p->elmCtx.key.numItemsHint = lpLength(listpackBulk->ref);
 
     if (p->elmCtx.key.handleByLevel == RDB_LEVEL_STRUCT) {
@@ -2019,8 +2018,9 @@ RdbStatus elementModule(RdbParser *p) {
 /*** Loaders from RDB ***/
 
 RdbStatus rdbLoadFloatValue(RdbParser *p, float *val) {
-    BulkInfo *binfoUnused;
-    IF_NOT_OK_RETURN(rdbLoad(p, sizeof(*val), RQ_ALLOC_REF, (char *) val, &binfoUnused));
+    BulkInfo *binfo;
+    IF_NOT_OK_RETURN(rdbLoad(p, sizeof(*val), RQ_ALLOC, NULL, &binfo));
+    *val = *((float*) binfo->ref);
     memrev32ifbe(val);
     return RDB_STATUS_OK;
 }

@@ -582,11 +582,11 @@ RdbStatus elementRawZsetZL(RdbParser *p) {
 
 RdbStatus elementRawZset(RdbParser *p) {
     enum RAW_ZSET_STATES {
-        ST_RAW_ZSET_HEADER=0,
-        ST_RAW_ZSET_READ_MEMBER_STR,
-        ST_RAW_ZSET_READ_MEMBER_STR_RETURN,
-        ST_RAW_ZSET_READ_SCORE_DOUBLE,
-        ST_RAW_ZSET_READ_SCORE_STR,
+        ST_RAW_ZSET_HEADER=0,                /* Retrieve number of members */
+        ST_RAW_ZSET_READ_MEMBER_STR,         /* Read next member string */
+        ST_RAW_ZSET_READ_MEMBER_STR_RETURN,  /* After reading member string: */
+        ST_RAW_ZSET_READ_SCORE_DOUBLE,       /*    read 'score' as double (for ZSET_2) or */
+        ST_RAW_ZSET_READ_SCORE_STR,          /*    read 'score' as string (for ZSET)      */
         ST_RAW_ZSET_READ_SCORE_STR_RETURN,
     };
 
