@@ -364,8 +364,8 @@ static RdbRes toRespZset(RdbParser *p, void *userData, RdbBulk member, double sc
     IOV_CONST(&iov[3], "\r\n$");
 
     /* write score */
-    char score_str[64];
-    int len = ld2string(score_str, sizeof(score_str), score, LD_STR_HUMAN);
+    char score_str[256];
+    int len = d2string(score_str, sizeof(score_str), score);
     assert(len != 0);
     IOV_VALUE(&iov[4], len, scoreLenStr);
     IOV_STRING(&iov[5], score_str, strlen(score_str));

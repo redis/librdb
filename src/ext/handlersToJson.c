@@ -349,7 +349,7 @@ static RdbRes toJsonZset(RdbParser *p, void *userData, RdbBulk member, double sc
     RdbxToJson *ctx = userData;
 
     char score_str[64];
-    int len = ld2string(score_str, sizeof(score_str), score, LD_STR_HUMAN);
+    int len = d2string(score_str, sizeof(score_str), score);
 
     if (ctx->state == R2J_IN_KEY) {
         /* output json part */

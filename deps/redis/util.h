@@ -27,7 +27,7 @@ typedef enum {
     LD_STR_HEX       /* %La */
 } ld2string_mode;
 
-int string2d(const char *s, size_t slen, double *dp);
-int ld2string(char *buf, size_t len, long double value, ld2string_mode mode);
+double zzlStrtod(unsigned char *vstr, unsigned int vlen);
+int d2string(char *buf, size_t len, double value);
 
 #endif /*LIBRDB_UTIL_H*/

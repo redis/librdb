@@ -582,12 +582,9 @@ RdbStatus elementRawZsetZL(RdbParser *p) {
 
 RdbStatus elementRawZset(RdbParser *p) {
     enum RAW_ZSET_STATES {
-        ST_RAW_ZSET_HEADER=0,                /* Retrieve number of members */
-        ST_RAW_ZSET_READ_MEMBER_STR,         /* Read next member string */
-        ST_RAW_ZSET_READ_MEMBER_STR_RETURN,  /* After reading member string: */
-        ST_RAW_ZSET_READ_SCORE_DOUBLE,       /*    read 'score' as double (for ZSET_2) or */
-        ST_RAW_ZSET_READ_SCORE_STR,          /*    read 'score' as string (for ZSET)      */
-        ST_RAW_ZSET_READ_SCORE_STR_RETURN,
+        ST_RAW_ZSET_HEADER=0,    /* Retrieve number of members */
+        ST_RAW_ZSET_READ_MEMBER, /* Read next member string */
+        ST_RAW_ZSET_READ_SCORE,  /* Read score of the member */
     };
 
     ElementRawZsetCtx *zsetCtx = &p->elmCtx.rawZset;
@@ -608,54 +605,38 @@ RdbStatus elementRawZset(RdbParser *p) {
             IF_NOT_OK_RETURN(cbHandleBegin(p, DATA_SIZE_UNKNOWN_AHEAD));
             IF_NOT_OK_RETURN(aggUpdateWritten(p, headerLen));
         }
-            updateElementState(p, ST_RAW_ZSET_READ_MEMBER_STR); /* fall-thru */
+            updateElementState(p, ST_RAW_ZSET_READ_MEMBER); /* fall-thru */
 
-        case ST_RAW_ZSET_READ_MEMBER_STR:
-            return subElementCall(p, PE_RAW_STRING, ST_RAW_ZSET_READ_MEMBER_STR_RETURN);
+        case ST_RAW_ZSET_READ_MEMBER:
+            return subElementCall(p, PE_RAW_STRING, ST_RAW_ZSET_READ_SCORE);
 
-        case ST_RAW_ZSET_READ_MEMBER_STR_RETURN: {
-            /*** ENTER SAFE STATE (no rdb read)***/
-
+        case ST_RAW_ZSET_READ_SCORE: {
             size_t len;
             unsigned char *encodedItem;
 
             /* return from sub-element string parsing */
             subElementCallEnd(p, (char **) &encodedItem, &len);
+
+            /* For RDB_TYPE_ZSET, worst case < 255 */
+            IF_NOT_OK_RETURN(aggMakeRoom(p, 255));
 
             if (p->currOpcode == RDB_TYPE_ZSET_2) {
-                return updateElementState(p, ST_RAW_ZSET_READ_SCORE_DOUBLE);
+                IF_NOT_OK_RETURN(rdbLoadBinaryDoubleValue(p, (double *) rawCtx->at));
+                IF_NOT_OK_RETURN(aggUpdateWritten(p, sizeof(double)));
             } else {
-                return updateElementState(p, ST_RAW_ZSET_READ_SCORE_STR);
+                int written;
+                IF_NOT_OK_RETURN(rdbLoadDoubleValueToDest(p, rawCtx->at, &written));
+                IF_NOT_OK_RETURN(aggUpdateWritten(p, written));
             }
-        }
-        case ST_RAW_ZSET_READ_SCORE_DOUBLE: {
-            IF_NOT_OK_RETURN(aggMakeRoom(p, sizeof(double)));
-            IF_NOT_OK_RETURN(rdbLoadDoubleValue(p, (double *) rawCtx->at));
+
             /*** ENTER SAFE STATE ***/
-            IF_NOT_OK_RETURN(aggUpdateWritten(p, sizeof(double)));
+
 
             if (--zsetCtx->numItems == 0)
                 return nextParsingElement(p, PE_RAW_END_KEY); /* done */
 
-            return updateElementState(p, ST_RAW_ZSET_READ_MEMBER_STR);
+            return updateElementState(p, ST_RAW_ZSET_READ_MEMBER);
         }
-        case ST_RAW_ZSET_READ_SCORE_STR:
-            return subElementCall(p, PE_RAW_STRING, ST_RAW_ZSET_READ_SCORE_STR_RETURN);
-
-        case ST_RAW_ZSET_READ_SCORE_STR_RETURN: {
-            /*** ENTER SAFE STATE (no rdb read)***/
-
-            size_t len;
-            unsigned char *encodedItem;
-
-            /* return from sub-element string parsing */
-            subElementCallEnd(p, (char **) &encodedItem, &len);
-            if (--zsetCtx->numItems == 0)
-                return nextParsingElement(p, PE_RAW_END_KEY); /* done */
-
-            return updateElementState(p, ST_RAW_ZSET_READ_MEMBER_STR);
-        }
-
         default:
             RDB_reportError(p, RDB_ERR_PLAIN_ZSET_INVALID_STATE,
                             "elementRawZset(): invalid parsing element state: %d", p->elmCtx.state);
@@ -747,7 +728,7 @@ RdbStatus elementRawModule(RdbParser *p) {
 
             case ST_RAW_MODULE_OPCODE_DOUBLE: {
                 IF_NOT_OK_RETURN(aggMakeRoom(p, sizeof(double)));
-                IF_NOT_OK_RETURN(rdbLoadDoubleValue(p, (double *) rawCtx->at));
+                IF_NOT_OK_RETURN(rdbLoadBinaryDoubleValue(p, (double *) rawCtx->at));
                 /*** ENTER SAFE STATE ***/
                 IF_NOT_OK_RETURN(aggUpdateWritten(p, sizeof(double)));
                 updateElementState(p, ST_RAW_MODULE_NEXT_OPCODE);

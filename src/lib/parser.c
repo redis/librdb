@@ -18,6 +18,7 @@
 #include <string.h>
 #include <arpa/inet.h>
 #include <time.h>
+#include <math.h>
 #include "../../deps/redis/crc64.h"
 #include "bulkAlloc.h"
 #include "parser.h"
@@ -1117,6 +1118,7 @@ static RdbStatus zsetZiplistItem(RdbParser *p, BulkInfo *ziplistBulk) {
         unsigned char *item1, *item2;
         unsigned int item1Len, item2Len;
         long long item1Val, item2Val;
+        double score;
         EmbeddedBulk embBulk;
 
         ziplistGet(offsetZL, &item1, &item1Len, &item1Val);
@@ -1125,18 +1127,7 @@ static RdbStatus zsetZiplistItem(RdbParser *p, BulkInfo *ziplistBulk) {
         ziplistGet(offsetZL, &item2, &item2Len, &item2Val);
         offsetZL = ziplistNext(ziplistBulk->ref, offsetZL);
 
-        double score;
-        if (item2) {
-            if (!string2d((const char*) item2, item2Len, &score)) {
-                RDB_reportError(p, RDB_ERR_ZSET_ZL_INTEG_CHECK,
-                                "elementZsetZL(): failed to parse string to double: %.*s",
-                                item2Len, item2);
-
-                return RDB_STATUS_ERROR;
-            }
-        } else {
-            score = (double) item2Val;
-        }
+        score = item2 ? zzlStrtod(item2, item2Len) : (double) item2Val;
 
         if (!allocEmbeddedBulk(p, item1, item1Len, item1Val, &embBulk))
             return RDB_STATUS_ERROR;
@@ -1754,18 +1745,9 @@ RdbStatus elementZset(RdbParser *p) {
             IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC_APP_BULK, NULL, &binfoItem));
 
             if (p->currOpcode == RDB_TYPE_ZSET_2) {
-                IF_NOT_OK_RETURN(rdbLoadDoubleValue(p, &score));
+                IF_NOT_OK_RETURN(rdbLoadBinaryDoubleValue(p, &score));
             } else {
-                BulkInfo *binfoItem2;
-                IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC_APP_BULK, NULL, &binfoItem2));
-
-                if (!string2d((const char*) binfoItem2->ref, binfoItem2->len, &score)) {
-                    RDB_reportError(p, RDB_ERR_PLAIN_ZSET_INVALID_STATE,
-                                    "elementZset(): failed to parse string to double: %.*s",
-                                    binfoItem2->len, binfoItem2->ref);
-
-                    return RDB_STATUS_ERROR;
-                }
+                IF_NOT_OK_RETURN(rdbLoadDoubleValue(p, &score));
             }
 
             /*** ENTER SAFE STATE ***/
@@ -1829,17 +1811,7 @@ RdbStatus elementZsetLP(RdbParser *p) {
             iterator = lpNext(listpackBulk->ref, iterator);
             item2 = lpGetValue(iterator, &item2Len, &item2Val);
 
-            if (item2) {
-                if (!string2d((const char*) item2, item2Len, &score)) {
-                    RDB_reportError(p, RDB_ERR_ZSET_LP_INTEG_CHECK,
-                                    "elementZsetLP(): failed to parse string to double: %.*s",
-                                    item2Len, item2);
-
-                    return RDB_STATUS_ERROR;
-                }
-            } else {
-                score = (double) item2Val;
-            }
+            score = item2 ? zzlStrtod(item2, item2Len) : (double) item2Val;
 
             if (!allocEmbeddedBulk(p, item1, item1Len, item1Val, &embBulk))
                 return RDB_STATUS_ERROR;
@@ -1961,7 +1933,7 @@ RdbStatus elementModule(RdbParser *p) {
             }
             case ST_MODULE_OPCODE_DOUBLE: {
                 double val; /*UNUSED*/
-                IF_NOT_OK_RETURN(rdbLoadDoubleValue(p, &val));
+                IF_NOT_OK_RETURN(rdbLoadBinaryDoubleValue(p, &val));
                 /*** ENTER SAFE STATE ***/
                 updateElementState(p, ST_MODULE_NEXT_OPCODE);
                 break;
@@ -2025,12 +1997,70 @@ RdbStatus rdbLoadFloatValue(RdbParser *p, float *val) {
     return RDB_STATUS_OK;
 }
 
-RdbStatus rdbLoadDoubleValue(RdbParser *p, double *val) {
+RdbStatus rdbLoadBinaryDoubleValue(RdbParser *p, double *val) {
     BulkInfo *binfo;
     IF_NOT_OK_RETURN(rdbLoad(p, sizeof(*val), RQ_ALLOC, NULL, &binfo));
     *val = *((double*) binfo->ref);
     memrev64ifbe(val);
     return RDB_STATUS_OK;
+}
+
+/*
+ * For RDB_TYPE_ZSET, doubles are saved as strings prefixed by an unsigned
+ * 8 bit integer specifying the length of the representation.
+ * This 8 bit integer has special values in order to specify the following
+ * conditions:
+ * 253: not a number
+ * 254: + inf
+ * 255: - inf
+ */
+RdbStatus rdbLoadDoubleValue(RdbParser *p, double *val) {
+    unsigned char len;
+    BulkInfo *binfo;
+
+    IF_NOT_OK_RETURN(rdbLoad(p, 1, RQ_ALLOC, NULL, &binfo));
+    len = *((unsigned char*)binfo->ref);
+
+    switch (len) {
+        case 255: *val = -INFINITY; return RDB_STATUS_OK;
+        case 254: *val = INFINITY; return RDB_STATUS_OK;
+        case 253: *val = NAN; return RDB_STATUS_OK;
+        default:
+            IF_NOT_OK_RETURN(rdbLoad(p, len, RQ_ALLOC, NULL, &binfo));
+            if (sscanf(binfo->ref, "%lg", val) != 1)
+                return RDB_STATUS_ERROR;
+
+            return RDB_STATUS_OK;
+    }
+}
+
+/* Try to read double value and then copy it to the destination including one
+ * byte prefix. See rdbLoadDoubleValue() for details. */
+RdbStatus rdbLoadDoubleValueToDest(RdbParser *p, char *dst, int *written) {
+    double val;
+    unsigned char len;
+    BulkInfo *binfo;
+
+    IF_NOT_OK_RETURN(rdbLoad(p, 1, RQ_ALLOC, NULL, &binfo));
+    len = *((unsigned char*)binfo->ref);
+
+    *dst++ = len;
+    *written = 1;
+
+    switch (len) {
+        case 255:  /* -INFINITY */
+        case 254:  /* INFINITY */
+        case 253:  /* NAN */
+            return RDB_STATUS_OK;
+        default:
+            IF_NOT_OK_RETURN(rdbLoad(p, len, RQ_ALLOC, NULL, &binfo));
+            if (sscanf(binfo->ref, "%lg", &val) != 1)
+                return RDB_STATUS_ERROR;
+
+            memcpy(dst, binfo->ref, len);
+            *written += len;
+            return RDB_STATUS_OK;
+    }
 }
 
 RdbStatus rdbLoadInteger(RdbParser *p, int enctype, AllocTypeRq type, char *refBuf, BulkInfo **binfo) {
