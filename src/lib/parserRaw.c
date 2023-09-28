@@ -625,7 +625,7 @@ RdbStatus elementRawZset(RdbParser *p) {
                 IF_NOT_OK_RETURN(aggUpdateWritten(p, sizeof(double)));
             } else {
                 int written;
-                IF_NOT_OK_RETURN(rdbLoadDoubleValueToDest(p, rawCtx->at, &written));
+                IF_NOT_OK_RETURN(rdbLoadDoubleValueToBuff(p, rawCtx->at, &written));
                 IF_NOT_OK_RETURN(aggUpdateWritten(p, written));
             }
 

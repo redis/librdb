@@ -207,15 +207,6 @@ int lpStringToInt64(const char *s, unsigned long slen, int64_t *value) {
     return 1;
 }
 
-double zzlStrtod(unsigned char *vstr, unsigned int vlen) {
-    char buf[128];
-    if (vlen > sizeof(buf) - 1)
-        vlen = sizeof(buf) - 1;
-    memcpy(buf,vstr,vlen);
-    buf[vlen] = '\0';
-    return strtod(buf,NULL);
-}
-
 /* Returns 1 if the double value can safely be represented in long long without
  * precision loss, in which case the corresponding long long is stored in the out variable. */
 static int double2ll(double d, long long *out) {

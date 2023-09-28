@@ -31,6 +31,7 @@
 #include "../../deps/redis/zipmap.h"
 #include "../../deps/redis/intset.h"
 #include "../../deps/redis/lzf.h"
+#include "../../deps/redis/t_zset.h"
 
 #define DONE_FILL_BULK SIZE_MAX
 
@@ -2036,7 +2037,7 @@ RdbStatus rdbLoadDoubleValue(RdbParser *p, double *val) {
 
 /* Try to read double value and then copy it to the destination including one
  * byte prefix. See rdbLoadDoubleValue() for details. */
-RdbStatus rdbLoadDoubleValueToDest(RdbParser *p, char *dst, int *written) {
+RdbStatus rdbLoadDoubleValueToBuff(RdbParser *p, char *dst, int *written) {
     double val;
     unsigned char len;
     BulkInfo *binfo;
@@ -2053,11 +2054,10 @@ RdbStatus rdbLoadDoubleValueToDest(RdbParser *p, char *dst, int *written) {
         case 253:  /* NAN */
             return RDB_STATUS_OK;
         default:
-            IF_NOT_OK_RETURN(rdbLoad(p, len, RQ_ALLOC, NULL, &binfo));
-            if (sscanf(binfo->ref, "%lg", &val) != 1)
+            IF_NOT_OK_RETURN(rdbLoad(p, len, RQ_ALLOC_REF, dst, &binfo));
+            if (sscanf(dst, "%lg", &val) != 1)
                 return RDB_STATUS_ERROR;
 
-            memcpy(dst, binfo->ref, len);
             *written += len;
             return RDB_STATUS_OK;
     }
