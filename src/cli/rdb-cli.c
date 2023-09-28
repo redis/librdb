@@ -52,7 +52,7 @@ static void loggerWrap(RdbLogLevel l, const char *msg, ...) {
     logger(l, tmp);
 }
 
-static void printUsage() {
+static void printUsage(void) {
     printf("[v%s] ", RDB_getLibVersion(NULL,NULL,NULL));
     printf("Usage: rdb-cli /path/to/dump.rdb [OPTIONS] {json|resp|redis} [FORMAT_OPTIONS]\n");
     printf("OPTIONS:\n");

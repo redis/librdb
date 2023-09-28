@@ -58,7 +58,7 @@ char *readFile(const char *filename,  size_t *length) {
     return str;
 }
 
-void cleanTmpFolder() {
+void cleanTmpFolder(void) {
     const char *folder_path = "./test/tmp";
 
     DIR *dir = opendir(folder_path);
@@ -179,7 +179,7 @@ int findFreePort(int startPort, int endPort) {
     return -1;
 }
 
-void cleanupRedisServer() {
+void cleanupRedisServer(void) {
     if (redisPID)
         kill(redisPID, SIGTERM);
 }
@@ -305,7 +305,7 @@ void setupRedisServer(const char *installFolder) {
     }
 }
 
-void teardownRedisServer() {
+void teardownRedisServer(void) {
     if (redisConnContext) {
         assert_non_null(redisConnContext);
         assert_null(redisCommand(redisConnContext, "SHUTDOWN"));
@@ -315,14 +315,14 @@ void teardownRedisServer() {
     }
 }
 
-int isSetRedisServer() {
+int isSetRedisServer(void) {
     return (redisConnContext != NULL);
 }
 
 /* Redis OSS does not support restoring module auxiliary data. This feature
  * is currently available only in Redis Enterprise. There are plans to bring
  * this functionality to Redis OSS in the near future. */
-int isSupportRestoreModuleAux() {
+int isSupportRestoreModuleAux(void) {
     static int supported = -1;   /* -1=UNINIT, 0=NO, 1=YES */
     if (supported == -1) {
         char *res = sendRedisCmd("RESTOREMODAUX", REDIS_REPLY_ERROR, NULL);

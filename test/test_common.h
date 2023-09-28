@@ -33,21 +33,21 @@ void assert_json_equal(const char *f1, const char *f2, int ignoreListOrder);
 /* Test against Redis Server */
 extern int redisPort;
 void setupRedisServer(const char *installFolder);
-void teardownRedisServer();
-int isSetRedisServer();
+void teardownRedisServer(void);
+int isSetRedisServer(void);
 char *sendRedisCmd(char *cmd, int expRetType, char *expRsp);
-int isSupportRestoreModuleAux();
+int isSupportRestoreModuleAux(void);
 
 /* test groups */
-int group_rdb_to_redis();
-int group_test_rdb_cli();
-int group_rdb_to_resp();
-int group_main();
-int group_rdb_to_json();
-int group_mem_management();
-int group_pause();
-int group_bulk_ops();
-int group_test_resp_reader();
+int group_rdb_to_redis(void);
+int group_test_rdb_cli(void);
+int group_rdb_to_resp(void);
+int group_main(void);
+int group_rdb_to_json(void);
+int group_mem_management(void);
+int group_pause(void);
+int group_bulk_ops(void);
+int group_test_resp_reader(void);
 
 /* simulate external malloc */
 void *xmalloc(size_t size);
@@ -56,7 +56,7 @@ void xfree(void *ptr);
 void *xrealloc(void *ptr, size_t size);
 
 char *readFile(const char *filename, size_t *len);
-void cleanTmpFolder();
+void cleanTmpFolder(void);
 void setEnvVar (const char *name, const char *val);
 char *substring(char *str, size_t len, char *substr);
 void assert_file_payload(const char *filename, char *expData, int expLen, MatchType matchType, int expMatch);
