@@ -2037,7 +2037,7 @@ RdbStatus rdbLoadDoubleValue(RdbParser *p, double *val) {
 
 /* Try to read double value and then copy it to the destination including one
  * byte prefix. See rdbLoadDoubleValue() for details. */
-RdbStatus rdbLoadDoubleValueToBuff(RdbParser *p, char *dst, int *written) {
+RdbStatus rdbLoadDoubleValueToBuff(RdbParser *p, char *buff, int *written) {
     double val;
     unsigned char len;
     BulkInfo *binfo;
@@ -2045,7 +2045,7 @@ RdbStatus rdbLoadDoubleValueToBuff(RdbParser *p, char *dst, int *written) {
     IF_NOT_OK_RETURN(rdbLoad(p, 1, RQ_ALLOC, NULL, &binfo));
     len = *((unsigned char*)binfo->ref);
 
-    *dst++ = len;
+    *buff++ = len;
     *written = 1;
 
     switch (len) {
@@ -2054,8 +2054,8 @@ RdbStatus rdbLoadDoubleValueToBuff(RdbParser *p, char *dst, int *written) {
         case 253:  /* NAN */
             return RDB_STATUS_OK;
         default:
-            IF_NOT_OK_RETURN(rdbLoad(p, len, RQ_ALLOC_REF, dst, &binfo));
-            if (sscanf(dst, "%lg", &val) != 1)
+            IF_NOT_OK_RETURN(rdbLoad(p, len, RQ_ALLOC_REF, buff, &binfo));
+            if (sscanf(buff, "%lg", &val) != 1)
                 return RDB_STATUS_ERROR;
 
             *written += len;

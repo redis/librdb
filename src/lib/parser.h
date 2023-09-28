@@ -445,7 +445,7 @@ void subElementCallEnd(RdbParser *p, RdbBulk *bulkResult, size_t *len);
 RdbStatus rdbLoadFloatValue(RdbParser *p, float *val);
 RdbStatus rdbLoadBinaryDoubleValue(RdbParser *p, double *val);
 RdbStatus rdbLoadDoubleValue(RdbParser *p, double *val);
-RdbStatus rdbLoadDoubleValueToBuff(RdbParser *p, char *dst, int *written);
+RdbStatus rdbLoadDoubleValueToBuff(RdbParser *p, char *buff, int *written);
 RdbStatus rdbLoadLen(RdbParser *p, int *isencoded, uint64_t *lenptr, unsigned char* outbuff, int *outbufflen);
 RdbStatus rdbLoadInteger(RdbParser *p, int enctype, AllocTypeRq type, char *refBuf, BulkInfo **out);
 RdbStatus rdbLoadString(RdbParser *p, AllocTypeRq type, char *refBuf, BulkInfo **out);
