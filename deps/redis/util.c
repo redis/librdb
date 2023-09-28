@@ -3,7 +3,11 @@
 #include <string.h>
 #include <limits.h>
 #include <errno.h>
+#include <math.h>
+#include <stdio.h>
+#include <ctype.h>
 #include "util.h"
+#include "fpconv_dtoa.h"
 
 /* Return the number of digits of 'v' when converted to string in radix 10.
  * See ll2string() for more information. */
@@ -201,4 +205,76 @@ int lpStringToInt64(const char *s, unsigned long slen, int64_t *value) {
         if (value != NULL) *value = v;
     }
     return 1;
+}
+
+/* Returns 1 if the double value can safely be represented in long long without
+ * precision loss, in which case the corresponding long long is stored in the out variable. */
+static int double2ll(double d, long long *out) {
+    (void) out;
+#if (DBL_MANT_DIG >= 52) && (DBL_MANT_DIG <= 63) && (LLONG_MAX == 0x7fffffffffffffffLL)
+    /* Check if the float is in a safe range to be casted into a
+     * long long. We are assuming that long long is 64 bit here.
+     * Also we are assuming that there are no implementations around where
+     * double has precision < 52 bit.
+     *
+     * Under this assumptions we test if a double is inside a range
+     * where casting to long long is safe. Then using two castings we
+     * make sure the decimal part is zero. If all this is true we can use
+     * integer without precision loss.
+     *
+     * Note that numbers above 2^52 and below 2^63 use all the fraction bits as real part,
+     * and the exponent bits are positive, which means the "decimal" part must be 0.
+     * i.e. all double values in that range are representable as a long without precision loss,
+     * but not all long values in that range can be represented as a double.
+     * we only care about the first part here. */
+    if (d < (double)(-LLONG_MAX/2) || d > (double)(LLONG_MAX/2))
+        return 0;
+    long long ll = d;
+    if (ll == d) {
+        *out = ll;
+        return 1;
+    }
+#else
+    (void) out;
+    (void) d;
+#endif
+    return 0;
+}
+
+/* Convert a double to a string representation. Returns the number of bytes
+ * required. The representation should always be parsable by strtod(3).
+ * This function does not support human-friendly formatting like ld2string
+ * does. It is intended mainly to be used inside t_zset.c when writing scores
+ * into a listpack representing a sorted set. */
+int d2string(char *buf, size_t len, double value) {
+    if (isnan(value)) {
+        /* Libc in some systems will format nan in a different way,
+         * like nan, -nan, NAN, nan(char-sequence).
+         * So we normalize it and create a single nan form in an explicit way. */
+        len = snprintf(buf,len,"nan");
+    } else if (isinf(value)) {
+        /* Libc in odd systems (Hi Solaris!) will format infinite in a
+         * different way, so better to handle it in an explicit way. */
+        if (value < 0)
+            len = snprintf(buf,len,"-inf");
+        else
+            len = snprintf(buf,len,"inf");
+    } else if (value == 0) {
+        /* See: http://en.wikipedia.org/wiki/Signed_zero, "Comparisons". */
+        if (1.0/value < 0)
+            len = snprintf(buf,len,"-0");
+        else
+            len = snprintf(buf,len,"0");
+    } else {
+        long long lvalue;
+        /* Integer printing function is much faster, check if we can safely use it. */
+        if (double2ll(value, &lvalue))
+            len = ll2string(buf,len,lvalue);
+        else {
+            len = fpconv_dtoa(value, buf);
+            buf[len] = '\0';
+        }
+    }
+
+    return len;
 }

@@ -18,6 +18,7 @@
 #include <string.h>
 #include <arpa/inet.h>
 #include <time.h>
+#include <math.h>
 #include "../../deps/redis/crc64.h"
 #include "bulkAlloc.h"
 #include "parser.h"
@@ -30,6 +31,7 @@
 #include "../../deps/redis/zipmap.h"
 #include "../../deps/redis/intset.h"
 #include "../../deps/redis/lzf.h"
+#include "../../deps/redis/t_zset.h"
 
 #define DONE_FILL_BULK SIZE_MAX
 
@@ -65,6 +67,11 @@ struct ParsingElementInfo peInfo[PE_MAX] = {
         [PE_SET]              = {elementSet, "elementSet", "Parsing set"},
         [PE_SET_IS]           = {elementSetIS, "elementSetIS", "Parsing set Intset"},
         [PE_SET_LP]           = {elementSetLP, "elementSetLP", "Parsing set Listpack"},
+        /* zset */
+        [PE_ZSET]             = {elementZset, "elementZset", "Parsing zset"},
+        [PE_ZSET_2]           = {elementZset, "elementZset", "Parsing zset_2"},
+        [PE_ZSET_ZL]          = {elementZsetZL, "elementZsetZL", "Parsing zset Ziplist"},
+        [PE_ZSET_LP]          = {elementZsetLP, "elementZsetLP", "Parsing zset Listpack"},
         [PE_FUNCTION]         = {elementFunction, "elementFunction", "Parsing Function"},
         [PE_MODULE]           = {elementModule, "elementModule", "Parsing silently Module element"},
         [PE_MODULE_AUX]       = {elementModule, "elementModule", "Parsing silently Module Auxiliary data"},
@@ -89,6 +96,11 @@ struct ParsingElementInfo peInfo[PE_MAX] = {
         [PE_RAW_SET]          = {elementRawSet, "elementRawSet", "Parsing raw set"},
         [PE_RAW_SET_IS]       = {elementRawSetIS, "elementRawSetIS", "Parsing raw set Intset"},
         [PE_RAW_SET_LP]       = {elementRawSetLP, "elementRawSetLP", "Parsing raw set Listpack"},
+        /* zset */
+        [PE_RAW_ZSET]         = {elementRawZset, "elementRawZset", "Parsing raw zset"},
+        [PE_RAW_ZSET_2]       = {elementRawZset, "elementRawZset", "Parsing raw zset_2"},
+        [PE_RAW_ZSET_ZL]      = {elementRawZsetZL, "elementRawZsetZL", "Parsing raw zset Ziplist"},
+        [PE_RAW_ZSET_LP]      = {elementRawZsetLP, "elementRawZsetLP", "Parsing raw zset Listpack"},
         /* module */
         [PE_RAW_MODULE]       = {elementRawModule, "elementRawModule", "Parsing raw Module element"},
         [PE_RAW_MODULE_AUX]   = {elementRawModule, "elementRawModule(aux)", "Parsing Module Auxiliary data"},
@@ -1086,6 +1098,52 @@ void moduleTypeNameByID(char *name, uint64_t moduleid) {
     }
 }
 
+/* return either RDB_STATUS_OK or RDB_STATUS_ERROR */
+static RdbStatus zsetZiplistItem(RdbParser *p, BulkInfo *ziplistBulk) {
+
+    int ret = ziplistValidateIntegrity(ziplistBulk->ref, ziplistBulk->len, p->deepIntegCheck, NULL, NULL);
+
+    if (unlikely(!ret)) {
+        RDB_reportError(p, RDB_ERR_ZSET_ZL_INTEG_CHECK, "zsetZiplistItem(): Ziplist integrity check failed");
+        return RDB_STATUS_ERROR;
+    }
+
+    if (p->elmCtx.key.handleByLevel == RDB_LEVEL_STRUCT) {
+        registerAppBulkForNextCb(p, ziplistBulk);
+        CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_STRUCT, rdbStruct.handleZsetZL, ziplistBulk->ref);
+        return RDB_STATUS_OK;
+    }
+
+    unsigned char *offsetZL = ziplistIndex(ziplistBulk->ref, 0);
+    while (offsetZL != NULL) {
+        unsigned char *item1, *item2;
+        unsigned int item1Len, item2Len;
+        long long item1Val, item2Val;
+        double score;
+        EmbeddedBulk embBulk;
+
+        ziplistGet(offsetZL, &item1, &item1Len, &item1Val);
+        offsetZL = ziplistNext(ziplistBulk->ref, offsetZL);
+
+        ziplistGet(offsetZL, &item2, &item2Len, &item2Val);
+        offsetZL = ziplistNext(ziplistBulk->ref, offsetZL);
+
+        score = item2 ? zzlStrtod(item2, item2Len) : (double) item2Val;
+
+        if (!allocEmbeddedBulk(p, item1, item1Len, item1Val, &embBulk))
+            return RDB_STATUS_ERROR;
+
+        registerAppBulkForNextCb(p, embBulk.binfo);
+        CALL_HANDLERS_CB(p,
+                         restoreEmbeddedBulk(&embBulk);, /*finalize*/
+                         RDB_LEVEL_DATA,
+                         rdbData.handleZsetMember,
+                         embBulk.binfo->ref,
+                         score);
+    }
+    return RDB_STATUS_OK;
+}
+
 /*** Parsing Common Elements ***/
 
 RdbStatus elementRdbHeader(RdbParser *p) {
@@ -1267,10 +1325,10 @@ RdbStatus elementNextRdbType(RdbParser *p) {
         case RDB_OPCODE_EOF:                return nextParsingElement(p, PE_END_OF_FILE);
 
         /* zset (TBD) */
-        case RDB_TYPE_ZSET:
-        case RDB_TYPE_ZSET_2:
-        case RDB_TYPE_ZSET_ZIPLIST:
-        case RDB_TYPE_ZSET_LISTPACK:
+        case RDB_TYPE_ZSET:                 return nextParsingElementKeyValue(p, PE_RAW_ZSET, PE_ZSET);
+        case RDB_TYPE_ZSET_2:               return nextParsingElementKeyValue(p, PE_RAW_ZSET, PE_ZSET);
+        case RDB_TYPE_ZSET_ZIPLIST:         return nextParsingElementKeyValue(p, PE_RAW_ZSET_ZL, PE_ZSET_ZL);
+        case RDB_TYPE_ZSET_LISTPACK:        return nextParsingElementKeyValue(p, PE_RAW_ZSET_LP, PE_ZSET_LP);
 
         /* stream (TBD) */
         case RDB_TYPE_STREAM_LISTPACKS:
@@ -1664,6 +1722,115 @@ RdbStatus elementSetLP(RdbParser *p) {
     return nextParsingElement(p, PE_END_KEY);
 }
 
+RdbStatus elementZset(RdbParser *p) {
+    ElementCtx *ctx = &p->elmCtx;
+    enum ZSET_STATES {
+        ST_ZSET_HEADER=0, /*  Retrieve number of nodes */
+        ST_ZSET_NEXT_ITEM /* Process next node and callback to app (Iterative) */
+    };
+    switch (ctx->state) {
+        case ST_ZSET_HEADER:
+            IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, (uint64_t *) &(ctx->key.numItemsHint), NULL, NULL));
+
+            /*** ENTER SAFE STATE ***/
+
+            ctx->zset.left = ctx->key.numItemsHint;
+
+            updateElementState(p, ST_ZSET_NEXT_ITEM); /* fall-thru */
+
+        case ST_ZSET_NEXT_ITEM: {
+            double score;
+            BulkInfo *binfoItem;
+
+
+            IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC_APP_BULK, NULL, &binfoItem));
+
+            if (p->currOpcode == RDB_TYPE_ZSET_2) {
+                IF_NOT_OK_RETURN(rdbLoadBinaryDoubleValue(p, &score));
+            } else {
+                IF_NOT_OK_RETURN(rdbLoadDoubleValue(p, &score));
+            }
+
+            /*** ENTER SAFE STATE ***/
+
+            registerAppBulkForNextCb(p, binfoItem);
+            if (p->elmCtx.key.handleByLevel == RDB_LEVEL_STRUCT)
+                CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_STRUCT, rdbStruct.handleZsetPlain, binfoItem->ref, score);
+            else
+                CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_DATA, rdbData.handleZsetMember, binfoItem->ref, score);
+
+            return (--ctx->zset.left) ? updateElementState(p, ST_ZSET_NEXT_ITEM) : nextParsingElement(p, PE_END_KEY);
+        }
+        default:
+            RDB_reportError(p, RDB_ERR_PLAIN_ZSET_INVALID_STATE,
+                            "elementZset(): invalid parsing element state: %d", ctx->state);
+            return RDB_STATUS_ERROR;
+    }
+}
+
+RdbStatus elementZsetZL(RdbParser *p) {
+    BulkInfo *ziplistBulk;
+
+    IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC_APP_BULK, NULL, &ziplistBulk));
+
+    /*** ENTER SAFE STATE ***/
+
+    if (RDB_STATUS_ERROR == zsetZiplistItem(p, ziplistBulk))
+        return RDB_STATUS_ERROR;
+
+    return nextParsingElement(p, PE_END_KEY);
+}
+
+RdbStatus elementZsetLP(RdbParser *p) {
+    unsigned char *iterator, *item1, *item2;
+    unsigned int item1Len, item2Len;
+    long long item1Val, item2Val;
+    BulkInfo *listpackBulk;
+
+    IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC_APP_BULK, NULL, &listpackBulk));
+
+    /*** ENTER SAFE STATE ***/
+
+    /* Doesn't check for duplication */
+    if (!lpValidateIntegrity(listpackBulk->ref, listpackBulk->len, p->deepIntegCheck, NULL, 0)) {
+        RDB_reportError(p, RDB_ERR_ZSET_LP_INTEG_CHECK, "elementZsetLP(): LISTPACK integrity check failed");
+        return RDB_STATUS_ERROR;
+    }
+
+    p->elmCtx.key.numItemsHint = lpLength(listpackBulk->ref);
+
+    if (p->elmCtx.key.handleByLevel == RDB_LEVEL_STRUCT) {
+        registerAppBulkForNextCb(p, listpackBulk);
+        CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_STRUCT, rdbStruct.handleZsetLP, listpackBulk->ref);
+    } else {
+        iterator = lpFirst(listpackBulk->ref);
+        while (iterator) {
+            double score;
+            EmbeddedBulk embBulk;
+
+            item1 = lpGetValue(iterator, &item1Len, &item1Val);
+            iterator = lpNext(listpackBulk->ref, iterator);
+            item2 = lpGetValue(iterator, &item2Len, &item2Val);
+
+            score = item2 ? zzlStrtod(item2, item2Len) : (double) item2Val;
+
+            if (!allocEmbeddedBulk(p, item1, item1Len, item1Val, &embBulk))
+                return RDB_STATUS_ERROR;
+
+            registerAppBulkForNextCb(p, embBulk.binfo);
+            CALL_HANDLERS_CB(p,
+                             restoreEmbeddedBulk(&embBulk);, /*finalize*/
+                             RDB_LEVEL_DATA,
+                             rdbData.handleZsetMember,
+                             embBulk.binfo->ref,
+                             score);
+
+            iterator = lpNext(listpackBulk->ref, iterator);
+        }
+    }
+    return nextParsingElement(p, PE_END_KEY);
+}
+
 RdbStatus elementEndOfFile(RdbParser *p) {
     /* Verify the checksum if RDB version is >= 5 */
     if (p->rdbversion >= 5) {
@@ -1767,7 +1934,7 @@ RdbStatus elementModule(RdbParser *p) {
             }
             case ST_MODULE_OPCODE_DOUBLE: {
                 double val; /*UNUSED*/
-                IF_NOT_OK_RETURN(rdbLoadDoubleValue(p, &val));
+                IF_NOT_OK_RETURN(rdbLoadBinaryDoubleValue(p, &val));
                 /*** ENTER SAFE STATE ***/
                 updateElementState(p, ST_MODULE_NEXT_OPCODE);
                 break;
@@ -1824,17 +1991,76 @@ RdbStatus elementModule(RdbParser *p) {
 /*** Loaders from RDB ***/
 
 RdbStatus rdbLoadFloatValue(RdbParser *p, float *val) {
-    BulkInfo *binfoUnused;
-    IF_NOT_OK_RETURN(rdbLoad(p, sizeof(*val), RQ_ALLOC_REF, (char *) val, &binfoUnused));
+    BulkInfo *binfo;
+    IF_NOT_OK_RETURN(rdbLoad(p, sizeof(*val), RQ_ALLOC, NULL, &binfo));
+    *val = *((float*) binfo->ref);
     memrev32ifbe(val);
     return RDB_STATUS_OK;
 }
 
-RdbStatus rdbLoadDoubleValue(RdbParser *p, double *val) {
-    BulkInfo *binfoUnused;
-    IF_NOT_OK_RETURN(rdbLoad(p, sizeof(*val), RQ_ALLOC_REF, (char *) val, &binfoUnused));
+RdbStatus rdbLoadBinaryDoubleValue(RdbParser *p, double *val) {
+    BulkInfo *binfo;
+    IF_NOT_OK_RETURN(rdbLoad(p, sizeof(*val), RQ_ALLOC, NULL, &binfo));
+    *val = *((double*) binfo->ref);
     memrev64ifbe(val);
     return RDB_STATUS_OK;
+}
+
+/*
+ * For RDB_TYPE_ZSET, doubles are saved as strings prefixed by an unsigned
+ * 8 bit integer specifying the length of the representation.
+ * This 8 bit integer has special values in order to specify the following
+ * conditions:
+ * 253: not a number
+ * 254: + inf
+ * 255: - inf
+ */
+RdbStatus rdbLoadDoubleValue(RdbParser *p, double *val) {
+    unsigned char len;
+    BulkInfo *binfo;
+
+    IF_NOT_OK_RETURN(rdbLoad(p, 1, RQ_ALLOC, NULL, &binfo));
+    len = *((unsigned char*)binfo->ref);
+
+    switch (len) {
+        case 255: *val = -INFINITY; return RDB_STATUS_OK;
+        case 254: *val = INFINITY; return RDB_STATUS_OK;
+        case 253: *val = NAN; return RDB_STATUS_OK;
+        default:
+            IF_NOT_OK_RETURN(rdbLoad(p, len, RQ_ALLOC, NULL, &binfo));
+            if (sscanf(binfo->ref, "%lg", val) != 1)
+                return RDB_STATUS_ERROR;
+
+            return RDB_STATUS_OK;
+    }
+}
+
+/* Try to read double value and then copy it to the destination including one
+ * byte prefix. See rdbLoadDoubleValue() for details. */
+RdbStatus rdbLoadDoubleValueToBuff(RdbParser *p, char *buff, int *written) {
+    double val;
+    unsigned char len;
+    BulkInfo *binfo;
+
+    IF_NOT_OK_RETURN(rdbLoad(p, 1, RQ_ALLOC, NULL, &binfo));
+    len = *((unsigned char*)binfo->ref);
+
+    *buff++ = len;
+    *written = 1;
+
+    switch (len) {
+        case 255:  /* -INFINITY */
+        case 254:  /* INFINITY */
+        case 253:  /* NAN */
+            return RDB_STATUS_OK;
+        default:
+            IF_NOT_OK_RETURN(rdbLoad(p, len, RQ_ALLOC_REF, buff, &binfo));
+            if (sscanf(buff, "%lg", &val) != 1)
+                return RDB_STATUS_ERROR;
+
+            *written += len;
+            return RDB_STATUS_OK;
+    }
 }
 
 RdbStatus rdbLoadInteger(RdbParser *p, int enctype, AllocTypeRq type, char *refBuf, BulkInfo **binfo) {

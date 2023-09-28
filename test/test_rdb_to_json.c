@@ -281,6 +281,78 @@ static void test_r2j_set_lp_raw(void **state) {
     testRdbToJsonCommon(DUMP_FOLDER("set_lp_v11.rdb"), DUMP_FOLDER("set_lp_v11_raw.json"), &r2jConf);
 }
 
+static void test_r2j_plain_zset_data(void **state) {
+    UNUSED(state);
+    RdbxToJsonConf r2jConf = DEF_CONF(RDB_LEVEL_DATA);
+    testRdbToJsonCommon(DUMP_FOLDER("plain_zset_v6.rdb"), DUMP_FOLDER("plain_zset_v6_data.json"), &r2jConf);
+}
+
+static void test_r2j_plain_zset_struct(void **state) {
+    UNUSED(state);
+    RdbxToJsonConf r2jConf = DEF_CONF(RDB_LEVEL_STRUCT);
+    testRdbToJsonCommon(DUMP_FOLDER("plain_zset_v6.rdb"), DUMP_FOLDER("plain_zset_v6_struct.json"), &r2jConf);
+}
+
+static void test_r2j_plain_zset_raw(void **state) {
+    UNUSED(state);
+    RdbxToJsonConf r2jConf = DEF_CONF(RDB_LEVEL_RAW);
+    testRdbToJsonCommon(DUMP_FOLDER("plain_zset_v6.rdb"), DUMP_FOLDER("plain_zset_v6_raw.json"), &r2jConf);
+}
+
+static void test_r2j_plain_zset_2_data(void **state) {
+    UNUSED(state);
+    RdbxToJsonConf r2jConf = DEF_CONF(RDB_LEVEL_DATA);
+    testRdbToJsonCommon(DUMP_FOLDER("plain_zset_2_v11.rdb"), DUMP_FOLDER("plain_zset_2_v11_data.json"), &r2jConf);
+}
+
+static void test_r2j_plain_zset_2_struct(void **state) {
+    UNUSED(state);
+    RdbxToJsonConf r2jConf = DEF_CONF(RDB_LEVEL_STRUCT);
+    testRdbToJsonCommon(DUMP_FOLDER("plain_zset_2_v11.rdb"), DUMP_FOLDER("plain_zset_2_v11_struct.json"), &r2jConf);
+}
+
+static void test_r2j_plain_zset_2_raw(void **state) {
+    UNUSED(state);
+    RdbxToJsonConf r2jConf = DEF_CONF(RDB_LEVEL_RAW);
+    testRdbToJsonCommon(DUMP_FOLDER("plain_zset_2_v11.rdb"), DUMP_FOLDER("plain_zset_2_v11_raw.json"), &r2jConf);
+}
+
+static void test_r2j_zset_lp_data(void **state) {
+    UNUSED(state);
+    RdbxToJsonConf r2jConf = DEF_CONF(RDB_LEVEL_DATA);
+    testRdbToJsonCommon(DUMP_FOLDER("zset_lp_v11.rdb"), DUMP_FOLDER("zset_lp_v11_data.json"), &r2jConf);
+}
+
+static void test_r2j_zset_lp_struct(void **state) {
+    UNUSED(state);
+    RdbxToJsonConf r2jConf = DEF_CONF(RDB_LEVEL_STRUCT);
+    testRdbToJsonCommon(DUMP_FOLDER("zset_lp_v11.rdb"), DUMP_FOLDER("zset_lp_v11_struct.json"), &r2jConf);
+}
+
+static void test_r2j_zset_lp_raw(void **state) {
+    UNUSED(state);
+    RdbxToJsonConf r2jConf = DEF_CONF(RDB_LEVEL_RAW);
+    testRdbToJsonCommon(DUMP_FOLDER("zset_lp_v11.rdb"), DUMP_FOLDER("zset_lp_v11_raw.json"), &r2jConf);
+}
+
+static void test_r2j_zset_zl_data(void **state) {
+    UNUSED(state);
+    RdbxToJsonConf r2jConf = DEF_CONF(RDB_LEVEL_DATA);
+    testRdbToJsonCommon(DUMP_FOLDER("zset_zl_v6.rdb"), DUMP_FOLDER("zset_zl_v6_data.json"), &r2jConf);
+}
+
+static void test_r2j_zset_zl_struct(void **state) {
+    UNUSED(state);
+    RdbxToJsonConf r2jConf = DEF_CONF(RDB_LEVEL_STRUCT);
+    testRdbToJsonCommon(DUMP_FOLDER("zset_zl_v6.rdb"), DUMP_FOLDER("zset_zl_v6_struct.json"), &r2jConf);
+}
+
+static void test_r2j_zset_zl_raw(void **state) {
+    UNUSED(state);
+    RdbxToJsonConf r2jConf = DEF_CONF(RDB_LEVEL_RAW);
+    testRdbToJsonCommon(DUMP_FOLDER("zset_zl_v6.rdb"), DUMP_FOLDER("zset_zl_v6_raw.json"), &r2jConf);
+}
+
 static void test_r2j_quicklist_data(void **state) {
     UNUSED(state);
     RdbxToJsonConf r2jConf = DEF_CONF(RDB_LEVEL_DATA);
@@ -448,6 +520,20 @@ int group_rdb_to_json(void) {
         cmocka_unit_test(test_r2j_set_lp_data),
         cmocka_unit_test(test_r2j_set_lp_struct),
         cmocka_unit_test(test_r2j_set_lp_raw),
+
+        /* zset */
+        cmocka_unit_test(test_r2j_plain_zset_data),
+        cmocka_unit_test(test_r2j_plain_zset_struct),
+        cmocka_unit_test(test_r2j_plain_zset_raw),
+        cmocka_unit_test(test_r2j_plain_zset_2_data),
+        cmocka_unit_test(test_r2j_plain_zset_2_struct),
+        cmocka_unit_test(test_r2j_plain_zset_2_raw),
+        cmocka_unit_test(test_r2j_zset_lp_data),
+        cmocka_unit_test(test_r2j_zset_lp_struct),
+        cmocka_unit_test(test_r2j_zset_lp_raw),
+        cmocka_unit_test(test_r2j_zset_zl_data),
+        cmocka_unit_test(test_r2j_zset_zl_struct),
+        cmocka_unit_test(test_r2j_zset_zl_raw),
 
         /* function */
         cmocka_unit_test(test_r2j_function),

@@ -68,6 +68,8 @@ typedef enum RdbRes {
     RDB_ERR_LIST_ZL_INTEG_CHECK,
     RDB_ERR_SET_IS_INTEG_CHECK,
     RDB_ERR_SET_LP_INTEG_CHECK,
+    RDB_ERR_ZSET_ZL_INTEG_CHECK,
+    RDB_ERR_ZSET_LP_INTEG_CHECK,
     RDB_ERR_HASH_LP_INTEG_CHECK,
     RDB_ERR_HASH_ZM_INTEG_CHECK,
     RDB_ERR_SSTYPE_INTEG_CHECK,
@@ -75,6 +77,7 @@ typedef enum RdbRes {
     RDB_ERR_PLAIN_HASH_INVALID_STATE,
     RDB_ERR_PLAIN_LIST_INVALID_STATE,
     RDB_ERR_PLAIN_SET_INVALID_STATE,
+    RDB_ERR_PLAIN_ZSET_INVALID_STATE,
     RDB_ERR_QUICK_LIST_INVALID_STATE,
     RDB_ERR_SSTYPE_INVALID_STATE,
     RDB_ERR_MODULE_INVALID_STATE,
@@ -255,17 +258,20 @@ typedef struct RdbHandlersStructCallbacks {
     RdbRes (*handleSetIS)(RdbParser *p, void *userData, RdbBulk intset);
     /* Callback to handle a listpack-based set value */
     RdbRes (*handleSetLP)(RdbParser *p, void *userData, RdbBulk listpack);
+
+    /* Callback to handle an item from a plain sorted set */
+    RdbRes (*handleZsetPlain)(RdbParser *p, void *userData, RdbBulk item, double score);
+    /* Callback to handle a ziplist-based sorted set value */
+    RdbRes (*handleZsetZL)(RdbParser *p, void *userData, RdbBulk ziplist);
+    /* Callback to handle a listpack-based sorted set value */
+    RdbRes (*handleZsetLP)(RdbParser *p, void *userData, RdbBulk listpack);
+
     /* Callback to handle function code */
     RdbRes (*handleFunction)(RdbParser *p, void *userData, RdbBulk func);
     /* Callback to handle module. Currently only reports about the name & size. */
     RdbRes (*handleModule)(RdbParser *p, void *userData, RdbBulk moduleName, size_t serializedSize);
 
     /*** TODO: RdbHandlersStructCallbacks: ***/
-
-    /* Callback to handle a ziplist-based sorted set value */
-    RdbRes (*handleZsetZL)(RdbParser *p, void *userData, RdbBulk ziplist);
-    /* Callback to handle a listpack-based sorted set value */
-    RdbRes (*handleZsetLP)(RdbParser *p, void *userData, RdbBulk listpack);
 
     /*** TODO: RdbHandlersStructCallbacks: stream stuff ... ***/
 
