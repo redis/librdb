@@ -19,7 +19,7 @@
 #define NUM_RECORDED_CMDS         400   /* Number of commands to backlog, in a cyclic array */
 #define RECORDED_DATA_MAX_LEN     40    /* Maximum payload size from any command to record into cyclic array */
 
-#define REPLY_BUFF_SIZE           4096  /* reply buffer size */
+#define REPLY_BUFF_SIZE           1024  /* reply buffer size */
 
 #define MAX_EINTR_RETRY           3
 
@@ -65,8 +65,10 @@ static void onReadRepliesError(RdbxRespToRedisLoader *ctx) {
     }
 }
 
-/* Read 'numToRead' replies from the socket.
- * Return 0 for success, 1 otherwise. */
+/* Read 'numToRead' replies from the socket. * Return 0 for success, 1 otherwise.
+ *
+ * TODO: Support nonblocking configuration. If EAGAIN, propaagate it to parser's caller
+ *       and let it to decide whether it wants to retry now or later or change to blocking mode */
 static int readReplies(RdbxRespToRedisLoader *ctx, int numToRead) {
     char buff[REPLY_BUFF_SIZE];
 
@@ -88,7 +90,7 @@ static int readReplies(RdbxRespToRedisLoader *ctx, int numToRead) {
             RDB_reportError(ctx->p, (RdbRes) RDBX_ERR_RESP2REDIS_CONN_CLOSE, "Connection closed by the remote side");
             return 1;
         } else {
-            RDB_reportError(ctx->p, (RdbRes) RDBX_ERR_RESP2REDIS_FAILED_READ, "Failed to recv() from Redis server. Exit.");
+            RDB_reportError(ctx->p, (RdbRes) RDBX_ERR_RESP2REDIS_FAILED_READ, "Failed to recv() from Redis server. (errno=%d)", errno);
             return 1;
         }
     }

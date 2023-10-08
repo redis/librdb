@@ -8,6 +8,12 @@ typedef enum RespReplyRes {
     RESP_REPLY_ERR,
 } RespRes;
 
+typedef struct RespReplyBuff {
+    const char *buff;
+    int len;
+    int at;
+} RespReplyBuff;
+
 typedef struct {
 
 /* PUBLIC: read-only */
@@ -18,10 +24,14 @@ typedef struct {
 /* PRIVATE: */
     int type;
     int typeState;
+    int typeArrayState;
 
     /* private bulk response state */
     unsigned int bulkLen;
     unsigned int bulkAt;
+
+    /* private bulk-array response state */
+    long long numBulksArray;
 
 } RespReaderCtx;
 

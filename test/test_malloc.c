@@ -43,6 +43,7 @@ static void test_extern_alloc(void **state) {
                 .encoding = RDBX_CONV_JSON_ENC_PLAIN,
                 .includeAuxField = 1,
                 .includeFunc = 0,
+                .includeStreamMeta = 0,
                 .flatten = 1,
         };
         assert_non_null(RDBX_createHandlersToJson(parser,

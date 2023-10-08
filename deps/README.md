@@ -1,11 +1,5 @@
 # deps
 The purpose of this folder is to provide the necessary dependencies for the librdb parser. 
-Currently, it includes only redis subfolder, which contains a subset of files from the Redis 
-repository that have been slightly adapted for reuse by librdb.
-
-As the librdb library evolves, it might require additional dependencies apart from the redis
-subfolder. In such cases, new subfolders may be added under the deps directory to
-accommodate these dependencies.
 
 # librdb dependencies
 
@@ -20,3 +14,6 @@ To upgrade, use as base reference specified version in version.h file, though it
 update so often (Otherwise, consider in the future having better methodology to consume 
 and upgrade redis code).
 
+## hiredis
+This directory contains the 'hiredis' project as a submodule. It is exclusively utilized 
+by the tests to manipulate the Redis server.

@@ -108,4 +108,5 @@
 #define RDB_MODULE_OPCODE_DOUBLE 4  /* Double. */
 #define RDB_MODULE_OPCODE_STRING 5  /* String. */
 
+#define UNINIT_STREAM_ENTRIES_READ (-2)
 #endif /*DEFINES_H*/

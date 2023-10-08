@@ -6,9 +6,15 @@
 #include "../../deps/redis/crc64.h"
 #include "../../deps/redis/util.h"
 #include "../../deps/redis/endianconv.h"
+#include "../../deps/redis/rax.h"
 
+#define DEF_TARGET_VERSION_STRING "5.0"
+
+/* RDB opcode defines */
 #define _RDB_TYPE_STRING 0
+#define _RDB_TYPE_STREAM_LISTPACKS_2 19
 #define _REDISMODULE_AUX_BEFORE_RDB (1<<0)
+
 #define VER_VAL(major,minor) (((unsigned int)(major)<<8) | (unsigned int)(minor))
 
 #define KEY_CMD_ID_DBG  "_RDB_CLI_CMD_ID_"
@@ -58,7 +64,7 @@ struct RdbxToResp {
     RdbxRespWriter respWriter;
     int respWriterConfigured;
 
-    unsigned int targetVerValue;  /* major << 8 | minor */
+    unsigned int targetRedisVerVal;  /* major << 8 | minor */
 
     struct {
         RdbBulkCopy key;
@@ -79,7 +85,37 @@ struct RdbxToResp {
     } rawCtx;
 
     int srcRdbVer;
+    int dstRdbVer;
+
+    struct {
+        /* +1 on start of XADD. Another +1 on end of XADD. Reset by toRespStreamMetaData() */
+        long long xaddStartEndCounter;
+
+        /* The radix tree representing pending entries for a consumer group is rebuilt
+         * each time a new consumer group is visited (The tree is used exclusively
+         * to map consumer IDs within this group to their respective  associated
+         * delivery times, which are necessary for reconstructing XCLAIM commands). */
+        rax *groupPel;
+
+        RdbBulkCopy grpName, consName;
+        int grpNameLen, consNameLen;
+
+    } streamCtx;
 };
+
+static void deletePendingEntriesList(RdbParser *p, rax **pel) {
+    /* Free all entries in the Rax tree */
+    raxIterator ri_cons;
+    raxStart(&ri_cons,*pel);
+    raxSeek(&ri_cons,"^",NULL,0);
+    while(raxNext(&ri_cons)) {
+        RdbStreamPendingEntry *entry = ri_cons.data;
+        RDB_free(p, entry);
+    }
+    /* Free the entire Rax tree */
+    raxFree(*pel);
+    *pel = NULL;
+}
 
 static void deleteRdbToRespCtx(RdbParser *p, void *context) {
     RdbxToResp *ctx = (RdbxToResp *) context;
@@ -89,9 +125,17 @@ static void deleteRdbToRespCtx(RdbParser *p, void *context) {
     /* ignore the first release attempt */
     if (--ctx->refcount) return;
 
+    if(ctx->streamCtx.grpName)
+        RDB_bulkCopyFree(p, ctx->streamCtx.grpName);
+
+    if(ctx->streamCtx.groupPel)
+        deletePendingEntriesList(p, &ctx->streamCtx.groupPel);
+
     if (ctx->keyCtx.key != NULL)
         RDB_bulkCopyFree(p, ctx->keyCtx.key);
-    ctx->keyCtx.key = NULL;
+
+    if(ctx->streamCtx.consName)
+        RDB_bulkCopyFree(p, ctx->streamCtx.consName);
 
     /* delete respWriter */
     if (ctx->respWriter.delete)
@@ -100,51 +144,62 @@ static void deleteRdbToRespCtx(RdbParser *p, void *context) {
     RDB_free(p, ctx);
 }
 
-int iov_value(struct iovec *iov, long long count, char *buf, int bufsize) {
+/* Example:: Input: length=123  return: buf="\r\n$123\r\n" */
+static void iov_length(struct iovec *iov, long long length, char *buf, int bufsize) {
     int len = 0;
-    len = ll2string(buf, bufsize, count);
+    buf[0] = '\r';
+    buf[1] = '\n';
+    buf[2] = '$';
+    len = ll2string(buf+3, bufsize-5, length);
+    buf[len + 3] = '\r';
+    buf[len + 4] = '\n';
+    iov_plain(iov, buf, len+5);
+}
 
-    int lenWithNewLine = len;
-    buf[lenWithNewLine++] = '\r';
-    buf[lenWithNewLine++] = '\n';
-
-    iov_plain(iov, buf, lenWithNewLine);
+/* For value 123 the function will return in buf: "123\r\n" */
+int iov_value(struct iovec *iov, long long value, char *buf, int bufsize) {
+    int len = 0;
+    len = ll2string(buf, bufsize-2, value); /* -2 for: 'r' and '\n' */
+    buf[len] = '\r';
+    buf[len+1] = '\n';
+    iov_plain(iov, buf, len+2);
     return len;
 }
 
-static int rdbVerFromRedisVer(RdbxToResp *ctx) {
-    const char *ver = ctx->conf.dstRedisVersion;
-    if (!ver) return 0;
+static int setRdbVerFromDestRedisVer(RdbxToResp *ctx) {
 
-    int mjr=0, mnr, pch, pos1 = 0, pos2 = 0;
+    const char *ver = ctx->conf.dstRedisVersion;
+    if (!ver) {
+        RDB_log(ctx->parser, RDB_LOG_WRN, "Destination redis version is not configured. Set target version to: %s",
+                DEF_TARGET_VERSION_STRING);
+        ver = DEF_TARGET_VERSION_STRING;
+    }
+
+    int mjr = 0, mnr, pch, pos1 = 0, pos2 = 0;
     int scanned = sscanf(ver, "%d.%d%n.%d%n", &mjr, &mnr, &pos1, &pch, &pos2);
     if ((scanned == 3 && pos2 == (int) strlen(ver)) ||
         (scanned == 2 && pos1 == (int) strlen(ver))) {
 
-        ctx->targetVerValue = VER_VAL(mjr, mnr);
+        ctx->targetRedisVerVal = VER_VAL(mjr, mnr);
         unsigned int i;
         for (i = 0; i < sizeof(redisToRdbVersion) / sizeof(redisToRdbVersion[0]); i++)
-            if (ctx->targetVerValue >= redisToRdbVersion[i].redis) return redisToRdbVersion[i].rdb;
+            if (ctx->targetRedisVerVal >= redisToRdbVersion[i].redis) {
+                return redisToRdbVersion[i].rdb;
+            }
     }
+    RDB_log(ctx->parser, RDB_LOG_WRN, "Configured Obsolete or invalid target version [%s]. Earliest is [2.4]", ver);
     return 0;
 }
 
-static void resolveSupportRestore(RdbParser *p, RdbxToResp *ctx, int srcRdbVer) {
-    int dstRdbVer;
-
-    ctx->srcRdbVer = srcRdbVer;
+static void resolveSupportRestore(RdbParser *p, RdbxToResp *ctx) {
 
     ctx->keyCtx.delBeforeWrite = (ctx->conf.delKeyBeforeWrite) ? DEL_KEY_BEFORE_BY_DEL_CMD : DEL_KEY_BEFORE_NONE;
-
     if (ctx->conf.supportRestore) {
-        /* if not configured destination RDB version, then resolve it from
-         * configured destination Redis version */
-        dstRdbVer = rdbVerFromRedisVer(ctx);
 
-        if (dstRdbVer < srcRdbVer) {
+        if (ctx->dstRdbVer < ctx->srcRdbVer) {
             RDB_log(p, RDB_LOG_WRN,
                     "Cannot support RESTORE. source RDB version (=%d) is higher than destination (=%d)",
-                    srcRdbVer, dstRdbVer);
+                    ctx->srcRdbVer, ctx->dstRdbVer);
             ctx->conf.supportRestore = 0;
         } else {
             if (ctx->conf.delKeyBeforeWrite) {
@@ -184,7 +239,7 @@ static inline RdbRes onWriteNewCmdDbg(RdbxToResp *ctx) {
         IOV_STRING(&iov[2], KEY_CMD_ID_DBG, sizeof(KEY_CMD_ID_DBG)-1);
         /* write cmd-id */
         IOV_CONST(&iov[3], "\r\n$");
-        IOV_LEN_AND_VALUE(&iov[4], currCmdNum, cmdIdLenStr, cmdIdStr);
+        IOV_LEN_AND_VAL(&iov[4], currCmdNum, cmdIdLenStr, cmdIdStr);
         if (unlikely(writer->writev(writer->ctx, iov, 6, 1, 1))) {
             RdbRes errCode = RDB_getErrorCode(ctx->parser);
             assert(errCode != RDB_OK);
@@ -224,8 +279,8 @@ static RdbRes toRespNewDb(RdbParser *p, void *userData, int dbid) {
 
     int cnt = ll2string(dbidStr, sizeof(dbidStr), dbid);
 
-    IOV_CONST(&iov[0], "*2\r\n$6\r\nSELECT\r\n$");
-    IOV_VALUE(&iov[1], cnt, cntStr);
+    IOV_CONST(&iov[0], "*2\r\n$6\r\nSELECT");
+    IOV_LENGTH(&iov[1], cnt, cntStr);
     IOV_STRING(&iov[2], dbidStr, cnt);
     IOV_CONST(&iov[3], "\r\n");
     return writevWrap(ctx, iov, 4, 1, 1);
@@ -238,7 +293,10 @@ static RdbRes toRespStartRdb(RdbParser *p, void *userData, int rdbVersion) {
     /* If not configured respWriter then output it to STDOUT */
     assert (ctx->respWriterConfigured == 1);
 
-    resolveSupportRestore(p, ctx, rdbVersion);
+    ctx->srcRdbVer = rdbVersion;
+    ctx->dstRdbVer = setRdbVerFromDestRedisVer(ctx);
+
+    resolveSupportRestore(p, ctx);
 
     return RDB_OK;
 }
@@ -258,8 +316,8 @@ static RdbRes toRespNewKey(RdbParser *p, void *userData, RdbBulk key, RdbKeyInfo
     if ((ctx->keyCtx.delBeforeWrite == DEL_KEY_BEFORE_BY_DEL_CMD) && (info->opcode != _RDB_TYPE_STRING)) {
         struct iovec iov[4];
         char keyLenStr[32];
-        IOV_CONST(&iov[0], "*2\r\n$3\r\nDEL\r\n$");
-        IOV_VALUE(&iov[1], ctx->keyCtx.keyLen, keyLenStr);
+        IOV_CONST(&iov[0], "*2\r\n$3\r\nDEL");
+        IOV_LENGTH(&iov[1], ctx->keyCtx.keyLen, keyLenStr);
         IOV_STRING(&iov[2], ctx->keyCtx.key, ctx->keyCtx.keyLen);
         IOV_CONST(&iov[3], "\r\n");
         return writevWrap(ctx, iov, 4, 1, 1);
@@ -276,15 +334,14 @@ static RdbRes toRespEndKey(RdbParser *p, void *userData) {
         struct iovec iov[6];
         char keyLenStr[32], expireLenStr[32], expireStr[32];
         /* PEXPIREAT */
-        IOV_CONST(&iov[0], "*3\r\n$9\r\nPEXPIREAT\r\n$");
+        IOV_CONST(&iov[0], "*3\r\n$9\r\nPEXPIREAT");
 
         /* KEY-LEN and KEY */
-        IOV_VALUE(&iov[1], ctx->keyCtx.keyLen, keyLenStr);
+        IOV_LENGTH(&iov[1], ctx->keyCtx.keyLen, keyLenStr);
         IOV_STRING(&iov[2], ctx->keyCtx.key, ctx->keyCtx.keyLen);
-        IOV_CONST(&iov[3], "\r\n$");
-        IOV_LEN_AND_VALUE(iov+4, ctx->keyCtx.info.expiretime, expireLenStr, expireStr);
+        IOV_LEN_AND_VAL(iov+3, ctx->keyCtx.info.expiretime, expireLenStr, expireStr);
 
-        return writevWrap(ctx, iov, 6, 1, 1);
+        return writevWrap(ctx, iov, 5, 1, 1);
     }
 
     if (ctx->keyCtx.key != NULL)
@@ -306,16 +363,15 @@ static RdbRes toRespString(RdbParser *p, void *userData, RdbBulk string) {
 
     struct iovec iov[7];
     /* write SET */
-    IOV_CONST(&iov[0], "*3\r\n$3\r\nSET\r\n$");
+    IOV_CONST(&iov[0], "*3\r\n$3\r\nSET");
     /* write key */
-    IOV_VALUE(&iov[1], ctx->keyCtx.keyLen, keyLenStr);
+    IOV_LENGTH(&iov[1], ctx->keyCtx.keyLen, keyLenStr);
     IOV_STRING(&iov[2], ctx->keyCtx.key, ctx->keyCtx.keyLen);
-    IOV_CONST(&iov[3], "\r\n$");
     /* write string */
-    IOV_VALUE(&iov[4], valLen, valLenStr);
-    IOV_STRING(&iov[5], string, valLen);
-    IOV_CONST(&iov[6], "\r\n");
-    return writevWrap(ctx, iov, 7, 1, 1);
+    IOV_LENGTH(&iov[3], valLen, valLenStr);
+    IOV_STRING(&iov[4], string, valLen);
+    IOV_CONST(&iov[5], "\r\n");
+    return writevWrap(ctx, iov, 6, 1, 1);
 }
 
 static RdbRes toRespList(RdbParser *p, void *userData, RdbBulk item) {
@@ -328,16 +384,15 @@ static RdbRes toRespList(RdbParser *p, void *userData, RdbBulk item) {
 
     struct iovec iov[7];
     /* write RPUSH */
-    IOV_CONST(&iov[0], "*3\r\n$5\r\nRPUSH\r\n$");
+    IOV_CONST(&iov[0], "*3\r\n$5\r\nRPUSH");
     /* write key */
-    IOV_VALUE(&iov[1], ctx->keyCtx.keyLen, keyLenStr);
+    IOV_LENGTH(&iov[1], ctx->keyCtx.keyLen, keyLenStr);
     IOV_STRING(&iov[2], ctx->keyCtx.key, ctx->keyCtx.keyLen);
-    IOV_CONST(&iov[3], "\r\n$");
     /* write item */
-    IOV_VALUE(&iov[4], valLen, valLenStr);
-    IOV_STRING(&iov[5], item, valLen);
-    IOV_CONST(&iov[6], "\r\n");
-    return writevWrap(ctx, iov, 7, 1, 1);
+    IOV_LENGTH(&iov[3], valLen, valLenStr);
+    IOV_STRING(&iov[4], item, valLen);
+    IOV_CONST(&iov[5], "\r\n");
+    return writevWrap(ctx, iov, 6, 1, 1);
 }
 
 static RdbRes toRespHash(RdbParser *p, void *userData, RdbBulk field, RdbBulk value) {
@@ -351,20 +406,18 @@ static RdbRes toRespHash(RdbParser *p, void *userData, RdbBulk field, RdbBulk va
 
     struct iovec iov[10];
     /* write RPUSH */
-    IOV_CONST(&iov[0], "*4\r\n$4\r\nHSET\r\n$");
+    IOV_CONST(&iov[0], "*4\r\n$4\r\nHSET");
     /* write key */
-    IOV_VALUE(&iov[1], ctx->keyCtx.keyLen, keyLenStr);
+    IOV_LENGTH(&iov[1], ctx->keyCtx.keyLen, keyLenStr);
     IOV_STRING(&iov[2], ctx->keyCtx.key, ctx->keyCtx.keyLen);
-    IOV_CONST(&iov[3], "\r\n$");
     /* write field */
-    IOV_VALUE(&iov[4], fieldLen, fieldLenStr);
-    IOV_STRING(&iov[5], field, fieldLen);
-    IOV_CONST(&iov[6], "\r\n$");
+    IOV_LENGTH(&iov[3], fieldLen, fieldLenStr);
+    IOV_STRING(&iov[4], field, fieldLen);
     /* write value */
-    IOV_VALUE(&iov[7], valueLen, valueLenStr);
-    IOV_STRING(&iov[8], value, valueLen);
-    IOV_CONST(&iov[9], "\r\n");
-    return writevWrap(ctx, iov, sizeof(iov)/sizeof(iov[0]), 1, 1);
+    IOV_LENGTH(&iov[5], valueLen, valueLenStr);
+    IOV_STRING(&iov[6], value, valueLen);
+    IOV_CONST(&iov[7], "\r\n");
+    return writevWrap(ctx, iov, 8, 1, 1);
 }
 
 static RdbRes toRespSet(RdbParser *p, void *userData, RdbBulk member) {
@@ -375,16 +428,15 @@ static RdbRes toRespSet(RdbParser *p, void *userData, RdbBulk member) {
 
     struct iovec iov[7];
     /* write RPUSH */
-    IOV_CONST(&iov[0], "*3\r\n$4\r\nSADD\r\n$");
+    IOV_CONST(&iov[0], "*3\r\n$4\r\nSADD");
     /* write key */
-    IOV_VALUE(&iov[1], ctx->keyCtx.keyLen, keyLenStr);
+    IOV_LENGTH(&iov[1], ctx->keyCtx.keyLen, keyLenStr);
     IOV_STRING(&iov[2], ctx->keyCtx.key, ctx->keyCtx.keyLen);
-    IOV_CONST(&iov[3], "\r\n$");
     /* write member */
-    IOV_VALUE(&iov[4], valLen, valLenStr);
-    IOV_STRING(&iov[5], member, valLen);
-    IOV_CONST(&iov[6], "\r\n");
-    return writevWrap(ctx, iov, 7, 1, 1);
+    IOV_LENGTH(&iov[3], valLen, valLenStr);
+    IOV_STRING(&iov[4], member, valLen);
+    IOV_CONST(&iov[5], "\r\n");
+    return writevWrap(ctx, iov, 6, 1, 1);
 }
 
 static RdbRes toRespZset(RdbParser *p, void *userData, RdbBulk member, double score) {
@@ -395,25 +447,23 @@ static RdbRes toRespZset(RdbParser *p, void *userData, RdbBulk member, double sc
 
     struct iovec iov[10];
     /* write ZADD */
-    IOV_CONST(&iov[0], "*4\r\n$4\r\nZADD\r\n$");
+    IOV_CONST(&iov[0], "*4\r\n$4\r\nZADD");
     /* write key */
-    IOV_VALUE(&iov[1], ctx->keyCtx.keyLen, keyLenStr);
+    IOV_LENGTH(&iov[1], ctx->keyCtx.keyLen, keyLenStr);
     IOV_STRING(&iov[2], ctx->keyCtx.key, ctx->keyCtx.keyLen);
-    IOV_CONST(&iov[3], "\r\n$");
 
     /* write score */
     char score_str[MAX_D2STRING_CHARS];
     int len = d2string(score_str, sizeof(score_str), score);
     assert(len != 0);
-    IOV_VALUE(&iov[4], len, scoreLenStr);
-    IOV_STRING(&iov[5], score_str, strlen(score_str));
-    IOV_CONST(&iov[6], "\r\n$");
+    IOV_LENGTH(&iov[3], len, scoreLenStr);
+    IOV_STRING(&iov[4], score_str, strlen(score_str));
 
     /* write member */
-    IOV_VALUE(&iov[7], valLen, valLenStr);
-    IOV_STRING(&iov[8], member, valLen);
-    IOV_CONST(&iov[9], "\r\n");
-    return writevWrap(ctx, iov, 10, 1, 1);
+    IOV_LENGTH(&iov[5], valLen, valLenStr);
+    IOV_STRING(&iov[6], member, valLen);
+    IOV_CONST(&iov[7], "\r\n");
+    return writevWrap(ctx, iov, 8, 1, 1);
 }
 
 static RdbRes toRespEndRdb(RdbParser *p, void *userData) {
@@ -438,13 +488,232 @@ static RdbRes toRespFunction(RdbParser *p, void *userData, RdbBulk func) {
     int funcLen = RDB_bulkLen(p, func);
 
     struct iovec iov[4];
-    IOV_CONST(&iov[0], "*4\r\n$8\r\nFUNCTION\r\n$4\r\nLOAD\r\n$7\r\nREPLACE\r\n$");
+    IOV_CONST(&iov[0], "*4\r\n$8\r\nFUNCTION\r\n$4\r\nLOAD\r\n$7\r\nREPLACE");
     /* write member */
-    IOV_VALUE(&iov[1], funcLen, funcLenStr);
+    IOV_LENGTH(&iov[1], funcLen, funcLenStr);
     IOV_STRING(&iov[2], func, funcLen);
     IOV_CONST(&iov[3], "\r\n");
     return writevWrap( (RdbxToResp *) userData, iov, 4, 1, 1);
 
+}
+
+RdbRes toRespStreamMetaData(RdbParser *p, void *userData, RdbStreamMeta *meta) {
+
+    UNUSED(p);
+    char keyLenStr[32], idStr[100], idLenStr[32], maxDelEntryIdLenStr[64], maxDelEntryId[100], entriesLenStr[32], entriesStr[32];
+    RdbxToResp *ctx = userData;
+    struct iovec iov[15];
+
+    if (ctx->streamCtx.xaddStartEndCounter == 0) {
+        /* Use the XGROUP CREATE MKSTREAM + DESTROY trick to generate an empty stream if
+         * the key we are serializing is an empty stream, which is possible
+         * for the Stream type. (We don't use the MAXLEN 0 trick from aof.c
+         * because of Redis Enterprise CRDT compatibility issues - Can't XSETID "back") */
+
+        IOV_CONST(&iov[0], "*6\r\n$6\r\nXGROUP\r\n$6\r\nCREATE");
+        IOV_LENGTH(&iov[1], ctx->keyCtx.keyLen, keyLenStr);
+        IOV_STRING(&iov[2], ctx->keyCtx.key, ctx->keyCtx.keyLen);
+        IOV_CONST(&iov[3], "$7\r\ndummyCG\r\n$1\r\n$\r\n$8\r\nMKSTREAM\r\n");
+        IF_NOT_OK_RETURN(writevWrap( (RdbxToResp *) userData, iov, 4, 1, 1));
+
+        IOV_CONST(&iov[0], "*4\r\n$6\r\nXGROUP\r\n$7\r\nDESTROY");
+        IOV_LENGTH(&iov[1], ctx->keyCtx.keyLen, keyLenStr);
+        IOV_STRING(&iov[2], ctx->keyCtx.key, ctx->keyCtx.keyLen);
+        IOV_CONST(&iov[3], "$7\r\ndummyCG\r\n");
+        IF_NOT_OK_RETURN(writevWrap( (RdbxToResp *) userData, iov, 4, 1, 1));
+    }
+
+    /* take care to reset it for next stream-item */
+    ctx->streamCtx.xaddStartEndCounter = 0;
+
+    int idLen = snprintf(idStr, sizeof(idStr), "%lu-%lu",meta->lastID.ms,meta->lastID.seq);
+    int maxDelEntryIdLen = snprintf(maxDelEntryId, sizeof(maxDelEntryId), "%lu-%lu", meta->maxDelEntryID.ms, meta->maxDelEntryID.seq);
+
+    if ((ctx->keyCtx.info.opcode >= _RDB_TYPE_STREAM_LISTPACKS_2) && (ctx->targetRedisVerVal >= VER_VAL(7, 0))) {
+        IOV_CONST(&iov[0], "*7\r\n$6\r\nXSETID");
+        IOV_LENGTH(&iov[1], ctx->keyCtx.keyLen, keyLenStr);
+        IOV_STRING(&iov[2], ctx->keyCtx.key, ctx->keyCtx.keyLen);
+        IOV_LENGTH(&iov[3], idLen, idLenStr);
+        IOV_STRING(&iov[4], idStr, idLen);
+        IOV_CONST(&iov[5], "\r\n$12\r\nENTRIESADDED");
+        IOV_LEN_AND_VAL(&iov[6], meta->entriesAdded, entriesLenStr, entriesStr);
+        IOV_CONST(&iov[8], "$12\r\nMAXDELETEDID");
+        IOV_LENGTH(&iov[9], maxDelEntryIdLen, maxDelEntryIdLenStr);
+        IOV_STRING(&iov[10], maxDelEntryId, maxDelEntryIdLen);
+        IOV_CONST(&iov[11], "\r\n");
+        return writevWrap( (RdbxToResp *) userData, iov, 12, 1, 1);
+    } else {
+        IOV_CONST(&iov[0], "*3\r\n$6\r\nXSETID");
+        IOV_LENGTH(&iov[1], ctx->keyCtx.keyLen, keyLenStr);
+        IOV_STRING(&iov[2], ctx->keyCtx.key, ctx->keyCtx.keyLen);
+        IOV_LENGTH(&iov[3], idLen, idLenStr);
+        IOV_STRING(&iov[4], idStr, idLen);
+        IOV_CONST(&iov[5], "\r\n");
+        return writevWrap( (RdbxToResp *) userData, iov, 6, 1, 1);
+    }
+}
+
+RdbRes toRespStreamItem(RdbParser *p, void *userData, RdbStreamID *id, RdbBulk field, RdbBulk val, int64_t pairsLeft) {
+    char cmd[64], idStr[100], idLenStr[64], keyLenStr[32], fieldLenStr[32], valLenStr[32];
+    int iovs = 0, startCmd = 0 , endCmd = 0;
+    struct iovec iov[15];
+    RdbxToResp *ctx = userData;
+
+    size_t fieldLen = RDB_bulkLen(p, field);
+    size_t valLen = RDB_bulkLen(p, val);
+
+    /* Start of (another) stream item? */
+    if ((ctx->streamCtx.xaddStartEndCounter % 2) == 0) {
+        int cmdLen = snprintf(cmd, sizeof(cmd), "*%lu\r\n$4\r\nXADD", 3 + (pairsLeft + 1) * 2);
+        IOV_STRING(&iov[iovs++], cmd, cmdLen);
+        IOV_LENGTH(&iov[iovs++], ctx->keyCtx.keyLen, keyLenStr);
+        IOV_STRING(&iov[iovs++], ctx->keyCtx.key, ctx->keyCtx.keyLen);
+        int idLen = snprintf(idStr, sizeof(idStr), "%lu-%lu",id->ms,id->seq);
+        IOV_LENGTH(&iov[iovs++], idLen, idLenStr);
+        IOV_STRING(&iov[iovs++], idStr, idLen);
+
+        startCmd = 1;
+        ++ctx->streamCtx.xaddStartEndCounter;
+    }
+
+    IOV_LENGTH(&iov[iovs++], fieldLen, fieldLenStr);
+    IOV_STRING(&iov[iovs++], field, fieldLen);
+    IOV_LENGTH(&iov[iovs++], valLen, valLenStr);
+    IOV_STRING(&iov[iovs++], val, valLen);
+
+    /* if end of variadic command */
+    if (!pairsLeft) {
+        IOV_CONST(&iov[iovs++], "\r\n");
+        endCmd = 1;
+        ++ctx->streamCtx.xaddStartEndCounter;
+    }
+
+    return writevWrap( (RdbxToResp *) userData, iov, iovs, startCmd, endCmd);
+}
+
+/* Emit the XGROUP CREATE in order to create the group. */
+RdbRes toRespStreamNewCGroup(RdbParser *p, void *userData, RdbBulk grpName, RdbStreamGroupMeta *meta) {
+    struct iovec iov[16];
+    int iovs = 0;
+    RdbxToResp *ctx = userData;
+    char keyLenStr[32], gNameLenStr[32], idStr[100], idLenStr[32], entriesReadStr[32], entriesReadLenStr[32];
+
+    /* (re)allocate mem to keep group name */
+    if(ctx->streamCtx.grpName)
+        RDB_bulkCopyFree(p, ctx->streamCtx.grpName);
+    ctx->streamCtx.grpNameLen = RDB_bulkLen(p, grpName);
+    if(!(ctx->streamCtx.grpName = RDB_bulkClone(p, grpName)))
+        return RDB_ERR_FAIL_ALLOC;
+
+    /* (re)allocate rax tree for group pel */
+    if(ctx->streamCtx.groupPel)
+        deletePendingEntriesList(p, &ctx->streamCtx.groupPel);
+    if(!(ctx->streamCtx.groupPel = raxNew()))
+        return RDB_ERR_FAIL_ALLOC;
+
+    int idLen = snprintf(idStr, sizeof(idStr), "%lu-%lu",meta->lastId.ms,meta->lastId.seq);
+
+    if ( (meta->entriesRead>=0) && (ctx->targetRedisVerVal >= VER_VAL(7, 0))) {
+        /* XGROUP CREATE */
+        IOV_CONST(&iov[iovs++], "*7\r\n$6\r\nXGROUP\r\n$6\r\nCREATE");
+        /* key */
+        IOV_LENGTH(&iov[iovs++], ctx->keyCtx.keyLen, keyLenStr);
+        IOV_STRING(&iov[iovs++], ctx->keyCtx.key, ctx->keyCtx.keyLen);
+        /* group name */
+        IOV_LENGTH(&iov[iovs++], ctx->streamCtx.grpNameLen, gNameLenStr);
+        IOV_STRING(&iov[iovs++], ctx->streamCtx.grpName, ctx->streamCtx.grpNameLen);
+        /* last id */
+        IOV_LENGTH(&iov[iovs++], idLen, idLenStr);
+        IOV_STRING(&iov[iovs++], idStr, idLen);
+        /* entries read */
+        IOV_CONST(&iov[iovs++], "\r\n$11\r\nENTRIESREAD");
+        IOV_LEN_AND_VAL(&iov[iovs], meta->entriesRead, entriesReadLenStr, entriesReadStr);
+        iovs += 2;
+    } else {
+        /* XGROUP CREATE */
+        IOV_CONST(&iov[iovs++], "*5\r\n$6\r\nXGROUP\r\n$6\r\nCREATE");
+        /* key */
+        IOV_LENGTH(&iov[iovs++], ctx->keyCtx.keyLen, keyLenStr);
+        IOV_STRING(&iov[iovs++], ctx->keyCtx.key, ctx->keyCtx.keyLen);
+        /* group name */
+        IOV_LENGTH(&iov[iovs++], ctx->streamCtx.grpNameLen, gNameLenStr);
+        IOV_STRING(&iov[iovs++], ctx->streamCtx.grpName, ctx->streamCtx.grpNameLen);
+        /* last id */
+        IOV_LENGTH(&iov[iovs++], idLen, idLenStr);
+        IOV_STRING(&iov[iovs++], idStr, idLen);
+        IOV_CONST(&iov[iovs++], "\r\n");
+    }
+    return writevWrap(ctx, iov, iovs, 1, 1);
+}
+
+RdbRes toRespStreamCGroupPendingEntry(RdbParser *p, void *userData, RdbStreamPendingEntry *pendingEntry) {
+    RdbxToResp *ctx = userData;
+    RdbStreamPendingEntry *pe;
+
+    /* Make a copy pending entry */
+    if ((pe = RDB_alloc(p, sizeof(RdbStreamPendingEntry))) == NULL)
+        return RDB_ERR_FAIL_ALLOC;
+
+    memcpy(pe, pendingEntry, sizeof(RdbStreamPendingEntry));
+
+    if (!raxTryInsert(ctx->streamCtx.groupPel, (unsigned char *) &(pe->id),
+                      sizeof(pe->id), pe, NULL))
+        return (RdbRes) RDBX_ERR_STREAM_DUPLICATE_PEL;
+
+    return RDB_OK;
+}
+
+RdbRes toRespStreamNewConsumer(RdbParser *p, void *userData, RdbBulk consName, RdbStreamConsumerMeta *meta) {
+    UNUSED(meta);
+    RdbxToResp *ctx = userData;
+
+    /* (re)allocate mem to keep consumer name */
+    if(ctx->streamCtx.consName)
+        RDB_bulkCopyFree(p, ctx->streamCtx.consName);
+
+    ctx->streamCtx.consNameLen = RDB_bulkLen(p, consName);
+    if(!(ctx->streamCtx.consName = RDB_bulkClone(p, consName)))
+        return RDB_ERR_FAIL_ALLOC;
+
+    return RDB_OK;
+}
+
+/* Callback to handle a pending entry within a consumer */
+RdbRes toRespStreamConsumerPendingEntry(RdbParser *p, void *userData, RdbStreamID *streamId) {
+    RdbStreamPendingEntry *pe;
+    char cmdTrailer[256], idStr[100], keyLenStr[32], gNameLenStr[32], cNameLenStr[32], sentTime[32], sentCount[32];
+    struct iovec iov[16];
+    int iovs = 0;
+    RdbxToResp *ctx = userData;
+
+    if ((pe = raxFind(ctx->streamCtx.groupPel, (unsigned char *)streamId, sizeof(*streamId))) == raxNotFound) {
+        RDB_reportError(p, (RdbRes) RDBX_ERR_STREAM_INTEG_CHECK,
+                        "toRespStreamNewConsumer(): Cannot find consumer pending entry in group PEL");
+        return (RdbRes) RDBX_ERR_STREAM_INTEG_CHECK;
+    }
+
+    /* XCLAIM */
+    IOV_CONST(&iov[iovs++], "*12\r\n$6\r\nXCLAIM");
+    /* key */
+    IOV_LENGTH(&iov[iovs++], ctx->keyCtx.keyLen, keyLenStr);
+    IOV_STRING(&iov[iovs++], ctx->keyCtx.key, ctx->keyCtx.keyLen);
+    /* group name */
+    IOV_LENGTH(&iov[iovs++], ctx->streamCtx.grpNameLen, gNameLenStr);
+    IOV_STRING(&iov[iovs++], ctx->streamCtx.grpName, ctx->streamCtx.grpNameLen);
+
+    /* consumer name */
+    IOV_LENGTH(&iov[iovs++], ctx->streamCtx.consNameLen, cNameLenStr);
+    IOV_STRING(&iov[iovs++], ctx->streamCtx.consName, ctx->streamCtx.consNameLen);
+    /* trailer of the command */
+    int idLen = snprintf(idStr, sizeof(idStr), "%lu-%lu",streamId->ms, streamId->seq);
+    int sentTimeLen = ll2string(sentTime, sizeof(sentTime), pe->deliveryTime);
+    int sentCountLen = ll2string(sentCount, sizeof(sentCount), pe->deliveryCount);
+    int cmdTrailerLen = snprintf(cmdTrailer, sizeof(cmdTrailer),
+                                "\r\n$1\r\n0\r\n$%d\r\n%s\r\n$4\r\nTIME\r\n$%d\r\n%s\r\n$10\r\nRETRYCOUNT\r\n$%d\r\n%s\r\n$6\r\nJUSTID\r\n$5\r\nFORCE\r\n",
+                                idLen, idStr, sentTimeLen, sentTime, sentCountLen, sentCount);
+    /* max: 2 + 2 + 1 + 3 + 21*2+1 + 2 + 4 + 3 + 21 + 2 + 10 + 3 +21 +2 + 6 + 2 +5 + 2*16 */
+    IOV_STRING(&iov[iovs++], cmdTrailer, cmdTrailerLen);
+    return writevWrap(ctx, iov, iovs, 1, 1);
 }
 
 /*** Handling raw ***/
@@ -472,7 +741,7 @@ static RdbRes toRespRawBeginModuleAux(RdbParser *p, void *userData, RdbBulk name
     const char* whenstr = (when==_REDISMODULE_AUX_BEFORE_RDB) ? "before" :"after";
     ctx->rawCtx.moduleAux.cmdlen = snprintf(ctx->rawCtx.moduleAux.cmdPrefix,
             sizeof(ctx->rawCtx.moduleAux.cmdPrefix),
-            "*5\r\n$13\r\nRESTOREMODAUX\r\n$%zu\r\n%s\r\n$%zu\r\n%s\r\n$%zu\r\n%s\r\n$",
+            "*5\r\n$13\r\nRESTOREMODAUX\r\n$%zu\r\n%s\r\n$%zu\r\n%s\r\n$%zu\r\n%s",
             strlen(name), name, enclen, encstr, strlen(whenstr), whenstr);
     return RDB_OK;
 }
@@ -499,7 +768,7 @@ static inline RdbRes sendFirstRawFrag(RdbxToResp *ctx, RdbBulk frag, size_t frag
     int extra_args = 0, iovs = 0;
 
     /* this logic must be exactly the same as in toRespRawFragEnd() */
-    if (ctx->targetVerValue >= VER_VAL(5,0))
+    if (ctx->targetRedisVerVal >= VER_VAL(5, 0))
     {
         if (ctx->keyCtx.info.expiretime != -1) {
             expireTime = ctx->keyCtx.info.expiretime;
@@ -516,20 +785,20 @@ static inline RdbRes sendFirstRawFrag(RdbxToResp *ctx, RdbBulk frag, size_t frag
 
     char cmd[64];
 
-    int len = snprintf(cmd, sizeof(cmd), "*%d\r\n$7\r\nRESTORE\r\n$", 4+extra_args);
+    int len = snprintf(cmd, sizeof(cmd), "*%d\r\n$7\r\nRESTORE", 4+extra_args);
 
     IOV_STRING(&iov[iovs++], cmd, len);                             /* RESTORE */
-    IOV_VALUE(&iov[iovs++], ctx->keyCtx.keyLen, keyLenStr);         /* write key len */
+    IOV_LENGTH(&iov[iovs++], ctx->keyCtx.keyLen, keyLenStr);         /* write key len */
     IOV_STRING(&iov[iovs++], ctx->keyCtx.key, ctx->keyCtx.keyLen);  /* write key */
 
     if (expireTime) {
-        IOV_CONST(&iov[iovs++], "\r\n$");
-        IOV_LEN_AND_VALUE(&iov[iovs], expireTime, expireTimeLenStr, expireTimeStr);
+        IOV_LEN_AND_VAL(&iov[iovs], expireTime, expireTimeLenStr, expireTimeStr);
         iovs += 2;
         IOV_CONST(&iov[iovs++], "$");
     } else {
         IOV_CONST(&iov[iovs++], "\r\n$1\r\n0\r\n$");
     }
+
     IOV_VALUE(&iov[iovs++], ctx->rawCtx.rawSize + 10, lenStr); /* write raw len + trailer */
     IOV_STRING(&iov[iovs++], frag, fragLen);                   /* write first frag */
     return writevWrap(ctx, iov, iovs, 1, 0);
@@ -540,7 +809,7 @@ static inline RdbRes sendFirstRawFragModuleAux(RdbxToResp *ctx, RdbBulk frag, si
     char lenStr[32];
     iov[0].iov_base = ctx->rawCtx.moduleAux.cmdPrefix;
     iov[0].iov_len =  ctx->rawCtx.moduleAux.cmdlen;
-    IOV_VALUE(&iov[1], ctx->rawCtx.rawSize + 10, lenStr); /* write raw len + trailer */
+    IOV_LENGTH(&iov[1], ctx->rawCtx.rawSize + 10, lenStr); /* write raw len + trailer */
     IOV_STRING(&iov[2], frag, fragLen);                   /* write first frag */
     return writevWrap(ctx, iov, 3, 1, 0);
 }
@@ -607,7 +876,7 @@ RdbRes toRespRawFragEnd(RdbParser *p, void *userData) {
         len += snprintf(cmd+len, sizeof(cmd)-len, "\r\n");
 
     /* This logic must be exactly the same as in toRespRawFrag() */
-    if (likely(ctx->targetVerValue >= VER_VAL(5,0))) {
+    if (likely(ctx->targetRedisVerVal >= VER_VAL(5, 0))) {
 
         /* Add ABSTTL */
         if (ctx->keyCtx.info.expiretime != -1) {
@@ -646,6 +915,9 @@ _LIBRDB_API RdbxToResp *RDBX_createHandlersToResp(RdbParser *p, RdbxToRespConf *
     if (conf) ctx->conf = *conf;
     ctx->parser = p;
     ctx->refcount = 2;
+    ctx->streamCtx.xaddStartEndCounter = 0;
+    ctx->streamCtx.grpName = NULL;
+    ctx->streamCtx.groupPel = NULL;
 
     RdbHandlersDataCallbacks dataCb;
     memset(&dataCb, 0, sizeof(RdbHandlersDataCallbacks));
@@ -660,6 +932,12 @@ _LIBRDB_API RdbxToResp *RDBX_createHandlersToResp(RdbParser *p, RdbxToRespConf *
     dataCb.handleZsetMember = toRespZset;
     dataCb.handleEndRdb = toRespEndRdb;
     dataCb.handleFunction = toRespFunction;
+    dataCb.handleStreamMetadata = toRespStreamMetaData;
+    dataCb.handleStreamItem = toRespStreamItem;
+    dataCb.handleStreamNewCGroup = toRespStreamNewCGroup;
+    dataCb.handleStreamCGroupPendingEntry = toRespStreamCGroupPendingEntry;
+    dataCb.handleStreamNewConsumer = toRespStreamNewConsumer;
+    dataCb.handleStreamConsumerPendingEntry = toRespStreamConsumerPendingEntry;
     RDB_createHandlersData(p, &dataCb, ctx, deleteRdbToRespCtx);
 
     RdbHandlersRawCallbacks rawCb;

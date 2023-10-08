@@ -26,6 +26,7 @@ static void test_rdb_cli_resp_common(const char *rdbfile) {
             .encoding = RDBX_CONV_JSON_ENC_PLAIN,
             .includeAuxField = 0,
             .includeFunc = 0,
+            .includeStreamMeta = 0,
             .flatten = 1,
     };
 

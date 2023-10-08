@@ -38,6 +38,7 @@ static void test_empty_rdb(void **state) {
             .encoding = RDBX_CONV_JSON_ENC_PLAIN,
             .includeAuxField = 1,
             .includeFunc = 0,
+            .includeStreamMeta = 0,
             .flatten = 1,
     };
 
@@ -61,10 +62,10 @@ static void test_mixed_levels_registration(void **state) {
     RdbParser *parser = RDB_createParserRdb(NULL);
     RDB_setLogLevel(parser, RDB_LOG_ERR);
     assert_non_null(RDBX_createReaderFile(parser, rdbfile));
-    RdbxToJsonConf conf1 = {RDB_LEVEL_DATA, RDBX_CONV_JSON_ENC_PLAIN, 0, 0, 1};
+    RdbxToJsonConf conf1 = {RDB_LEVEL_DATA, RDBX_CONV_JSON_ENC_PLAIN, 0, 0, 0, 1};
     assert_non_null(RDBX_createHandlersToJson(parser, jsonfileData, &conf1));
 
-    RdbxToJsonConf conf2 = {RDB_LEVEL_RAW, RDBX_CONV_JSON_ENC_PLAIN, 0, 0, 1};
+    RdbxToJsonConf conf2 = {RDB_LEVEL_RAW, RDBX_CONV_JSON_ENC_PLAIN, 0, 0, 0, 1};
     assert_non_null(RDBX_createHandlersToJson(parser, jsonfileRaw, &conf2));
 
     /* configure at what level of the parser each obj type should be handled and callback */
@@ -181,7 +182,6 @@ int main(int argc, char *argv[]) {
     RUN_TEST_GROUP(group_pause);
     RUN_TEST_GROUP(group_rdb_to_redis); /*external*/
     RUN_TEST_GROUP(group_test_rdb_cli); /*external*/
-
 
     printf("\n*************** SIMULATING WAIT_MORE_DATA *******************\n");
     setEnvVar("LIBRDB_SIM_WAIT_MORE_DATA", "1");

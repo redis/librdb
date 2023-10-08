@@ -1,9 +1,11 @@
 SOURCES = $(notdir $(basename $(wildcard *.c)))
 OBJECTS = $(patsubst %,%.o,$(SOURCES))
 
+OPTIMIZATION?=-O3
+
 STD            = -std=c99
 WARNS          = -Wall -Wextra -pedantic -Werror
-CFLAGS         = -fPIC -O3 $(STD) $(WARNS)
+CFLAGS         = -fPIC $(OPTIMIZATION) $(STD) $(WARNS)
 DEBUG          = -g3 -DDEBUG=1
 LIBS           =
 

@@ -18,6 +18,7 @@
  * Since it uses %g and not %f, some 40 chars should be enough. */
 #define MAX_D2STRING_CHARS 128
 
+int string2ll(const char *s, size_t slen, long long *value);
 int ll2string(char *s, size_t len, long long value);
 int ull2string(char *s, size_t len, unsigned long long value);
 int lpStringToInt64(const char *s, unsigned long slen, int64_t *value);

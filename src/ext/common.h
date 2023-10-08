@@ -20,19 +20,32 @@ static inline void unused(void *dummy, ...) { (void)(dummy);}
 #endif
 
 /*** IOVEC manipulation ***/
+// INPUT: str="ABC"         OUTPUT: iov={ "ABC" , 3 }
 #define IOV_CONST(iov, str)       iov_plain(iov, str, sizeof(str)-1)
+
+// INPUT: str="ABC", len=3  OUTPUT: iov={ "ABC" , 3 }
 #define IOV_STRING(iov, str, len) iov_plain(iov, str, len)
+
+// INPUT: len=45678         OUTPUT: iov={ "\r\n$45678\r\n" , 10 }
+#define IOV_LENGTH(iov, len, ar)  iov_length(iov, len, ar, sizeof(ar))
+
+// INPUT: val=45678          OUTPUT: iov={ "45678\r\n" , 7 }
 #define IOV_VALUE(iov, val, ar)   iov_value(iov, val, ar, sizeof(ar))
-#define IOV_LEN_AND_VALUE(iov, val, ar1, ar2) \
+
+// INPUT: val=45678          OUTPUT: iov={{ "$5\r\n" , 4 } , { "45678\r\n" , 7 }}
+#define IOV_LEN_AND_VAL(iov, val, ar1, ar2) \
    do {\
         int l = IOV_VALUE((iov)+1, val, ar2); \
-        IOV_VALUE( (iov), l, ar1); \
+        IOV_LENGTH( (iov), l, ar1); \
    } while (0);
 
 int iov_value(struct iovec *iov, long long count, char *buf, int bufsize);
-inline void iov_plain(struct iovec *iov, const char *s, size_t l) {
+
+static inline void iov_plain(struct iovec *iov, const char *s, size_t l) {
     iov->iov_base = (void *) s;
     iov->iov_len = l;
 }
+
+#define IF_NOT_OK_RETURN(cmd) do {RdbRes s; s = cmd; if (unlikely(s!=RDB_OK)) return s;} while (0)
 
 #endif /*define RDBX_COMMON_H*/

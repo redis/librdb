@@ -3,7 +3,6 @@
 #include <string.h>
 #include <ctype.h>
 #include "common.h"
-
 #include "../../deps/redis/util.h"
 
 struct RdbxToJson;
@@ -22,7 +21,17 @@ typedef enum
     R2J_IN_SET,
     R2J_IN_STRING,
     R2J_IN_HASH,
-    R2J_IN_ZSET
+    R2J_IN_ZSET,
+
+    /* Possible states in R2J_IN_STREAM */
+    R2J_IN_STREAM,
+    R2J_IN_STREAM_ENTRIES,
+    R2J_IN_STREAM_ENTRIES_PAIRS,
+    R2J_IN_STREAM_CG,
+    R2J_IN_STREAM_CG_PEL,
+    R2J_IN_STREAM_CG_CONSUMER,
+    R2J_IN_STREAM_CG_CONSUMER_PEL,
+
 } RdbxToJsonState;
 
 struct RdbxToJson {
@@ -114,6 +123,7 @@ static RdbxToJson *initRdbToJsonCtx(RdbParser *p, const char *outfilename, RdbxT
     ctx->conf.level = RDB_LEVEL_DATA;
     ctx->conf.includeAuxField = 0;
     ctx->conf.includeFunc = 0;
+    ctx->conf.includeStreamMeta = 0;
 
     /* override configuration if provided */
     if (conf) ctx->conf = *conf;
@@ -147,6 +157,25 @@ static RdbRes toJsonEndKey(RdbParser *p, void *userData) {
 
     /* output json part */
     switch(ctx->state) {
+        case R2J_IN_STREAM:
+            fprintf(ctx->outfile, "\n   }");
+            break;
+        case R2J_IN_STREAM_ENTRIES:
+            fprintf(ctx->outfile, "\n   ]}");
+            break;
+        case R2J_IN_STREAM_CG:
+            fprintf(ctx->outfile, "}]}");
+            break;
+        case R2J_IN_STREAM_CG_PEL:
+            fprintf(ctx->outfile, "]}]}");
+            break;
+        case R2J_IN_STREAM_CG_CONSUMER:
+            fprintf(ctx->outfile, "}]}]}");
+            break;
+        case R2J_IN_STREAM_CG_CONSUMER_PEL:
+            fprintf(ctx->outfile, "]}]}]}");
+            break;
+
         case R2J_IN_LIST:
         case R2J_IN_SET:
             fprintf(ctx->outfile, "]");
@@ -414,6 +443,147 @@ static RdbRes toJsonFunction(RdbParser *p, void *userData, RdbBulk func) {
     return RDB_OK;
 }
 
+static RdbRes toJsonStreamItem(RdbParser *p, void *userData, RdbStreamID *id, RdbBulk field, RdbBulk value, int64_t pairsLeft) {
+    RdbxToJson *ctx = userData;
+
+    if ( (ctx->state == R2J_IN_KEY) || (ctx->state == R2J_IN_STREAM_ENTRIES)) {
+        /* start of stream array of entries */
+        if (ctx->state == R2J_IN_KEY)
+            fprintf(ctx->outfile, "{\n      \"entries\":[");
+
+        /* output another stream entry */
+        fprintf(ctx->outfile, "%c\n        { \"id\":\"%lu-%lu\", ",
+                (ctx->state == R2J_IN_STREAM_ENTRIES) ? ',' : ' ',
+                id->ms, id->seq );
+        fprintf(ctx->outfile, "\"values\":{");
+        outputQuotedEscaping(ctx, field, RDB_bulkLen(p, field));
+        fprintf(ctx->outfile, ":");
+        outputQuotedEscaping(ctx, value, RDB_bulkLen(p, value));
+    } else if (ctx->state == R2J_IN_STREAM_ENTRIES_PAIRS) {
+        outputQuotedEscaping(ctx, field, RDB_bulkLen(p, field));
+        fprintf(ctx->outfile, ":");
+        outputQuotedEscaping(ctx, value, RDB_bulkLen(p, value));
+    } else {
+        RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
+                        "toJsonStreamItem(): Invalid state value: %d", ctx->state);
+        return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
+    }
+
+    if (pairsLeft) {
+        fprintf(ctx->outfile, ", ");
+        ctx->state = R2J_IN_STREAM_ENTRIES_PAIRS;
+    } else {
+        fprintf(ctx->outfile, "} }");
+        ctx->state = R2J_IN_STREAM_ENTRIES;
+    }
+    return RDB_OK;
+}
+
+RdbRes toJsonStreamMetadata(RdbParser *p, void *userData, RdbStreamMeta *meta) {
+    UNUSED(p);
+    RdbxToJson *ctx = userData;
+    if (ctx->state != R2J_IN_STREAM_ENTRIES) {
+        RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
+                        "toJsonStreamMetadata(): Invalid state value: %d", ctx->state);
+        return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
+    }
+    ctx->state = R2J_IN_STREAM;
+    fprintf(ctx->outfile, "],\n      \"length\": %lu, ", meta->length);
+    fprintf(ctx->outfile, "\n      \"entriesAdded\": %lu, ", meta->entriesAdded);
+    fprintf(ctx->outfile, "\n      \"firstID\": \"%lu-%lu\", ", meta->firstID.ms, meta->firstID.seq);
+    fprintf(ctx->outfile, "\n      \"lastID\": \"%lu-%lu\", ", meta->lastID.ms, meta->lastID.seq);
+    fprintf(ctx->outfile, "\n      \"maxDelEntryID\": \"%lu-%lu\",", meta->maxDelEntryID.ms, meta->maxDelEntryID.seq);
+    return RDB_OK;
+}
+
+RdbRes toJsonStreamNewCGroup(RdbParser *p, void *userData, RdbBulk grpName, RdbStreamGroupMeta *meta) {
+    UNUSED(p);
+    RdbxToJson *ctx = userData;
+    char *prefix;
+    if (ctx->state == R2J_IN_STREAM) {
+        prefix = "\n      \"groups\": [\n";
+    } else if (ctx->state == R2J_IN_STREAM_CG) {
+        prefix = "},\n";
+    } else if (ctx->state == R2J_IN_STREAM_CG_PEL) {
+        prefix = "]},\n";
+    } else if (ctx->state == R2J_IN_STREAM_CG_CONSUMER_PEL) {
+        prefix = "]}]},\n";
+    } else if (ctx->state == R2J_IN_STREAM_CG_CONSUMER) {
+        prefix = "}]},\n";
+    } else {
+        RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
+                        "toJsonStreamNewCGroup(): Invalid state value: %d", ctx->state);
+        return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
+    }
+    fprintf(ctx->outfile, "%s        {\"name\": \"%s\", \"lastid\": \"%lu-%lu\", \"entriesRead\": %lu",
+            prefix, grpName, meta->lastId.ms, meta->lastId.seq, meta->entriesRead);
+
+    ctx->state = R2J_IN_STREAM_CG;
+    return RDB_OK;
+}
+
+RdbRes toJsonStreamCGroupPendingEntry(RdbParser *p, void *userData, RdbStreamPendingEntry *pe) {
+    UNUSED(p);
+    char *prefix;
+    RdbxToJson *ctx = userData;
+    if (ctx->state == R2J_IN_STREAM_CG) {
+        ctx->state = R2J_IN_STREAM_CG_PEL;
+        prefix = ",\n         \"pending\": [ ";
+    } else if (ctx->state == R2J_IN_STREAM_CG_PEL) {
+        prefix = ", ";
+    } else {
+        RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
+                        "toJsonStreamCGroupPendingEntry(): Invalid state value: %d", ctx->state);
+        return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
+    }
+    fprintf(ctx->outfile, "%s\n           { \"sent\": %lu, \"id\":\"%lu-%lu\", \"count\": %lu }",
+            prefix, pe->deliveryTime, pe->id.ms, pe->id.seq, pe->deliveryCount);
+    return RDB_OK;
+}
+
+RdbRes toJsonStreamNewConsumer(RdbParser *p, void *userData, RdbBulk consName, RdbStreamConsumerMeta *meta) {
+    UNUSED(p);
+    RdbxToJson *ctx = userData;
+    char *prefix ="";
+
+    if (ctx->state == R2J_IN_STREAM_CG) {
+        prefix = ",\n         \"consumers\"";
+    } else if (ctx->state == R2J_IN_STREAM_CG_PEL) {
+        /* close pending entries array */
+        prefix = "],\n         \"consumers\": [";
+    } else if (ctx->state == R2J_IN_STREAM_CG_CONSUMER) {
+        prefix = "}, ";
+    } else if (ctx->state == R2J_IN_STREAM_CG_CONSUMER_PEL) {
+        prefix = "]}, "; /* take care to close previous cons + cons PEL */
+    } else {
+        RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
+                        "toJsonStreamNewConsumer(): Invalid state value: %d", ctx->state);
+        return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
+    }
+
+    ctx->state = R2J_IN_STREAM_CG_CONSUMER;
+    fprintf(ctx->outfile, "%s\n           { \"name\": \"%s\", \"activeTime\": %llu, \"seenTime\": %llu",
+            prefix, consName, meta->activeTime, meta->seenTime);
+
+    return RDB_OK;
+}
+
+RdbRes toJsonStreamConsumerPendingEntry(RdbParser *p, void *userData, RdbStreamID *streamId) {
+    UNUSED(p);
+    RdbxToJson *ctx = userData;
+    char *prefix;
+    if (ctx->state == R2J_IN_STREAM_CG_CONSUMER) {
+        prefix = ",\n             \"pending\": [";
+
+    } if (ctx->state == R2J_IN_STREAM_CG_CONSUMER_PEL) {
+        prefix = ", ";
+    }
+
+    ctx->state = R2J_IN_STREAM_CG_CONSUMER_PEL;
+    fprintf(ctx->outfile, "%s\n               {\"id\":\"%lu-%lu\"}", prefix, streamId->ms, streamId->seq);
+    return RDB_OK;
+}
+
 /*** Handling struct ***/
 
 static RdbRes toJsonStruct(RdbParser *p, void *userData, RdbBulk value) {
@@ -478,6 +648,15 @@ RdbxToJson *RDBX_createHandlersToJson(RdbParser *p, const char *filename, RdbxTo
         dataCb.handleZsetMember = toJsonZset;
         dataCb.handleFunction = (ctx->conf.includeFunc) ? toJsonFunction : NULL;
         dataCb.handleModule = toJsonModule;
+        /* stream */
+        dataCb.handleStreamItem = toJsonStreamItem;
+        if (ctx->conf.includeStreamMeta) {
+            dataCb.handleStreamMetadata = toJsonStreamMetadata;
+            dataCb.handleStreamNewCGroup = toJsonStreamNewCGroup;
+            dataCb.handleStreamCGroupPendingEntry = toJsonStreamCGroupPendingEntry;
+            dataCb.handleStreamNewConsumer = toJsonStreamNewConsumer;
+            dataCb.handleStreamConsumerPendingEntry = toJsonStreamConsumerPendingEntry;
+        }
         RDB_createHandlersData(p, &dataCb, ctx, deleteRdbToJsonCtx);
 
     } else  if (ctx->conf.level == RDB_LEVEL_STRUCT) {

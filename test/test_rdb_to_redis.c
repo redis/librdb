@@ -50,6 +50,7 @@ static void rdb_to_json(const char *rdbfile, const char *outfile) {
             .includeAuxField = 0,
             .includeFunc = 0,
             .flatten = 1,
+            .includeStreamMeta = 0,
     };
 
     RdbParser *parser = RDB_createParserRdb(NULL);
@@ -265,6 +266,10 @@ void test_rdb_to_redis_module(void **state) {
     sendRedisCmd("testrdb.get.key 123456", REDIS_REPLY_STRING, "7890");
 }
 
+void test_rdb_to_redis_stream(void **state) {
+    UNUSED(state);
+    test_rdb_to_redis_common(DUMP_FOLDER("stream_v11.rdb"), 1, NULL, NULL);
+}
 
 /* iff 'delKeyBeforeWrite' is not set, then the parser will return an error on
  * loading 100_lists.rdb ("mylist1 mylist2 ... mylist100") on key 'mylist62'
@@ -346,6 +351,12 @@ int group_rdb_to_redis(void) {
             cmocka_unit_test_setup(test_rdb_to_redis_zset_lp, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_zset_zl, setupTest),
 
+            /* module */
+            cmocka_unit_test_setup(test_rdb_to_redis_module, setupTest),
+
+            /* stream */
+            cmocka_unit_test_setup(test_rdb_to_redis_stream, setupTest),
+
             /* expired keys */
             cmocka_unit_test_setup(test_rdb_to_redis_set_expired, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_set_not_expired, setupTest),
@@ -360,7 +371,6 @@ int group_rdb_to_redis(void) {
             cmocka_unit_test_setup(test_rdb_to_redis_del_before_write, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_multiple_dbs, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_function, setupTest),
-            cmocka_unit_test_setup(test_rdb_to_redis_module, setupTest),
     };
 
     int res = cmocka_run_group_tests(tests, NULL, NULL);

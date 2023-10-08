@@ -1,5 +1,6 @@
 
 PREFIX?=/usr/local
+
 DESTDIR?=
 INSTALL = /usr/bin/install -c
 BINDIR=$(DESTDIR)$(PREFIX)/bin
@@ -29,6 +30,11 @@ distclean: clean
 
 example: all
 	cd examples && export LD_LIBRARY_PATH=../lib && ./example1
+
+# ------------------------- DEBUG -------------------------------------
+
+noopt:
+	OPTIMIZATION="-O0" LIBRDB_DEBUG=1 $(MAKE)
 
 # ------------------------- TEST --------------------------------------
 

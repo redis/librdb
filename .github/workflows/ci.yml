@@ -39,7 +39,7 @@ jobs:
         run: |
           export LIBRDB_REDIS_FOLDER=~/redis/src
           export LD_LIBRARY_PATH=/usr/local/lib/
-          make all valgrind
+          make all example valgrind
         working-directory: ${{github.workspace}}
 
   build-clang:
@@ -78,5 +78,12 @@ jobs:
           (cd ./deps/hiredis ; ln -s ./libhiredis.so ./libhiredis.so.1.2.1-dev)
           export LD_LIBRARY_PATH=/usr/local/lib/
           export LIBRDB_REDIS_FOLDER=~/redis/src
-          make all test
+          
+          # Verify that rule "noopt" being build and tested
+          make noopt
+          make test
+          # Verify that rule "example and "all" being build and tested
+          make distclean
+          make example 
+          make test
         working-directory: ${{github.workspace}}

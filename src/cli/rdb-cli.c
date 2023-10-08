@@ -84,7 +84,7 @@ static void printUsage(int shortUsage) {
     printf("[v%s] ", RDB_getLibVersion(NULL,NULL,NULL));
     printf("Usage: rdb-cli /path/to/dump.rdb [OPTIONS] {json|resp|redis} [FORMAT_OPTIONS]\n");
     printf("OPTIONS:\n");
-    printf("\t-l, --log-file <PATH>         Path to the log file (Default: './rdb-cli.log')\n\n");
+    printf("\t-l, --log-file {<PATH>|-}     Path to the log file or stdout (Default: './rdb-cli.log')\n\n");
     printf("\tMultiple filters combination of keys/types/dbs can be specified:\n");
     printf("\t-k, --key <REGEX>             Include only keys that match REGEX\n");
     printf("\t-K  --no-key <REGEX>          Exclude keys that match REGEX\n");
@@ -94,7 +94,7 @@ static void printUsage(int shortUsage) {
     printf("\t-D, --no-dbnum <DBNUM>        Exclude DB number\n\n");
 
     printf("FORMAT_OPTIONS ('json'):\n");
-    printf("\t-i, --include <EXTRAS>        To include: {aux-val|func}\n");
+    printf("\t-i, --include <EXTRAS>        To include: {aux-val|func|stream-meta}\n");
     printf("\t-f, --flatten                 Print flatten json, without DBs Parenthesis\n");
     printf("\t-o, --output <FILE>           Specify the output file. If not specified, output to stdout\n\n");
 
@@ -108,6 +108,7 @@ static void printUsage(int shortUsage) {
 
     printf("FORMAT_OPTIONS ('redis'|'resp'):\n");
     printf("\t-r, --support-restore         Use the RESTORE command when possible\n");
+    printf("\t-d, --del-before-write        Delete each key before writing. Relevant for non-empty db\n");
     printf("\t-t, --target-redis-ver <VER>  Specify the target Redis version. Helps determine which commands can\n");
     printf("\t                              be applied. Particularly crucial if support-restore being used \n");
     printf("\t                              as RESTORE is closely tied to specific RDB versions. If versions not\n");
@@ -122,7 +123,7 @@ static void printUsage(int shortUsage) {
 static RdbRes formatJson(RdbParser *parser, int argc, char **argv) {
     const char *includeArg;
     const char *output = NULL;/*default:stdout*/
-    int includeFunc=0, includeAuxField=0, flatten=0; /*without*/
+    int includeStreamMeta=0, includeFunc=0, includeAuxField=0, flatten=0; /*without*/
 
     /* parse specific command options */
     for (int at = 1; at < argc; ++at) {
@@ -133,6 +134,7 @@ static RdbRes formatJson(RdbParser *parser, int argc, char **argv) {
         if (getOptArg(argc, argv, &at, "-i", "--include", NULL, &includeArg)) {
             if (strcmp(includeArg, "aux-val") == 0) { includeAuxField = 1; continue; }
             if (strcmp(includeArg, "func") == 0) { includeFunc = 1; continue; }
+            if (strcmp(includeArg, "stream-meta") == 0) { includeStreamMeta = 1; continue; }
             fprintf(stderr, "Invalid argument for '--include': %s\n", includeArg);
             return RDB_ERR_GENERAL;
         }
@@ -148,6 +150,7 @@ static RdbRes formatJson(RdbParser *parser, int argc, char **argv) {
             .flatten = flatten,
             .includeAuxField = includeAuxField,
             .includeFunc = includeFunc,
+            .includeStreamMeta = includeStreamMeta,
     };
 
     if (RDBX_createHandlersToJson(parser, output, &conf) == NULL)
@@ -172,6 +175,7 @@ static RdbRes formatRedis(RdbParser *parser, int argc, char **argv) {
         if (getOptArg(argc, argv, &at, "-h", "--hostname", NULL, &hostname)) continue;
         if (getOptArgVal(argc, argv, &at, "-p", "--port", NULL, &port, 1, 65535)) continue;
         if (getOptArg(argc, argv, &at, "-r", "--support-restore", &(conf.supportRestore), NULL)) continue;
+        if (getOptArg(argc, argv, &at, "-d", "--del-before-write", &(conf.delKeyBeforeWrite), NULL)) continue;
         if (getOptArg(argc, argv, &at, "-t", "--target-redis-ver", NULL, &(conf.dstRedisVersion))) continue;
         if (getOptArgVal(argc, argv, &at, "-l", "--pipeline-depth", NULL, &pipeDepthVal, 1, 1000)) continue;
         if (getOptArgVal(argc, argv, &at, "-n", "--start-cmd-num", NULL, &startCmdNum, 1, INT_MAX)) continue;
@@ -244,6 +248,7 @@ static RdbRes formatResp(RdbParser *parser, int argc, char **argv) {
         char *opt = argv[at];
         if (getOptArg(argc, argv, &at, "-o", "--output", NULL, &output)) continue;
         if (getOptArg(argc, argv, &at, "-r", "--support-restore", &(conf.supportRestore), NULL)) continue;
+        if (getOptArg(argc, argv, &at, "-d", "--del-before-write", &(conf.delKeyBeforeWrite), NULL)) continue;
         if (getOptArg(argc, argv, &at, "-t", "--target-redis-ver", NULL, &(conf.dstRedisVersion))) continue;
         if (getOptArg(argc, argv, &at, "-e", "--enum-commands", &commandEnum, NULL)) continue;
         if (getOptArgVal(argc, argv, &at, "-n", "--start-cmd-num", NULL, &startCmdNum, 1, INT_MAX)) continue;
@@ -372,9 +377,13 @@ int main(int argc, char **argv)
         return RDB_ERR_GENERAL;
     }
 
-    if ((logfile = fopen(options.logfilePath, "w")) == NULL) {
-        printf("Error opening log file for writing: %s \n", options.logfilePath);
-        return RDB_ERR_GENERAL;
+    if (strcmp(options.logfilePath, "-") == 0) {
+        logfile = stdout;
+    } else {
+        if ((logfile = fopen(options.logfilePath, "w")) == NULL) {
+            printf("Error opening log file for writing: %s \n", options.logfilePath);
+            return RDB_ERR_GENERAL;
+        }
     }
 
     /* create the parser and attach it a file reader */
@@ -405,6 +414,9 @@ int main(int argc, char **argv)
         return RDB_getErrorCode(parser);
 
     RDB_deleteParser(parser);
-    fclose(logfile);
+
+    if (logfile != stdout)
+        fclose(logfile);
+
     return 0;
 }

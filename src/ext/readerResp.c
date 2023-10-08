@@ -11,6 +11,8 @@ static inline void unused(void *dummy, ...) { (void)(dummy);}
 
 #define MAX_RSP_BULK_SIZE 1024*1024
 
+#define MAX_ARRAY_ELEMENTS ((1LL<<32) - 1)
+
 typedef enum RespReplyType {
     RESP_REPLY_IDLE=0,
     RESP_REPLY_STRING,
@@ -28,12 +30,6 @@ typedef enum RespReplyType {
     RESP_REPLY_BIGNUM,
     RESP_REPLY_VERB,
 } RespReplyType;
-
-typedef struct RespReplyBuff {
-    const char *buff;
-    int len;
-    int at;
-} RespReplyBuff;
 
 /*** static functions (private) ***/
 
@@ -163,8 +159,7 @@ RespRes readRespReplyBulk(RespReaderCtx *ctx, RespReplyBuff *buffInfo) {
             case PROC_BULK_READ_INIT:
                 ctx->bulkLen = 0;
                 ctx->bulkAt = 0;
-                ctx->typeState = PROC_BULK_READ_LEN;
-                break;
+                ctx->typeState = PROC_BULK_READ_LEN; /* fall-thru */
 
             case PROC_BULK_READ_LEN:
                 ch = buffInfo->buff[(buffInfo->at)];
@@ -239,18 +234,101 @@ RespRes readRespReplyBulk(RespReaderCtx *ctx, RespReplyBuff *buffInfo) {
                 /* fall-through */
 
             case PROC_BULK_READ_END:
+                ctx->typeState = 0;
                 return RESP_REPLY_OK;
         }
     }
 }
 
-static RespRes readRespReplyAggregate(RespReaderCtx *ctx, RespReplyBuff *buffInfo) {
+static RespRes readRespReplyBulkArray(RespReaderCtx *ctx, RespReplyBuff *buffInfo) {
+    char ch;
+    RespRes res;
     UNUSED(buffInfo);
 
-    /* Currently there are no commands, which sent by respToTcpLoader.c, that will cause to
-     * get back aggregated replies. Might change in the future */
-    snprintf(ctx->errorMsg,sizeof(ctx->errorMsg),"Unexpected aggregate reply");
-    return RESP_REPLY_ERR;
+    enum ProcessBulkArrayReadStates {
+        READ_INIT = 0,
+        READ_NUM_BULKS,
+        READ_NUM_BULKS_CR,
+        READ_NUM_BULKS_NL,
+        READ_NEXT_BULK_HDR,
+        READ_NEXT_BULK,
+        READ_END,
+    };
+
+    while (1) {
+        if (buffInfo->at == buffInfo->len)
+            return RESP_REPLY_PARTIAL;
+
+        switch (ctx->typeArrayState) {
+            case READ_INIT:
+                ctx->numBulksArray = 0;
+                ctx->typeArrayState = READ_NUM_BULKS; /* fall-thru */
+
+            case READ_NUM_BULKS:
+                ch = buffInfo->buff[(buffInfo->at)];
+                while ((ch >= '0') && (ch <= '9')) {
+                    ctx->numBulksArray = ctx->numBulksArray * 10 + (ch - '0');
+
+                    if (ctx->numBulksArray > MAX_ARRAY_ELEMENTS) {
+                        snprintf(ctx->errorMsg, sizeof(ctx->errorMsg), "Multi-bulk length out of range");
+                        return RESP_REPLY_ERR;
+                    }
+                    ch = buffInfo->buff[(++(buffInfo->at))];
+
+                    if (buffInfo->at == buffInfo->len)
+                        return RESP_REPLY_PARTIAL;
+                }
+
+                ctx->typeArrayState = READ_NUM_BULKS_CR;
+                break;
+
+            case READ_NUM_BULKS_CR:
+                if (buffInfo->buff[buffInfo->at++] != '\r') {
+                    snprintf(ctx->errorMsg, sizeof(ctx->errorMsg),
+                             "Invalid Multi-Bulk response. Failed to read number of bulks");
+                    return RESP_REPLY_ERR;
+                }
+                ctx->typeArrayState = READ_NUM_BULKS_NL;
+                break;
+
+            case READ_NUM_BULKS_NL:
+                if (buffInfo->buff[buffInfo->at++] != '\n') {
+                    snprintf(ctx->errorMsg, sizeof(ctx->errorMsg),
+                             "Invalid Bulk response. Failed to read bulk length");
+                    return RESP_REPLY_ERR;
+                }
+
+                if (ctx->numBulksArray == 0) {
+                    snprintf(ctx->errorMsg, sizeof(ctx->errorMsg), "Bulk Array must be bigger than zero");
+                    return RESP_REPLY_ERR;
+                }
+
+                ctx->typeArrayState = READ_NEXT_BULK_HDR;
+                break;
+
+            case READ_NEXT_BULK_HDR:
+                if (buffInfo->buff[buffInfo->at++] != '$') {
+                    snprintf(ctx->errorMsg, sizeof(ctx->errorMsg),
+                             "Invalid Multi-Bulk response. Failed to read Bulk header.");
+                    return RESP_REPLY_ERR;
+                }
+                ctx->typeArrayState = READ_NEXT_BULK; /* fall-thru */
+
+            case READ_NEXT_BULK:
+                if ( (res = readRespReplyBulk(ctx, buffInfo)) != RESP_REPLY_OK)
+                    return res;
+
+                if (--ctx->numBulksArray) {
+                    ctx->typeArrayState = READ_NEXT_BULK_HDR;
+                    break;
+                }
+                ctx->typeArrayState = READ_END; /* fall-through */
+
+            case READ_END:
+                ctx->typeArrayState = 0;
+                return RESP_REPLY_OK;
+        }
+    }
 }
 
 static RespRes readRespReply(RespReaderCtx *ctx, RespReplyBuff *buffInfo) {
@@ -305,6 +383,7 @@ static RespRes readRespReply(RespReaderCtx *ctx, RespReplyBuff *buffInfo) {
 
         /* start read type */
         ctx->typeState = 0;
+        ctx->typeArrayState = 0;
         ctx->errorMsgLen = 0;
         buffInfo->at++;
     }
@@ -327,7 +406,7 @@ static RespRes readRespReply(RespReaderCtx *ctx, RespReplyBuff *buffInfo) {
         case RESP_REPLY_MAP:
         case RESP_REPLY_SET:
         case RESP_REPLY_PUSH:
-            return readRespReplyAggregate(ctx, buffInfo);
+            return readRespReplyBulkArray(ctx, buffInfo);
         default:
             assert(NULL);
             return RESP_REPLY_ERR; /* Avoid warning. */

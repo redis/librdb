@@ -15,13 +15,14 @@ OBJECTS  = $(patsubst %,%.o,$(SOURCES))
 REDIS_SOURCES = $(notdir $(basename $(wildcard ../../deps/redis/*.c)))
 REDIS_OBJECTS = $(patsubst %,../../deps/redis/%.o,$(REDIS_SOURCES))
 
-EXTERN_RP_CONFIG=
+OPTIMIZATION?=-O3
+LIBRDB_DEBUG?=0
 
 STD      = -std=c99
 STACK    = -fstack-protector-all -Wstack-protector
 WARNS    = -Wall -Wextra -pedantic -Werror
-CFLAGS   = -fPIC -O3 $(STD) $(STACK) $(WARNS) $(EXTERN_RP_CONFIG)
-DEBUG    = -g3 -DDEBUG=1
+CFLAGS   = -fPIC $(OPTIMIZATION) $(STD) $(STACK) $(WARNS)
+DEBUG    = -g3 -DLIBRDB_DEBUG=$(LIBRDB_DEBUG)
 LIBS     =
 
 ######################################### RULES #######################################

@@ -38,10 +38,10 @@ void runSystemCmd(const char *cmdFormat, ...) {
     }
 }
 
-char *readFile(const char *filename,  size_t *length) {
+char *readFile(const char *filename,  size_t *length, char *ignoredCh) {
     FILE* fp;
     char* str;
-    size_t size;
+    size_t size, i = 0;
 
     assert_non_null(fp = fopen(filename, "r"));
 
@@ -50,14 +50,19 @@ char *readFile(const char *filename,  size_t *length) {
     fseek (fp, 0, SEEK_SET);
     assert_non_null(str = (char*) malloc(size + 1));
 
-    size_t readBytes = fread(str, 1, size, fp);
-    assert_int_equal(readBytes, size);
+    char ch;
+    while (fread(&ch, 1, 1, fp) == 1) {
+        int incr = 1;
+        str[i] = ch;
+        for (int j = 0 ; (ignoredCh) && (ignoredCh[j] != '\0') && (incr) ; ++j)
+            incr = (ignoredCh[j] == ch) ? 0 : 1;
+        i += incr;
+    }
 
-    str[size] = '\0';
+    str[i] = '\0';
     fclose(fp);
 
-    if (length) *length = size;
-
+    if (length) *length = i;
     return str;
 }
 
@@ -103,7 +108,7 @@ char *substring(char *str, size_t len, char *substr) {
 void assert_file_payload(const char *filename, char *expData, int expLen, MatchType matchType, int expMatch) {
     const char *matchTypeName, *errMsg;
     size_t filelen;
-    char *filedata = readFile(filename, &filelen);
+    char *filedata = readFile(filename, &filelen, NULL);
     int result=1;
 
     switch (matchType) {
@@ -137,7 +142,7 @@ void assert_file_payload(const char *filename, char *expData, int expLen, MatchT
         printf("%s\n---- file [%s] ----\n", errMsg, filename);
         printHexDump(filedata, filelen, buf, (int) sizeof(buf));
         printf("%s", buf);
-        printf("\n---- Expected %s ----\n", matchTypeName);
+        printf("\n---- Expected %s %s ----\n", matchTypeName, (expMatch) ? "" : "not to match");
         printHexDump(expData, expLen, buf, (int) sizeof(buf));
         printf("%s", buf);
         printf("\n------------\n");
@@ -497,12 +502,12 @@ end_cmp:
 
     printf("Json files not equal.\n");
     printf("---- %s ----\n", filename1);
-    char *f1 = readFile(filename1, NULL);
+    char *f1 = readFile(filename1, NULL, NULL);
     printf ("%s", f1);
     free(f1);
 
     printf("\n---- %s ----\n", filename2);
-    char *f2 = readFile(filename2, NULL);
+    char *f2 = readFile(filename2, NULL, NULL);
     printf ("%s", f2);
     free(f2);
     printf("\n------------\n");

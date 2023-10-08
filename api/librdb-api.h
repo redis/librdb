@@ -13,12 +13,12 @@ extern "C" {
 
 #define MAX_RDB_VER_SUPPORT 11
 
-/****************************************************************
- * Incomplete structures for compiler checks but opaque access
- ****************************************************************/
 typedef char *RdbBulk;
 typedef char *RdbBulkCopy;
 
+/****************************************************************
+ * Incomplete structures for compiler checks but opaque access
+ ****************************************************************/
 typedef struct RdbReader RdbReader;
 typedef struct RdbParser RdbParser;
 typedef struct RdbHandlers RdbHandlers;
@@ -51,7 +51,6 @@ typedef enum RdbRes {
     RDB_ERR_FAILED_CREATE_PARSER,
     RDB_ERR_FAILED_OPEN_LOG_FILE,
     RDB_ERR_FAILED_READ_RDB_FILE,
-    RDB_ERR_NO_MEMORY,
     RDB_ERR_FAILED_OPEN_RDB_FILE,
     RDB_ERR_WRONG_FILE_SIGNATURE,
     RDB_ERR_UNSUPPORTED_RDB_VERSION,
@@ -72,6 +71,7 @@ typedef enum RdbRes {
     RDB_ERR_ZSET_LP_INTEG_CHECK,
     RDB_ERR_HASH_LP_INTEG_CHECK,
     RDB_ERR_HASH_ZM_INTEG_CHECK,
+    RDB_ERR_STREAM_LP_INTEG_CHECK,
     RDB_ERR_SSTYPE_INTEG_CHECK,
     RDB_ERR_STRING_INVALID_STATE,
     RDB_ERR_PLAIN_HASH_INVALID_STATE,
@@ -81,6 +81,7 @@ typedef enum RdbRes {
     RDB_ERR_QUICK_LIST_INVALID_STATE,
     RDB_ERR_SSTYPE_INVALID_STATE,
     RDB_ERR_MODULE_INVALID_STATE,
+    RDB_ERR_STREAM_INVALID_STATE,
     RDB_ERR_INVALID_BULK_ALLOC_TYPE,
     RDB_ERR_INVALID_BULK_CLONE_REQUEST,
     RDB_ERR_INVALID_BULK_LENGTH_REQUEST,
@@ -148,25 +149,27 @@ typedef struct RdbKeyInfo {
 } RdbKeyInfo;
 
 typedef struct RdbStreamID {
-    uint64_t ms;
-    uint64_t seq;
+    uint64_t ms;   /* Unix time in milliseconds. */
+    uint64_t seq;  /* sequence number */
 } RdbStreamID;
 
 typedef struct RdbStreamMeta {
-    uint64_t length;        /* Current number of elements inside this stream. */
-    uint64_t entriesAdded; /* All time count of elements added. */
-    RdbStreamID *firstID;
-    RdbStreamID *lastID;
-    RdbStreamID *maxDeletedEntryID;
+    uint64_t length;           /* Current number of elements inside this stream. */
+    uint64_t entriesAdded;     /* All time count of elements added. */
+    RdbStreamID firstID;
+    RdbStreamID lastID;
+    RdbStreamID maxDelEntryID; /* maximum deleted entry id */
 } RdbStreamMeta;
 
 typedef struct RdbStreamPendingEntry {
-    long long deliveryTime;
+    RdbStreamID id;
+    uint64_t deliveryTime;
     uint64_t deliveryCount;
 } RdbStreamPendingEntry;
 
 typedef struct RdbStreamGroupMeta {
     RdbStreamID lastId;
+    int64_t entriesRead;
 } RdbStreamGroupMeta;
 
 typedef struct RdbStreamConsumerMeta {
@@ -271,10 +274,6 @@ typedef struct RdbHandlersStructCallbacks {
     /* Callback to handle module. Currently only reports about the name & size. */
     RdbRes (*handleModule)(RdbParser *p, void *userData, RdbBulk moduleName, size_t serializedSize);
 
-    /*** TODO: RdbHandlersStructCallbacks: ***/
-
-    /*** TODO: RdbHandlersStructCallbacks: stream stuff ... ***/
-
     /* Callback to handle a stream key with listpack value */
     RdbRes (*handleStreamLP)(RdbParser *p, void *userData, RdbBulk nodekey, RdbBulk streamLP);
 
@@ -302,20 +301,12 @@ typedef struct RdbHandlersDataCallbacks {
     RdbRes (*handleFunction)(RdbParser *p, void *userData, RdbBulk func);
     /* Callback to handle module. Currently only reports about the name & size */
     RdbRes (*handleModule)(RdbParser *p, void *userData, RdbBulk moduleName, size_t serializedSize);
-
-
-
-    /*** TODO: RdbHandlersDataCallbacks: handleZsetElement ***/
-
     /* Callback to handle a member within a sorted set along with its score */
     RdbRes (*handleZsetMember)(RdbParser *p, void *userData, RdbBulk member, double score);
-
-    /*** TODO: RdbHandlersDataCallbacks: stream stuff ... ***/
-
     /* Callback to handle metadata associated with a stream */
     RdbRes (*handleStreamMetadata)(RdbParser *p, void *userData, RdbStreamMeta *meta);
     /* Callback to handle an item within a stream along with its field and value */
-    RdbRes (*handleStreamItem)(RdbParser *p, void *userData, RdbStreamID *id, RdbBulk field, RdbBulk value);
+    RdbRes (*handleStreamItem)(RdbParser *p, void *userData, RdbStreamID *id, RdbBulk field, RdbBulk value, int64_t pairsLeft);
     /* Callback to handle the creation of a new consumer group within a stream */
     RdbRes (*handleStreamNewCGroup)(RdbParser *p, void *userData, RdbBulk grpName, RdbStreamGroupMeta *meta);
     /* Callback to handle a pending entry within a consumer group */
@@ -323,7 +314,7 @@ typedef struct RdbHandlersDataCallbacks {
     /* Callback to handle the creation of a new consumer within a stream */
     RdbRes (*handleStreamNewConsumer)(RdbParser *p, void *userData, RdbBulk consName, RdbStreamConsumerMeta *meta);
     /* Callback to handle a pending entry within a consumer */
-    RdbRes (*handleStreamConsumerPendingEntry)(RdbParser *p, void *userData, RdbStreamPendingEntry *pendingEntry);
+    RdbRes (*handleStreamConsumerPendingEntry)(RdbParser *p, void *userData, RdbStreamID *streamId);
 
 } RdbHandlersDataCallbacks;
 
@@ -527,6 +518,11 @@ void RDB_free(RdbParser *p, void *ptr);
  * The purpose of RdbBulk is to give native c-string feeling, yet hiding whether
  * it actually allocated behind on stack, heap, reference another memory, or
  * externally allocated by user supplied RdbBulk allocation function.
+ *
+ * You can print RdbBulk with printf() as there is an implicit \0 at the
+ * end of the string. However the string is binary safe and can contain
+ * \0 characters in the middle. The length is stored out of bound and can be
+ * queried by function RDB_bulkLen() only from the handlers callbacks.
  *
  * In order to process the string behind the current call-stack,  function
  * `RDB_bulkClone()` is the way to clone a string, within callback context only!

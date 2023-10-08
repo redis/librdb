@@ -16,7 +16,9 @@ STD         = -std=c99
 STACK       = -fstack-protector-all -Wstack-protector
 WARNS       = -Wall -Wextra -pedantic -Werror -Wno-unused-function
 
-CFLAGS      = -fPIC -O3 $(STD) $(STACK) $(WARNS)
+OPTIMIZATION?=-O3
+
+CFLAGS      = -fPIC $(OPTIMIZATION) $(STD) $(STACK) $(WARNS)
 DEBUG       = -g3 -DDEBUG=1
 LIBS        = -l cmocka -L /usr/lib -L $(LIB_DIR) -l $(LIB_NAME) -l $(LIB_NAME_EXT) -L../deps/hiredis -lhiredis
 LIBS_STATIC = -l cmocka -L /usr/lib -L $(LIB_DIR) -l:lib$(LIB_NAME_EXT).a -L../deps/hiredis -lhiredis

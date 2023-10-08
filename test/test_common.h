@@ -57,7 +57,7 @@ void *xclone(void *str, size_t len);
 void xfree(void *ptr);
 void *xrealloc(void *ptr, size_t size);
 
-char *readFile(const char *filename, size_t *len);
+char *readFile(const char *filename, size_t *len, char *ignoredCh);
 void cleanTmpFolder(void);
 void setEnvVar (const char *name, const char *val);
 char *substring(char *str, size_t len, char *substr);

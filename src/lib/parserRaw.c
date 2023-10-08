@@ -162,7 +162,7 @@ RdbStatus elementRawList(RdbParser *p) {
 
         }
 
-        updateElementState(p, ST_RAW_LIST_NEXT_NODE_CALL_STR); /* fall-thru */
+        DBG_RETURN(updateElementState(p, ST_RAW_LIST_NEXT_NODE_CALL_STR, 0)); /* fall-thru */
 
         case ST_RAW_LIST_NEXT_NODE_CALL_STR:
             return subElementCall(p, PE_RAW_STRING, ST_RAW_LIST_NEXT_NODE_STR_RETURN);
@@ -180,7 +180,7 @@ RdbStatus elementRawList(RdbParser *p) {
             if (--listCtx->numNodes == 0)
                 return nextParsingElement(p, PE_RAW_END_KEY); /* done */
 
-            return updateElementState(p, ST_RAW_LIST_NEXT_NODE_CALL_STR);
+            return updateElementState(p, ST_RAW_LIST_NEXT_NODE_CALL_STR, 1);
         }
 
         default:
@@ -219,7 +219,7 @@ RdbStatus elementRawQuickList(RdbParser *p) {
 
         }
 
-            updateElementState(p, ST_RAW_LIST_NEXT_NODE_CALL_STR); /* fall-thru */
+            DBG_RETURN(updateElementState(p, ST_RAW_LIST_NEXT_NODE_CALL_STR, 0)); /* fall-thru */
 
         case ST_RAW_LIST_NEXT_NODE_CALL_STR: {
             listCtx->container = QUICKLIST_NODE_CONTAINER_PACKED;
@@ -270,7 +270,7 @@ RdbStatus elementRawQuickList(RdbParser *p) {
             if (--listCtx->numNodes == 0)
                 return nextParsingElement(p, PE_RAW_END_KEY); /* done */
 
-            return updateElementState(p, ST_RAW_LIST_NEXT_NODE_CALL_STR);
+            return updateElementState(p, ST_RAW_LIST_NEXT_NODE_CALL_STR, 0);
         }
 
         default:
@@ -328,10 +328,10 @@ RdbStatus elementRawString(RdbParser *p) {
             IF_NOT_OK_RETURN(aggUpdateWritten(p, headerlen));
 
             if (p->callSubElm.callerElm != PE_MAX)
-                return updateElementState(p, ST_RAW_STRING_PASS_AND_REPLY_CALLER);
+                return updateElementState(p, ST_RAW_STRING_PASS_AND_REPLY_CALLER, 0);
         }
 
-            updateElementState(p, ST_RAW_STRING_PASS_CHUNKS); /* fall-thru */
+            DBG_RETURN(updateElementState(p, ST_RAW_STRING_PASS_CHUNKS, 0)); /* fall-thru */
 
         case ST_RAW_STRING_PASS_CHUNKS: {
 
@@ -360,7 +360,7 @@ RdbStatus elementRawString(RdbParser *p) {
                 if (!(strCtx->len))   /* stop condition */
                     return nextParsingElement(p, PE_RAW_END_KEY);
 
-                updateElementState(p, ST_RAW_STRING_PASS_CHUNKS);
+                DBG_RETURN(updateElementState(p, ST_RAW_STRING_PASS_CHUNKS, 0));
             }
         }
 
@@ -466,7 +466,7 @@ RdbStatus elementRawHash(RdbParser *p) {
             IF_NOT_OK_RETURN(cbHandleBegin(p, DATA_SIZE_UNKNOWN_AHEAD));
             IF_NOT_OK_RETURN(aggUpdateWritten(p, headerLen));
         }
-        updateElementState(p, ST_RAW_HASH_READ_NEXT_FIELD_STR); /* fall-thru */
+        DBG_RETURN(updateElementState(p, ST_RAW_HASH_READ_NEXT_FIELD_STR, 0)); /* fall-thru */
 
         case ST_RAW_HASH_READ_NEXT_FIELD_STR:
             /*** ENTER SAFE STATE ***/
@@ -545,7 +545,7 @@ RdbStatus elementRawSet(RdbParser *p) {
             IF_NOT_OK_RETURN(cbHandleBegin(p, DATA_SIZE_UNKNOWN_AHEAD));
             IF_NOT_OK_RETURN(aggUpdateWritten(p, headerLen));
         }
-        updateElementState(p, ST_RAW_SET_NEXT_ITEM_CALL_STR); /* fall-thru */
+        DBG_RETURN(updateElementState(p, ST_RAW_SET_NEXT_ITEM_CALL_STR, 0)); /* fall-thru */
 
         case ST_RAW_SET_NEXT_ITEM_CALL_STR:
             return subElementCall(p, PE_RAW_STRING, ST_RAW_SET_NEXT_ITEM_STR_RETURN);
@@ -562,7 +562,7 @@ RdbStatus elementRawSet(RdbParser *p) {
             if (--setCtx->numItems == 0)
                 return nextParsingElement(p, PE_RAW_END_KEY); /* done */
 
-            return updateElementState(p, ST_RAW_SET_NEXT_ITEM_CALL_STR);
+            return updateElementState(p, ST_RAW_SET_NEXT_ITEM_CALL_STR, 1);
         }
 
         default:
@@ -605,7 +605,7 @@ RdbStatus elementRawZset(RdbParser *p) {
             IF_NOT_OK_RETURN(cbHandleBegin(p, DATA_SIZE_UNKNOWN_AHEAD));
             IF_NOT_OK_RETURN(aggUpdateWritten(p, headerLen));
         }
-            updateElementState(p, ST_RAW_ZSET_READ_MEMBER); /* fall-thru */
+            updateElementState(p, ST_RAW_ZSET_READ_MEMBER, 0); /* fall-thru */
 
         case ST_RAW_ZSET_READ_MEMBER:
             return subElementCall(p, PE_RAW_STRING, ST_RAW_ZSET_READ_SCORE);
@@ -635,7 +635,7 @@ RdbStatus elementRawZset(RdbParser *p) {
             if (--zsetCtx->numItems == 0)
                 return nextParsingElement(p, PE_RAW_END_KEY); /* done */
 
-            return updateElementState(p, ST_RAW_ZSET_READ_MEMBER);
+            return updateElementState(p, ST_RAW_ZSET_READ_MEMBER, 0);
         }
         default:
             RDB_reportError(p, RDB_ERR_PLAIN_ZSET_INVALID_STATE,
@@ -648,17 +648,17 @@ RdbStatus elementRawModule(RdbParser *p) {
 
     typedef enum RAW_MODULE_STATES {
         /* Start handling module or module-aux */
-        ST_RAW_MODULE_START=0,
+        ST_START=0,
         /* Following enums are aligned to module-opcodes */
-        ST_RAW_MODULE_OPCODE_SINT=RDB_MODULE_OPCODE_SINT,
-        ST_RAW_MODULE_OPCODE_UINT=RDB_MODULE_OPCODE_UINT,
-        ST_RAW_MODULE_OPCODE_FLOAT=RDB_MODULE_OPCODE_FLOAT,
-        ST_RAW_MODULE_OPCODE_DOUBLE=RDB_MODULE_OPCODE_DOUBLE,
-        ST_RAW_MODULE_OPCODE_STRING_CALL_STR=RDB_MODULE_OPCODE_STRING,
+        ST_OPCODE_SINT=RDB_MODULE_OPCODE_SINT,
+        ST_OPCODE_UINT=RDB_MODULE_OPCODE_UINT,
+        ST_OPCODE_FLOAT=RDB_MODULE_OPCODE_FLOAT,
+        ST_OPCODE_DOUBLE=RDB_MODULE_OPCODE_DOUBLE,
+        ST_OPCODE_STRING_CALL_STR=RDB_MODULE_OPCODE_STRING,
 
-        ST_RAW_MODULE_OPCODE_STRING_STR_RETURN, /* return from sub-element string parsing */
-        ST_RAW_MODULE_NEXT_OPCODE,
-        ST_RAW_MODULE_AUX_START,
+        ST_OPCODE_STRING_STR_RETURN, /* return from sub-element string parsing */
+        ST_NEXT_OPCODE,
+        ST_AUX_START,
     } RAW_MODULE_STATES;
 
     RawContext *rawCtx = &p->rawCtx;
@@ -666,7 +666,7 @@ RdbStatus elementRawModule(RdbParser *p) {
     while (1) {
         switch (p->elmCtx.state) {
 
-            case ST_RAW_MODULE_START: {
+            case ST_START: {
                 int len = 0;
 
                 if (p->currOpcode == RDB_TYPE_MODULE_2) {
@@ -676,17 +676,17 @@ RdbStatus elementRawModule(RdbParser *p) {
                     /*** ENTER SAFE STATE ***/
                     IF_NOT_OK_RETURN(cbHandleBegin(p, DATA_SIZE_UNKNOWN_AHEAD));
                     IF_NOT_OK_RETURN(aggUpdateWritten(p, len));
-                    updateElementState(p, ST_RAW_MODULE_NEXT_OPCODE);
+                    DBG_RETURN(updateElementState(p, ST_NEXT_OPCODE, 0));
                     break;
                 }
 
                 /* No new-key precedes module aux. Init Aggregator of bulks here.
                  * Note that the call is made from a safe state */
                 aggAllocFirstBulk(p);
-                updateElementState(p, ST_RAW_MODULE_AUX_START);
+                DBG_RETURN(updateElementState(p, ST_AUX_START, 0));
             } /* fall-thru */
 
-            case ST_RAW_MODULE_AUX_START: {
+            case ST_AUX_START: {
                 int len = 0;
                 ElementRawModuleAux *ma = &p->elmCtx.rawModAux;
                 IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &ma->moduleid, NULL, &len));
@@ -700,12 +700,12 @@ RdbStatus elementRawModule(RdbParser *p) {
                 /*** ENTER SAFE STATE ***/
                 IF_NOT_OK_RETURN(cbHandleBegin(p, DATA_SIZE_UNKNOWN_AHEAD));
                 IF_NOT_OK_RETURN(aggUpdateWritten(p, len));
-                updateElementState(p, ST_RAW_MODULE_NEXT_OPCODE);
+                DBG_RETURN(updateElementState(p, ST_NEXT_OPCODE, 0));
                 break;
             }
 
-            case ST_RAW_MODULE_OPCODE_SINT:
-            case ST_RAW_MODULE_OPCODE_UINT: {
+            case ST_OPCODE_SINT:
+            case ST_OPCODE_UINT: {
                 uint64_t val = 0;
                 int len = 0;
 
@@ -713,43 +713,43 @@ RdbStatus elementRawModule(RdbParser *p) {
                 IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &val, (unsigned char *) rawCtx->at, &len));
                 /*** ENTER SAFE STATE ***/
                 IF_NOT_OK_RETURN(aggUpdateWritten(p, len));
-                updateElementState(p, ST_RAW_MODULE_NEXT_OPCODE);
+                DBG_RETURN(updateElementState(p, ST_NEXT_OPCODE, 0));
                 break;
             }
 
-            case ST_RAW_MODULE_OPCODE_FLOAT: {
+            case ST_OPCODE_FLOAT: {
                 IF_NOT_OK_RETURN(aggMakeRoom(p, sizeof(float)));
                 IF_NOT_OK_RETURN(rdbLoadFloatValue(p, (float *) rawCtx->at));
                 /*** ENTER SAFE STATE ***/
                 IF_NOT_OK_RETURN(aggUpdateWritten(p, sizeof(float)));
-                updateElementState(p, ST_RAW_MODULE_NEXT_OPCODE);
+                DBG_RETURN(updateElementState(p, ST_NEXT_OPCODE, 0));
                 break;
             }
 
-            case ST_RAW_MODULE_OPCODE_DOUBLE: {
+            case ST_OPCODE_DOUBLE: {
                 IF_NOT_OK_RETURN(aggMakeRoom(p, sizeof(double)));
                 IF_NOT_OK_RETURN(rdbLoadBinaryDoubleValue(p, (double *) rawCtx->at));
                 /*** ENTER SAFE STATE ***/
                 IF_NOT_OK_RETURN(aggUpdateWritten(p, sizeof(double)));
-                updateElementState(p, ST_RAW_MODULE_NEXT_OPCODE);
+                DBG_RETURN(updateElementState(p, ST_NEXT_OPCODE, 0));
                 break;
             }
 
-            case ST_RAW_MODULE_OPCODE_STRING_CALL_STR: {
+            case ST_OPCODE_STRING_CALL_STR: {
                 /* call raw string as subelement */
-                return subElementCall(p, PE_RAW_STRING, ST_RAW_MODULE_OPCODE_STRING_STR_RETURN);
+                return subElementCall(p, PE_RAW_STRING, ST_OPCODE_STRING_STR_RETURN);
             }
 
-            case ST_RAW_MODULE_OPCODE_STRING_STR_RETURN: {
+            case ST_OPCODE_STRING_STR_RETURN: {
                 /*** ENTER SAFE STATE (no rdb read)***/
                 size_t len;
                 char *dataRet;
                 subElementCallEnd(p, &dataRet, &len);
-                updateElementState(p, ST_RAW_MODULE_NEXT_OPCODE);
+                DBG_RETURN(updateElementState(p, ST_NEXT_OPCODE, 1));
                 break;
             }
 
-            case ST_RAW_MODULE_NEXT_OPCODE: {
+            case ST_NEXT_OPCODE: {
                 int len = 0;
                 uint64_t opcode = 0;
 
@@ -760,7 +760,7 @@ RdbStatus elementRawModule(RdbParser *p) {
 
                 if ((int) opcode != RDB_MODULE_OPCODE_EOF) {
                     /* Valid cast. Took care to align opcode with module states */
-                    updateElementState(p, (RAW_MODULE_STATES) opcode);
+                    DBG_RETURN(updateElementState(p, (RAW_MODULE_STATES) opcode, 0));
                     break;
                 }
 
@@ -784,6 +784,232 @@ RdbStatus elementRawModule(RdbParser *p) {
     }
 }
 
+RdbStatus elementRawStreamLP(RdbParser *p) {
+
+    enum RAW_STREAM_STATES {               /* STATES FLOW: (Indentation represent conceptual nested loop among states) */
+        ST_READ_NUM_LP=0,                  /* Read number of LP (lpLeft) to load                                       */
+        ST_LOAD_NEXT_LP_IS_MORE,           /* While more LP to load                                                    */
+        ST_LOAD_NEXT_LP_STR1_RETURN,       /*   Complete loading node-key of next LP                                   */
+        ST_LOAD_NEXT_LP_STR2_RETURN,       /*   Complete loading next LP                                               */
+        ST_LOAD_METADATA,                  /* Load Stream metadata                                                     */
+        ST_LOAD_NEXT_CG_IS_MORE,           /* While more CG (Consumer groups) to load                                  */
+        ST_LOAD_NEXT_CG_STR_RETURN,        /*   Complete loading CG name                                               */
+        ST_LOAD_GLOBAL_PEL,                /*   Load CG's global PEL (Pending Entries List)                            */
+        ST_LOAD_NUM_CONSUMERS,             /*   Load number of consumers of current CG                                 */
+        ST_LOAD_NEXT_CONSUMER,             /*     Load next consumer                                                   */
+        ST_LOAD_NEXT_CONSUMER_STR_RETURN,  /*     Complete loading consumer name. Load consumder PEL.                  */
+    } ;
+
+    ElementRawStreamCtx *streamCtx = &p->elmCtx.rawStream;
+    RawContext *rawCtx = &p->rawCtx;
+    UNUSED(p, rawCtx);
+
+    switch (p->elmCtx.state) {
+
+        case ST_READ_NUM_LP: {
+                int headerLen = 0;
+                aggMakeRoom(p, 10); /* worse case 9 bytes for written */
+                IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &streamCtx->lpLeft,
+                                            (unsigned char *) rawCtx->at, &headerLen));
+                /*** ENTER SAFE STATE ***/
+                IF_NOT_OK_RETURN(cbHandleBegin(p, DATA_SIZE_UNKNOWN_AHEAD));
+                IF_NOT_OK_RETURN(aggUpdateWritten(p, headerLen));
+            }
+            DBG_RETURN(updateElementState(p, ST_LOAD_NEXT_LP_IS_MORE, 0)); /* fall-thru */
+
+        case ST_LOAD_NEXT_LP_IS_MORE:
+            /*** ENTER SAFE STATE ***/
+            if (unlikely(!(streamCtx->lpLeft))) {
+                /* if no more listpacks to load, jump to load stream metadata */
+                return updateElementState(p, ST_LOAD_METADATA, 1);
+            }
+            streamCtx->lpLeft--;
+            /* call raw string as sub-element to read nodekey */
+            return subElementCall(p, PE_RAW_STRING, ST_LOAD_NEXT_LP_STR1_RETURN);
+
+        case ST_LOAD_NEXT_LP_STR1_RETURN: {
+                size_t nodekeySize;
+                unsigned char *nodekeyUnused;
+                subElementCallEnd(p, (char **) &nodekeyUnused, &nodekeySize);
+                /* call raw string as sub-element to read listpack */
+                return subElementCall(p, PE_RAW_STRING, ST_LOAD_NEXT_LP_STR2_RETURN);
+            }
+
+        case ST_LOAD_NEXT_LP_STR2_RETURN: {
+                size_t lpSize;
+                unsigned char *lpUnused;
+                /*** ENTER SAFE STATE (no rdb read)***/
+                subElementCallEnd(p, (char **) &lpUnused, &lpSize);
+                if (!lpValidateIntegrity(lpUnused, lpSize, p->deepIntegCheck, NULL, 0)) {
+                    RDB_reportError(p, RDB_ERR_STREAM_LP_INTEG_CHECK,
+                                    "elementRawStreamLP(): LISTPACK integ check failed");
+                    return RDB_STATUS_ERROR;
+                }
+            }
+            DBG_RETURN(updateElementState(p, ST_LOAD_NEXT_LP_IS_MORE, 1)); /* fall-thru */
+
+        case ST_LOAD_METADATA: {
+                uint64_t dummyVal;
+
+                aggMakeRoom(p, LONG_STR_SIZE * 9);
+
+                /* Load total number of items inside the stream. */
+                int written = 0;
+                IF_NOT_OK_RETURN( rdbLoadLen(p, NULL, &dummyVal, (unsigned char *) (rawCtx->at + written),
+                                             &written)); /* meta->length */
+
+                /* Load the last entry ID. */
+                IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &dummyVal, (unsigned char *) (rawCtx->at + written), &written));
+                IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &dummyVal, (unsigned char *) (rawCtx->at + written), &written));
+
+                if (p->currOpcode >= RDB_TYPE_STREAM_LISTPACKS_2) {
+                    /* Load the first entry ID. */
+                    IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &dummyVal, (unsigned char *) (rawCtx->at + written), &written));
+                    IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &dummyVal, (unsigned char *) (rawCtx->at + written), &written));
+
+                    /* Load the maximal deleted entry ID. */
+                    IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &dummyVal, (unsigned char *) (rawCtx->at + written), &written));
+                    IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &dummyVal, (unsigned char *) (rawCtx->at + written), &written));
+
+                    /* Load entries added */
+                    IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &dummyVal, (unsigned char *) (rawCtx->at + written), &written));
+                }
+
+                /* Load total number of items inside the stream */
+                IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &streamCtx->cgroupsLeft,
+                                            (unsigned char *) (rawCtx->at + written), &written));
+
+                /*** ENTER SAFE STATE ***/
+
+                IF_NOT_OK_RETURN(aggUpdateWritten(p, written));
+            }
+            DBG_RETURN(updateElementState(p, ST_LOAD_NEXT_CG_IS_MORE, 0)); /* fall-thru */
+
+        case ST_LOAD_NEXT_CG_IS_MORE:
+            /*** ENTER SAFE STATE (no rdb read)***/
+            if (unlikely(!(streamCtx->cgroupsLeft))) {
+                /* if no more consumer-groups to load, then reached end of key */
+                return nextParsingElement(p, PE_RAW_END_KEY); /* done */
+            }
+            streamCtx->cgroupsLeft--;
+            /* call raw string as sub-element to read consumer-group name */
+            return subElementCall(p, PE_RAW_STRING, ST_LOAD_NEXT_CG_STR_RETURN);
+
+        case ST_LOAD_NEXT_CG_STR_RETURN: {
+                int written = 0;
+                size_t cgNameLen;
+                uint64_t dummyVal;
+                unsigned char *cgName;
+
+                /* return from sub-element string parsing */
+                subElementCallEnd(p, (char **) &cgName, &cgNameLen);
+                aggMakeRoom(p, LONG_STR_SIZE * 4);
+
+                /* read consumer-group lastid */
+                IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &dummyVal, (unsigned char *) (rawCtx->at + written), &written));
+                IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &dummyVal, (unsigned char *) (rawCtx->at + written), &written));
+                /* Load group offset. */
+                if (p->currOpcode >= RDB_TYPE_STREAM_LISTPACKS_2) {
+                    IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &dummyVal, (unsigned char *) (rawCtx->at + written), &written));
+                }
+                IF_NOT_OK_RETURN(
+                        rdbLoadLen(p, NULL, &streamCtx->globPelLeft, (unsigned char *) (rawCtx->at + written), &written));
+
+                /*** ENTER SAFE STATE ***/
+
+                IF_NOT_OK_RETURN(aggUpdateWritten(p, written));
+
+                if (!(streamCtx->globPelLeft))
+                    return updateElementState(p, ST_LOAD_NUM_CONSUMERS, 0);
+            }
+
+            DBG_RETURN(updateElementState(p, ST_LOAD_GLOBAL_PEL, 0)); /* fall-thru */
+
+        case ST_LOAD_GLOBAL_PEL:
+            while (streamCtx->globPelLeft) {
+                uint64_t dummyVal;
+                BulkInfo *binfo;
+                int pelLen = 0;
+                IF_NOT_OK_RETURN(aggMakeRoom(p, LONG_STR_SIZE * 2 + sizeof(RdbStreamID)));
+                /* load streamid */
+                IF_NOT_OK_RETURN(rdbLoad(p, sizeof(RdbStreamID), RQ_ALLOC_REF, rawCtx->at, &binfo));
+                pelLen += sizeof(RdbStreamID);
+                /* load millisec */
+                IF_NOT_OK_RETURN(rdbLoad(p, 8, RQ_ALLOC_REF, rawCtx->at + pelLen, &binfo));
+                pelLen += 8;
+                /* load delivery count */
+                IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &dummyVal, (unsigned char *) (rawCtx->at + pelLen), &pelLen));
+
+                /*** ENTER SAFE STATE ***/
+
+                IF_NOT_OK_RETURN(aggUpdateWritten(p, pelLen));
+
+                streamCtx->globPelLeft--;
+            }
+            DBG_RETURN(updateElementState(p, ST_LOAD_NUM_CONSUMERS, 0)); /* fall-thru */
+
+        case ST_LOAD_NUM_CONSUMERS: {
+                int written = 0;
+                IF_NOT_OK_RETURN(
+                        rdbLoadLen(p, NULL, &streamCtx->consumersLeft, (unsigned char *) rawCtx->at, &written));
+
+                /*** ENTER SAFE STATE ***/
+
+                IF_NOT_OK_RETURN(aggUpdateWritten(p, written)); /* fall-thru */
+            }
+            DBG_RETURN(updateElementState(p, ST_LOAD_NEXT_CONSUMER, 0)); /* fall-thru */
+
+        case ST_LOAD_NEXT_CONSUMER:
+            /*** ENTER SAFE STATE (no rdb read) ***/
+            if (streamCtx->consumersLeft) {
+                streamCtx->consumersLeft--;
+                /* call raw string as sub-element to read consumer name */
+                return subElementCall(p, PE_RAW_STRING, ST_LOAD_NEXT_CONSUMER_STR_RETURN);
+            }  else {
+                return updateElementState(p, ST_LOAD_NEXT_CG_IS_MORE, 0);
+            }
+
+        case ST_LOAD_NEXT_CONSUMER_STR_RETURN: {
+            size_t consNameLen;
+            unsigned char *consName;
+            uint64_t consPelSize, consLen = 0;
+            BulkInfo *binfo;
+            int written = 0;
+
+            subElementCallEnd(p, (char **) &consName, &consNameLen);
+
+            IF_NOT_OK_RETURN(aggMakeRoom(p, 8*2 + LONG_STR_SIZE));
+
+            /* load millisec */
+            IF_NOT_OK_RETURN(rdbLoad(p, 8, RQ_ALLOC_REF, rawCtx->at + consLen, &binfo));
+            consLen += 8;
+            if (p->currOpcode >= RDB_TYPE_STREAM_LISTPACKS_3) {
+                IF_NOT_OK_RETURN(rdbLoad(p, 8, RQ_ALLOC_REF, rawCtx->at + consLen, &binfo));
+                consLen += 8;
+            }
+            /* load consumer PEL consNameLen */
+            IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &consPelSize, (unsigned char *) rawCtx->at + consLen, &written));
+            consLen += written;
+
+            IF_NOT_OK_RETURN(aggMakeRoom(p, consPelSize * sizeof(RdbStreamID)));
+
+            /* load consumer PELs */
+            IF_NOT_OK_RETURN(rdbLoad(p, consPelSize * sizeof(RdbStreamID), RQ_ALLOC_REF, rawCtx->at + consLen, &binfo));
+            consLen += consPelSize * sizeof(RdbStreamID);
+
+            /*** ENTER SAFE STATE (no rdb read) ***/
+
+            IF_NOT_OK_RETURN(aggUpdateWritten(p, consLen));
+
+            return updateElementState(p, ST_LOAD_NEXT_CONSUMER, 0);
+        }
+
+        default:
+            RDB_reportError(p, RDB_ERR_STREAM_INVALID_STATE,
+                            "elementRawStreamLP() : Invalid parsing element state: %d.", p->elmCtx.state);
+            return RDB_STATUS_ERROR;
+    }
+}
 
 /*** various functions ***/
 
@@ -873,7 +1099,7 @@ static int intsetValidateIntegrityCb(unsigned char* str, size_t size, RdbParser 
 
 static RdbStatus singleStringTypeHandling(RdbParser *p, singleStringTypeValidateCb validateCb, char *callerName) {
 
-    enum RAW_LIST_STATES {
+    enum RAW_SINGLE_STRING_TYPE_STATES {
         ST_RAW_SSTYPE_START=0,
         ST_RAW_SSTYPE_CALL_STR, /* Call PE_RAW_STRING as sub-element */
         ST_RAW_SSTYPE_RET_FROM_STR, /* integ check of the returned string from PE_RAW_STRING */
