@@ -12,7 +12,7 @@ extern "C" {
 typedef struct RdbxRespToFileWriter RdbxRespToFileWriter;
 typedef struct RdbxReaderFile RdbxReaderFile;
 typedef struct RdbxReaderFileDesc RdbxReaderFileDesc;
-typedef struct RdbxFilterKey RdbxFilterKey;
+typedef struct RdbxFilter RdbxFilter;
 typedef struct RdbxToJson RdbxToJson;
 typedef struct RdbxToResp RdbxToResp;
 typedef struct RdbxRespToRedisLoader RdbxRespToRedisLoader;
@@ -31,6 +31,7 @@ typedef enum {
 
     /* HandlersFilterKey errors */
     RDBX_ERR_FILTER_FAILED_COMPILE_REGEX,
+    RDBX_ERR_FAILED_CREATE_FILTER,
 
     /* rdb2resp errors */
 
@@ -79,9 +80,17 @@ _LIBRDB_API RdbxToJson *RDBX_createHandlersToJson(RdbParser *p,
  * Create Filter Handlers
  ****************************************************************/
 
-_LIBRDB_API RdbxFilterKey *RDBX_createHandlersFilterKey(RdbParser *p,
+_LIBRDB_API RdbxFilter *RDBX_createHandlersFilterKey(RdbParser *p,
                                                         const char *keyRegex,
-                                                        uint32_t flags);
+                                                        uint32_t exclude);
+
+_LIBRDB_API RdbxFilter *RDBX_createHandlersFilterType(RdbParser *p,
+                                                      RdbDataType type,
+                                                      uint32_t exclude);
+
+_LIBRDB_API RdbxFilter *RDBX_createHandlersFilterDbNum(RdbParser *p,
+                                                       int dbnum,
+                                                       uint32_t exclude);
 
 /****************************************************************
  * Create RDB to RESP Handlers
@@ -122,11 +131,11 @@ typedef struct RdbxToRespConf {
 _LIBRDB_API RdbxToResp *RDBX_createHandlersToResp(RdbParser *, RdbxToRespConf *);
 
 /****************************************************************
- * Attach RESP writer
+ * RESP writer
  *
  * Create instance for writing RDB to RESP stream.
  *
- * Used by:  RDBX_createRespToRedisTcp
+ * Imp by:   RDBX_createRespToRedisTcp
  *           RDBX_createRespToRedisFd
  *           RDBX_createRespToFileWriter
  *           <user-defined-writer>
@@ -159,16 +168,58 @@ _LIBRDB_API RdbxRespToFileWriter *RDBX_createRespToFileWriter(RdbParser *p,
  * Can configure pipeline depth of transmitted RESP commands. Set
  * to 0 to use default.
  ****************************************************************/
+typedef struct RdbxRedisAuth {
+    const char *pwd;
+    const char *user;
+
+    /* alternative auth-cmd. Args must remain valid throughout the parser's lifetime. */
+    struct {
+        int argc;
+        char **argv;
+    } cmd;
+} RdbxRedisAuth;
+
 _LIBRDB_API RdbxRespToRedisLoader *RDBX_createRespToRedisTcp(RdbParser *p,
-                                                            RdbxToResp *rdbToResp,
-                                                            const char *hostname,
-                                                            int port);
+                                                             RdbxToResp *rdbToResp,
+                                                             RdbxRedisAuth *auth, /*opt*/
+                                                             const char *hostname,
+                                                             int port);
 
 _LIBRDB_API RdbxRespToRedisLoader *RDBX_createRespToRedisFd(RdbParser *p,
-                                                          RdbxToResp *rdbToResp,
-                                                          int fd);
+                                                            RdbxToResp *rdbToResp,
+                                                            RdbxRedisAuth *auth, /*opt*/
+                                                            int fd);
 
 _LIBRDB_API void RDBX_setPipelineDepth(RdbxRespToRedisLoader *r2r, int depth);
+
+/****************************************************************
+ * Debugging RESP to Redis
+ *
+ * This section provides debugging assistance for analyzing Redis server failures
+ * when attempting to stream multiple RESP commands. This analysis can be particularly
+ * challenging in the following scenarios:
+ *
+ * - When using pipeline mode, which involves multiple concurrent pending commands
+ *   at any given moment.
+ * - When not using the `delKeyBeforeWrite` flag and Redis server is not empty.
+ * - In a production environments with real-world loads.
+ *
+ * The following two debug functions are designed to help with the analysis of a given
+ * RDB file:
+ *
+ * RDBX_enumerateCmds
+ *   Enumerates commands by preceding any RESP command with an additional trivial
+ *   RESP command of the type 'echo <cmd-number>'. This can be especially useful since
+ *   the RESP-to-Redis instance prints the command number in case of a failure.
+ *
+ * RDBX_writeFromCmdNumber
+ *   Writing commands starting from specified command-number and onward as part
+ *   of reproducing effort. Once the problem was resolved, it might be also useful
+ *   to continue uploading the redis server from the point it got failed.
+ ****************************************************************/
+_LIBRDB_API void RDBX_enumerateCmds(RdbxToResp *rdbToResp);
+
+_LIBRDB_API void RDBX_writeFromCmdNumber(RdbxToResp *rdbToResp, size_t cmdNum);
 
 #ifdef __cplusplus
 }

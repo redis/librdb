@@ -2,7 +2,6 @@
 #include <assert.h>
 #include <sys/uio.h>
 #include "common.h"
-#include "utils.h"
 
 #include "../../deps/redis/crc64.h"
 #include "../../deps/redis/util.h"
@@ -11,6 +10,8 @@
 #define _RDB_TYPE_STRING 0
 #define _REDISMODULE_AUX_BEFORE_RDB (1<<0)
 #define VER_VAL(major,minor) (((unsigned int)(major)<<8) | (unsigned int)(minor))
+
+#define KEY_CMD_ID_DBG  "_RDB_CLI_CMD_ID_"
 
 typedef struct RedisToRdbVersion {
     unsigned int redis;
@@ -33,18 +34,22 @@ typedef enum DelKeyBeforeWrite {
     DEL_KEY_BEFORE_BY_RESTORE_REPLACE, /* RESTORE supported */
 } DelKeyBeforeWrite;
 
-#define IOV_CONST(iov, str)       iov_plain(iov, str, sizeof(str)-1)
-#define IOV_STRING(iov, str, len) iov_plain(iov, str, len)
-#define IOV_VALUE(iov, val, ar)   iov_value(iov, val, ar, sizeof(ar))
-#define IOV_LEN_AND_VALUE(iov, val, ar1, ar2) \
-   do {\
-        int l = IOV_VALUE((iov)+1, val, ar2); \
-        IOV_VALUE( (iov), l, ar1); \
-   } while (0);
-
 struct RdbxToResp {
 
     RdbxToRespConf conf;
+
+    struct RdbxToRespDebug {
+
+        size_t cmdNum;
+
+        /* configuration */
+#define RFLAG_ENUM_CMD_ID       (1<<0)  /* Enumerate and trace commands by pushing debug command
+                                         * of type "SET _RDB_CLI_CMD_ID_ <CMD-ID>" before each
+                                         * RESP command */
+#define RFLAG_WRITE_FROM_CMD_ID (1<<1)  /* Flag for writing commands from a specific command-id */
+        int flags;
+        size_t writeFromCmdNum;
+    } debug;
 
     /* Init to 3. Attempted to be released three times on termination */
     int refcount;
@@ -68,7 +73,7 @@ struct RdbxToResp {
         int isModuleAux;
         uint64_t crc;
         struct {
-            char cmdPrefix[100];
+            char cmdPrefix[128];
             int cmdlen;
         } moduleAux;
     } rawCtx;
@@ -95,12 +100,7 @@ static void deleteRdbToRespCtx(RdbParser *p, void *context) {
     RDB_free(p, ctx);
 }
 
-static inline void iov_plain(struct iovec *iov, const char *s, size_t l) {
-    iov->iov_base = (void *) s;
-    iov->iov_len = l;
-}
-
-static int iov_value(struct iovec *iov, long long count, char *buf, int bufsize) {
+int iov_value(struct iovec *iov, long long count, char *buf, int bufsize) {
     int len = 0;
     len = ll2string(buf, bufsize, count);
 
@@ -163,11 +163,49 @@ static void resolveSupportRestore(RdbParser *p, RdbxToResp *ctx, int srcRdbVer) 
     RDB_handleByLevel(p, RDB_DATA_TYPE_MODULE, RDB_LEVEL_RAW, 0);
 }
 
-static inline RdbRes writevWrap(RdbxToResp *ctx, struct iovec *iov, int cnt, int startCmd, int endCmd) {
+static inline RdbRes onWriteNewCmdDbg(RdbxToResp *ctx) {
     RdbxRespWriter *writer = &ctx->respWriter;
+    size_t currCmdNum = ctx->debug.cmdNum++;
+
+    /* Write only commands starting from given command number */
+    if ((ctx->debug.flags & RFLAG_WRITE_FROM_CMD_ID) &&
+        (currCmdNum < ctx->debug.writeFromCmdNum))
+        return RDB_OK;
+
+    /* enumerate and trace cmd-id by preceding each cmd with "SET _RDB_CLI_CMD_ID_ <CMD-ID>" */
+    if (ctx->debug.flags & RFLAG_ENUM_CMD_ID) {
+        char keyLenStr[32], cmdIdLenStr[32], cmdIdStr[32];
+
+        struct iovec iov[7];
+        /* write SET */
+        IOV_CONST(&iov[0], "*3\r\n$3\r\nSET\r\n$");
+        /* write key */
+        IOV_VALUE(&iov[1], sizeof(KEY_CMD_ID_DBG)-1, keyLenStr);
+        IOV_STRING(&iov[2], KEY_CMD_ID_DBG, sizeof(KEY_CMD_ID_DBG)-1);
+        /* write cmd-id */
+        IOV_CONST(&iov[3], "\r\n$");
+        IOV_LEN_AND_VALUE(&iov[4], currCmdNum, cmdIdLenStr, cmdIdStr);
+        if (unlikely(writer->writev(writer->ctx, iov, 6, 1, 1))) {
+            RdbRes errCode = RDB_getErrorCode(ctx->parser);
+            assert(errCode != RDB_OK);
+            return RDB_getErrorCode(ctx->parser);
+        }
+    }
+    return RDB_OK;
+}
+
+static inline RdbRes writevWrap(RdbxToResp *ctx, struct iovec *iov, int cnt, int startCmd, int endCmd) {
+    RdbRes res;
+    RdbxRespWriter *writer = &ctx->respWriter;
+
+    if (unlikely(ctx->debug.flags && startCmd)) {
+        if ((res = onWriteNewCmdDbg(ctx)) != RDB_OK)
+            return RDB_getErrorCode(ctx->parser);
+    }
+
     if (unlikely(writer->writev(writer->ctx, iov, cnt, startCmd, endCmd))) {
-        RdbRes errCode = RDB_getErrorCode(ctx->parser);
-        assert(errCode != RDB_OK);
+        res = RDB_getErrorCode(ctx->parser);
+        assert(res != RDB_OK);
         return RDB_getErrorCode(ctx->parser);
     }
 
@@ -642,4 +680,13 @@ _LIBRDB_API void RDBX_attachRespWriter(RdbxToResp *rdbToResp, RdbxRespWriter *wr
     assert (rdbToResp->respWriterConfigured == 0);
     rdbToResp->respWriter = *writer;
     rdbToResp->respWriterConfigured = 1;
+}
+
+_LIBRDB_API void RDBX_enumerateCmds(RdbxToResp *rdbToResp) {
+    rdbToResp->debug.flags |= RFLAG_ENUM_CMD_ID;
+}
+
+_LIBRDB_API void RDBX_writeFromCmdNumber(RdbxToResp *rdbToResp, size_t cmdNum) {
+    rdbToResp->debug.flags |= RFLAG_WRITE_FROM_CMD_ID;
+    rdbToResp->debug.writeFromCmdNum = cmdNum;
 }

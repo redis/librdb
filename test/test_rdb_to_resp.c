@@ -31,8 +31,8 @@ static void testRdbToRespCommon(const char *rdbfilename,
                                 int expMatch)
 {
     static int outputs = 0;
-    static char rdbfile[100];
-    static char respfile[100];
+    static char rdbfile[1024];
+    static char respfile[1024];
 
     /* build file path of input (rdb) file and output (resp) file */
     snprintf(rdbfile, sizeof(rdbfile), "./test/dumps/%s", rdbfilename);

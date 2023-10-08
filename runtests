@@ -2,6 +2,8 @@
 
 VALGRIND=0
 REDIS_FOLDER=""
+SPECIFIC_TEST=""
+SPECIFIC_TEST_GROUP=""
 
 while [[ $# -gt 0 ]]; do
   case $1 in
@@ -11,8 +13,14 @@ while [[ $# -gt 0 ]]; do
     -f|--redis-folder)
       REDIS_FOLDER=" --redis-folder $2 "
       shift 2 ;;
+    -t|--test)
+      SPECIFIC_TEST=" --test $2 "
+      shift 2 ;;
+    -g|--test-group)
+      SPECIFIC_TEST_GROUP=" --test-group $2 "
+      shift 2 ;;
     *|-h)
-      echo "Usage: $(basename $0) [-v|--valgrind] [-f|--folder REDIS_FOLDER]"
+      echo "Usage: $(basename $0) [-v|--valgrind] [-f|--folder REDIS_FOLDER] [-t|--test TEST] [-g|--test-group GROUP]"
       exit 1 ;;
   esac
 done
@@ -26,12 +34,12 @@ if [[ ${VALGRIND} -ne 0 ]]; then
   		--leak-resolution=high \
   		--error-exitcode=1 \
   		--log-file=test/log/valgrind.log \
-  		./test/test_static_lib $REDIS_FOLDER && exit 0
+  		./test/test_static_lib $REDIS_FOLDER $SPECIFIC_TEST $SPECIFIC_TEST_GROUP && exit 0
 
       sed -n -e '/SUMMARY:/,$p' ./test/log/valgrind.log | tail -n 20
   		echo  -en "\n(Entire log available at: ./test/log/valgrind.log)\n"
   		exit 1
 
 else
-  ./test/test_lib $REDIS_FOLDER
+  ./test/test_lib $REDIS_FOLDER $SPECIFIC_TEST $SPECIFIC_TEST_GROUP
 fi

@@ -1,7 +1,6 @@
 #include <stdio.h>
-#include <time.h>
-#include <unistd.h>
 #include <string.h>
+#include <unistd.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -22,7 +21,7 @@
 
 #define REPLY_BUFF_SIZE           4096  /* reply buffer size */
 
-#define MAX_EINTR_RETRY          3
+#define MAX_EINTR_RETRY           3
 
 
 struct RdbxRespToRedisLoader {
@@ -31,7 +30,6 @@ struct RdbxRespToRedisLoader {
         int num;
         int pipelineDepth;
         char cmdPrefix[NUM_RECORDED_CMDS][RECORDED_DATA_MAX_LEN];
-        int cmdAt;
     } pendingCmds;
 
     RespReaderCtx respReader;
@@ -195,43 +193,125 @@ static void redisLoaderDelete(void *context) {
     RDB_free(ctx->p, ctx);
 }
 
+static RdbRes redisAuthCustomized(RdbxRespToRedisLoader *ctx, RdbxRedisAuth *auth) {
+    int i, iovs;
+    RdbRes res = RDB_OK;
+
+    /* custom auth command - Need to break it into tokens based on spaces and
+    * tabs. And then translate it into RESP protocol */
+
+    char prefix[32];
+
+    /* allocate iovec (2 for header and trailer. 3 for each argument) */
+    struct iovec *iov = (struct iovec *)malloc((auth->cmd.argc * 3 + 2) * sizeof(struct iovec));
+    /* allocate temporary buffer to assist converting length to string of all args */
+    char (*lenStr)[21] = (char (*)[21])malloc(auth->cmd.argc * 21 * sizeof(char));
+
+    if (iov == NULL || lenStr == NULL) {
+        RDB_reportError(ctx->p, RDB_ERR_FAIL_ALLOC,
+                        "Failed to allocate for customized AUTH (tokens=%d)", auth->cmd.argc);
+        res = RDB_ERR_FAIL_ALLOC; // Return an error code
+        goto AuthEnd;
+    }
+
+    /* set number of elements in the prefix of the RESP command */
+    iov[0].iov_len = snprintf(prefix, sizeof(prefix)-1, "*%d", auth->cmd.argc);
+    iov[0].iov_base = prefix;
+
+    for ( i = 0, iovs = 1 ; i < auth->cmd.argc ; ++i)
+    {
+        size_t tLen = strlen(auth->cmd.argv[i]);
+        IOV_CONST(&iov[iovs++], "\r\n$");
+        IOV_VALUE(&iov[iovs++], tLen, lenStr[i]);
+        IOV_STRING(&iov[iovs++], auth->cmd.argv[i], tLen);
+    }
+    IOV_CONST(&iov[iovs++], "\r\n");
+    redisLoaderWritev(ctx, iov, iovs, 1, 1);
+
+AuthEnd:
+    if (iov) free(iov);
+    if (lenStr) free(lenStr);
+    return res;
+}
+
+static RdbRes redisAuth(RdbxRespToRedisLoader *ctx, RdbxRedisAuth *auth) {
+    int iovs;
+    char userLenStr[21], pwdLenStr[21];
+
+    if ((auth->pwd == NULL) && (auth->cmd.argc == 0))
+        return RDB_OK;
+
+    /* if customized auth command */
+    if (auth->cmd.argv)
+        return redisAuthCustomized(ctx, auth);
+
+    /* AUTH [username] password */
+    struct iovec iov[10];
+    if (auth->user) {
+        IOV_CONST(&iov[0], "*3\r\n$4\r\nauth\r\n$");
+        /* write user */
+        IOV_VALUE(&iov[1], strlen(auth->user), userLenStr);
+        IOV_STRING(&iov[2], auth->user, strlen(auth->user));
+        IOV_CONST(&iov[3], "\r\n$");
+        /* write pwd */
+        IOV_VALUE(&iov[4], strlen(auth->pwd), pwdLenStr);
+        IOV_STRING(&iov[5], auth->pwd, strlen(auth->pwd));
+        IOV_CONST(&iov[6], "\r\n");
+        iovs = 7;
+    } else {
+        IOV_CONST(&iov[0], "*2\r\n$4\r\nauth\r\n$");
+        /* write pwd */
+        IOV_VALUE(&iov[1], strlen(auth->pwd), pwdLenStr);
+        IOV_STRING(&iov[2], auth->pwd, strlen(auth->pwd));
+        IOV_CONST(&iov[3], "\r\n");
+        iovs = 4;
+    }
+
+    redisLoaderWritev(ctx, iov, iovs, 1, 1);
+    return RDB_OK;
+}
+
+/*** LIB API functions ***/
+
 _LIBRDB_API void RDBX_setPipelineDepth(RdbxRespToRedisLoader *r2r, int depth) {
     r2r->pendingCmds.pipelineDepth = (depth <= 0 || depth>PIPELINE_DEPTH_MAX) ? PIPELINE_DEPTH_DEF : depth;
 }
 
 _LIBRDB_API RdbxRespToRedisLoader *RDBX_createRespToRedisFd(RdbParser *p,
                                                             RdbxToResp *rdbToResp,
-                                                            int fd)
-{
-        RdbxRespToRedisLoader *ctx;
-        if ((ctx = RDB_alloc(p, sizeof(RdbxRespToRedisLoader))) == NULL) {
-            close(fd);
-            RDB_reportError(p, (RdbRes) RDBX_ERR_RESP_FAILED_ALLOC,
-                            "Failed to allocate struct RdbxRespToRedisLoader");
-            return NULL;
-        }
+                                                            RdbxRedisAuth *auth,
+                                                            int fd) {
+    RdbxRespToRedisLoader *ctx;
+    if ((ctx = RDB_alloc(p, sizeof(RdbxRespToRedisLoader))) == NULL) {
+        close(fd);
+        RDB_reportError(p, (RdbRes) RDBX_ERR_RESP_FAILED_ALLOC,
+                        "Failed to allocate struct RdbxRespToRedisLoader");
+        return NULL;
+    }
 
-        /* init RdbxRespToRedisLoader context */
-        memset(ctx, 0, sizeof(RdbxRespToRedisLoader));
-        ctx->p = p;
-        ctx->fd = fd;
-        ctx->pendingCmds.num = 0;
-        ctx->pendingCmds.pipelineDepth = PIPELINE_DEPTH_DEF;
-        readRespInit(&ctx->respReader);
+    /* init RdbxRespToRedisLoader context */
+    memset(ctx, 0, sizeof(RdbxRespToRedisLoader));
+    ctx->p = p;
+    ctx->fd = fd;
+    ctx->pendingCmds.num = 0;
+    ctx->pendingCmds.pipelineDepth = PIPELINE_DEPTH_DEF;
+    readRespInit(&ctx->respReader);
 
-        /* Set 'this' writer to rdbToResp */
-        RdbxRespWriter inst = {ctx, redisLoaderDelete, redisLoaderWritev, redisLoaderFlush};
-        RDBX_attachRespWriter(rdbToResp, &inst);
-        return ctx;
+    if (auth && (redisAuth(ctx, auth) != RDB_OK))
+        return NULL;
+
+    /* Set 'this' writer to rdbToResp */
+    RdbxRespWriter inst = {ctx, redisLoaderDelete, redisLoaderWritev, redisLoaderFlush};
+    RDBX_attachRespWriter(rdbToResp, &inst);
+    return ctx;
 }
 
 _LIBRDB_API RdbxRespToRedisLoader *RDBX_createRespToRedisTcp(RdbParser *p,
                                                              RdbxToResp *rdbToResp,
+                                                             RdbxRedisAuth *auth,
                                                              const char *hostname,
                                                              int port) {
-    int sockfd;
-
-    sockfd = socket(AF_INET, SOCK_STREAM, 0);
+    int sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (sockfd == -1) {
         RDB_reportError(p, (RdbRes) RDBX_ERR_RESP2REDIS_CREATE_SOCKET, "Failed to create tcp socket");
         return NULL;
@@ -255,5 +335,5 @@ _LIBRDB_API RdbxRespToRedisLoader *RDBX_createRespToRedisTcp(RdbParser *p,
         return NULL;
     }
 
-    return RDBX_createRespToRedisFd(p, rdbToResp, sockfd);
+    return RDBX_createRespToRedisFd(p, rdbToResp, auth, sockfd);
 }

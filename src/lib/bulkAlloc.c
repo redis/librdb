@@ -180,7 +180,7 @@ BulkInfo *bulkPoolAlloc(RdbParser *p, size_t len, AllocTypeRq typeRq, char *refB
 
         /* if requested ref another memory but forced to allocate a new buffer since configured
          * RDB_BULK_ALLOC_EXTERN, then copy referenced data to the new allocated buffer */
-        if (unlikely(typeRq == RQ_ALLOC_APP_BULK_REF) && (type != BULK_TYPE_REF))
+        if ((typeRq == RQ_ALLOC_APP_BULK_REF) && (type != BULK_TYPE_REF))
             memcpy(binfo->ref, refBuf, len);
 
     } else {
@@ -473,6 +473,11 @@ static inline BulkType bulkUnmanagedResolveAllocType(RdbParser *p, AllocUnmngTyp
 void bulkUnmanagedAlloc(RdbParser *p, size_t len, AllocUnmngTypeRq rq, char *refBuf, BulkInfo *bi) {
     BulkType type = bulkUnmanagedResolveAllocType(p, rq);
     bulkPoolAllocNew(p, len, type, refBuf, bi);
+
+    /* if requested ref another memory but forced to allocate a new buffer since configured
+     * RDB_BULK_ALLOC_EXTERN, then copy referenced data to the new allocated buffer */
+    if ((rq == UNMNG_RQ_ALLOC_APP_BULK_REF) && (type != BULK_TYPE_REF))
+        memcpy(bi->ref, refBuf, len);
 }
 
 void bulkUnmanagedFree(RdbParser *p, BulkInfo *binfo) {

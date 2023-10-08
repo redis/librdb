@@ -46,9 +46,9 @@ Install and run CLI extension of this library. Parse RDB file to json:
     }]
 
 
-Run CLI extension to generate RESP commands
+Run CLI extension to generate RESP commands (this time read file from standard input):
 
-    % rdb-cli ./test/dumps/multiple_lists_strings.rdb resp
+    % gzip -dc multiple_lists_strings.rdb.gz | rdb-cli - resp
     *3
     $3
     SET
@@ -190,8 +190,8 @@ core library vs. extension library ("RDB" vs "RDBX").
 
 - Parsing RDB file with user callbacks:
 
-      RdbRes myHandleNewKey(RdbParser *parser, void *userData,  RdbBulk key,...) { 
-          printf("%s\n", key);
+      RdbRes myHandleNewKey(RdbParser *parser, void *userData,  RdbBulk key, RdbKeyInfo *info) { 
+          printf("KEY=%s\n", key);
           return RDB_OK;
       } 
 
@@ -207,7 +207,7 @@ core library vs. extension library ("RDB" vs "RDBX").
       RdbParser *parser = RDB_createParserRdb(NULL);
       RDBX_createReaderFile(parser, "dump.rdb");
       RDBX_createHandlersToJson(parser, "redis.json", NULL);
-      RDBX_createHandlersFilterKey(parser, "id_*", 0);
+      RDBX_createHandlersFilterKey(parser, "id_*", 0 /*exclude*/);
       RDB_parse(parser);
       RDB_deleteParser(parser);
 
@@ -228,28 +228,39 @@ destruction, or when newer block replacing old one.
 
     Usage: rdb-cli /path/to/dump.rdb [OPTIONS] {json|resp|redis} [FORMAT_OPTIONS]
     OPTIONS:
-    -k, --filter-key <REGEX>      Filter keys using regular expressions
-    -l, --log-file <PATH>         Path to the log file (Default: './rdb-cli.log')
+            -l, --log-file <PATH>         Path to the log file (Default: './rdb-cli.log')
+    
+    Multiple filters combination of keys/types/dbs can be specified:
+            -k, --key <REGEX>             Include only keys that match REGEX
+            -K  --no-key <REGEX>          Exclude keys that match REGEX
+            -t, --type <TYPE>             Include only selected TYPE {str|list|set|zset|hash|module|func}
+            -T, --no-type <TYPE>          Exclude TYPE {str|list|set|zset|hash|module|func}
+            -d, --dbnum <DBNUM>           Include only selected db number
+            -D, --no-dbnum <DBNUM>        Exclude DB number
     
     FORMAT_OPTIONS ('json'):
-    -w, --with-aux-values         Include auxiliary values
-    -f, --flatten                 Print flatten json, without DBs Parenthesis
-    -o, --output <FILE>           Specify the output file. If not specified, output goes to stdout
-    
-    FORMAT_OPTIONS ('resp'):
-    -r, --support-restore         Use the RESTORE command when possible
-    -t, --target-redis-ver <VER>  Specify the target Redis version. Helps determine which commands can
-                                  be applied. Particularly crucial if support-restore being used
-                                  as RESTORE is closely tied to specific RDB versions. If versions not
-                                  aligned the parser will generate higher-level commands instead.
-    -o, --output <FILE>           Specify the output file. If not specified, output goes to stdout
+            -i, --include <EXTRAS>        To include: {aux-val|func}
+            -f, --flatten                 Print flatten json, without DBs Parenthesis
+            -o, --output <FILE>           Specify the output file. If not specified, output to stdout
     
     FORMAT_OPTIONS ('redis'):
-    -r, --support-restore         Use the RESTORE command when possible
-    -t, --target-redis-ver <VER>  Specify the target Redis version
-    -h, --hostname <HOSTNAME>     Specify the server hostname (default: 127.0.0.1)
-    -p, --port <PORT>             Specify the server port (default: 6379)
-    -l, --pipeline-depth <VALUE>  Number of pending commands before blocking for responses
+            -h, --hostname <HOSTNAME>     Specify the server hostname (default: 127.0.0.1)
+            -p, --port <PORT>             Specify the server port (default: 6379)
+            -l, --pipeline-depth <VALUE>  Number of pending commands before blocking for responses
+            -u, --user <USER>             Redis username for authentication
+            -P, --password <PWD>          Redis password for authentication
+            -a, --auth N [ARG1 ... ARGN]  An alternative authentication command. Given as vector of arguments
+    
+    FORMAT_OPTIONS ('redis'|'resp'):
+            -r, --support-restore         Use the RESTORE command when possible
+            -t, --target-redis-ver <VER>  Specify the target Redis version. Helps determine which commands can
+                                          be applied. Particularly crucial if support-restore being used
+                                          as RESTORE is closely tied to specific RDB versions. If versions not
+                                          aligned the parser will generate higher-level commands instead.
+            -o, --output <FILE>           Specify the output file (For 'resp' only: if not specified, output to stdout)
+            -s, --start-cmd-num <NUM>     Start writing redis from command number
+            -e, --enum-commands           Command enumeration and tracing by preceding each generated RESP command
+                                          with debug command of type: `SET _RDB_CLI_CMD_ID_ <CMD-ID>`
 
 <a name="Advanced"></a>
 ## Advanced
@@ -303,12 +314,12 @@ to give this indication and register it as well.
 
 ### Pause parser and resume
 At times, the application may need to execute additional tasks during parsing intervals,
-such as updating a progress bar or performing other computations. To facilitate this, the
-parser can be configured with a pause interval that specifies the number of bytes to be
-read from RDB source before pausing. This means that each time the parser is invoked, it
-will continue parsing until it has read a number of bytes equal to or greater than the
-configured interval, at which point it will automatically pause and return
-'RDB_STATUS_PAUSED' in order to allow the application to perform other tasks. Example:
+such as updating a progress bar or verifying that used memory remains within limit. To 
+facilitate this, the parser can be configured with a pause interval that specifies the 
+number of bytes to be read from RDB source before pausing. This means that each time the 
+parser is invoked, it will continue parsing until it has read a number of bytes equal to 
+or greater than the configured interval, at which point it will automatically pause and 
+return 'RDB_STATUS_PAUSED' in order to allow the application to perform other tasks. Example:
 
       size_t intervalBytes = 1048576;  
       RdbParser *parser = RDB_createParserRdb(memAlloc);

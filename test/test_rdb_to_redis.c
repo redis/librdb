@@ -30,7 +30,7 @@ void rdb_to_tcp(const char *rdbfile, int pipelineDepth, int isRestore, char *res
     RDB_setLogLevel(parser, RDB_LOG_ERR);
     assert_non_null(RDBX_createReaderFile(parser, rdbfile));
     assert_non_null(rdbToResp1 = RDBX_createHandlersToResp(parser, &rdb2respConf));
-    assert_non_null(r2r = RDBX_createRespToRedisTcp(parser, rdbToResp1, "127.0.0.1", redisPort));
+    assert_non_null(r2r = RDBX_createRespToRedisTcp(parser, rdbToResp1, NULL, "127.0.0.1", getRedisPort()));
     if (respFileName) {
         assert_non_null(rdbToResp2 = RDBX_createHandlersToResp(parser, &rdb2respConf));
         assert_non_null(RDBX_createRespToFileWriter(parser, rdbToResp2, respFileName));
@@ -295,8 +295,9 @@ static void test_rdb_to_redis_del_before_write(void **state) {
 
         assert_non_null(RDBX_createRespToRedisTcp(parser,
                                                   rdbToResp,
+                                                  NULL,
                                                   "127.0.0.1",
-                                                  redisPort));
+                                                  getRedisPort()));
 
         while ((status = RDB_parse(parser)) == RDB_STATUS_WAIT_MORE_DATA);
 
