@@ -51,33 +51,6 @@ static void test_empty_rdb(void **state) {
     RDB_deleteParser(parser);
 }
 
-static void test_createHandlersRdbToJson_and_2_FilterKey(void **state) {
-    UNUSED(state);
-
-    const char *rdbfile = DUMP_FOLDER("multiple_lists_strings.rdb");
-    const char *jsonfile = TMP_FOLDER("multiple_lists_strings.json");
-    const char *expJsonFile = DUMP_FOLDER("multiple_lists_strings_2filters.json");
-
-    RdbStatus  status;
-    RdbParser *parser = RDB_createParserRdb(NULL);
-    RDB_setLogLevel(parser, RDB_LOG_ERR);
-    assert_non_null(RDBX_createReaderFile(parser, rdbfile));
-    RdbxToJsonConf r2jConf = {RDB_LEVEL_DATA, RDBX_CONV_JSON_ENC_PLAIN, 0, 0, 1};
-    assert_non_null(RDBX_createHandlersToJson(parser,
-                                              jsonfile,
-                                              &r2jConf));
-
-    assert_non_null(RDBX_createHandlersFilterKey(parser, ".*i.*", 0));
-    assert_non_null(RDBX_createHandlersFilterKey(parser, "mylist.*", 0));
-
-
-    while ((status = RDB_parse(parser)) == RDB_STATUS_WAIT_MORE_DATA);
-    assert_int_equal( status, RDB_STATUS_OK);
-
-    RDB_deleteParser(parser);
-    assert_json_equal(jsonfile, expJsonFile, 0);
-}
-
 static void test_mixed_levels_registration(void **state) {
     UNUSED(state);
     const char *rdbfile = DUMP_FOLDER("multiple_lists_strings.rdb");
@@ -107,6 +80,11 @@ static void test_mixed_levels_registration(void **state) {
     assert_json_equal(jsonfileData, DUMP_FOLDER("multiple_lists_strings_subset_list.json"), 1);
 }
 
+static void test_examples(void **state) {
+    UNUSED(state);
+    runSystemCmd("make example > /dev/null ");
+}
+
 static void printResPicture(int result) {
     if (result)
         printf("    x_x\n"
@@ -128,13 +106,26 @@ static void printResPicture(int result) {
         result |= grp(); \
     }
 
+/*************************** group_examples ***************************
+ * Test the examples in the './examples' directory. These examples
+ * do not necessarily support asynchronous events 'WAIT_MORE_DATA.'
+ * Therefore, 'group_examples()' should not be called when the environment
+ * variable 'LIBRDB_SIM_WAIT_MORE_DATA' is set to '1'.
+ *********************************************************************/
+int group_examples(void) {
+    /* Insert here your test functions */
+    const struct CMUnitTest tests[] = {
+            cmocka_unit_test(test_examples),
+    };
+    return cmocka_run_group_tests(tests, NULL, NULL);
+}
+
 /*************************** group_main *******************************/
 int group_main(void) {
     /* Insert here your test functions */
     const struct CMUnitTest tests[] = {
         cmocka_unit_test(test_createReader_missingFile),
         cmocka_unit_test(test_empty_rdb),
-        cmocka_unit_test(test_createHandlersRdbToJson_and_2_FilterKey),
         cmocka_unit_test(test_mixed_levels_registration),
     };
     return cmocka_run_group_tests(tests, NULL, NULL);
@@ -148,7 +139,7 @@ int main(int argc, char *argv[]) {
 
     char *redisInstallFolder = getenv("LIBRDB_REDIS_FOLDER");
 
-    const char *USAGE ="<cmd> [-h|--help] [f|--redis-folder <folder>] [-g|--run-group <group-prefix>] [-t|--test-filter <filter>]";
+    const char *USAGE ="<cmd> [-h|--help] [f|--redis-folder <folder>] [-g|--test-group <group-prefix>] [-t|--test <filter>]";
     /* Parse command-line arguments */
     for (int i = 1; i < argc; i++) {
         if ((strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0)) {
@@ -156,9 +147,9 @@ int main(int argc, char *argv[]) {
             exit(EXIT_SUCCESS);
         } else if ((strcmp(argv[i], "-f") == 0 || strcmp(argv[i], "--redis-folder") == 0) && i+1 < argc) {
             redisInstallFolder = argv[++i];
-        } else if ((strcmp(argv[i], "-g") == 0 || strcmp(argv[i], "--run-group") == 0) && i+1 < argc) {
+        } else if ((strcmp(argv[i], "-g") == 0 || strcmp(argv[i], "--test-group") == 0) && i+1 < argc) {
             runGroupPrefix = argv[++i];
-        } else if ((strcmp(argv[i], "-t") == 0 || strcmp(argv[i], "--test-filter") == 0) && i+1 < argc) {
+        } else if ((strcmp(argv[i], "-t") == 0 || strcmp(argv[i], "--test") == 0) && i+1 < argc) {
             testFilter = argv[++i];
         } else {
             printf("Invalid argument: %s\n%s\n", argv[i], USAGE);
@@ -173,13 +164,14 @@ int main(int argc, char *argv[]) {
     cleanTmpFolder();
 
     /* Setup redis if configured */
-    if (redisInstallFolder)
-        setupRedisServer(redisInstallFolder);
+    setRedisInstallFolder(redisInstallFolder);
+    setupRedisServer(NULL);
 
     //setenv("LIBRDB_DEBUG_DATA", "1", 1); /* << to see parser states printouts */
 
     printf("\n*************** START TESTING *******************\n");
     setEnvVar("LIBRDB_SIM_WAIT_MORE_DATA", "0");
+    RUN_TEST_GROUP(group_examples);
     RUN_TEST_GROUP(group_test_resp_reader);
     RUN_TEST_GROUP(group_rdb_to_resp);
     RUN_TEST_GROUP(group_main);

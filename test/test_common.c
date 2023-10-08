@@ -2,6 +2,7 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include <stdio.h>
+#include <ctype.h>
 #include <string.h>
 #include <stdlib.h>
 #include <signal.h>
@@ -13,12 +14,14 @@
 #include <dirent.h>
 #include "../deps/hiredis/hiredis.h"
 #include "test_common.h"
-#include "../src/ext/utils.c" /* for printHexDump() */
 
 /* Live Redis server for some of the tests (Optional) */
-redisContext *redisConnContext = NULL;
-int          redisPort=0;
-pid_t        redisPID = 0;
+#define MAX_NUM_REDIS_INST 2
+int        currRedisInst = -1;
+redisContext *redisServersStack[MAX_NUM_REDIS_INST] = {0};
+int        redisPort[MAX_NUM_REDIS_INST]= {0};
+pid_t      redisPID[MAX_NUM_REDIS_INST] = {0};
+const char *redisInstallFolder  = NULL;
 
 void runSystemCmd(const char *cmdFormat, ...) {
     char cmd[1024];
@@ -130,7 +133,7 @@ void assert_file_payload(const char *filename, char *expData, int expLen, MatchT
     }
 
     if (((result != 0) && (expMatch)) || ((result == 0) && (!expMatch))) {
-        char buf[10000];
+        char buf[8192];
         printf("%s\n---- file [%s] ----\n", errMsg, filename);
         printHexDump(filedata, filelen, buf, (int) sizeof(buf));
         printf("%s", buf);
@@ -180,8 +183,11 @@ int findFreePort(int startPort, int endPort) {
 }
 
 void cleanupRedisServer(void) {
-    if (redisPID)
-        kill(redisPID, SIGTERM);
+    for (int i=0 ; i <=currRedisInst ; ++i ) {
+        if (redisPID[i])
+            kill(redisPID[i], SIGTERM);
+    }
+
 }
 
 size_t serializeRedisReply(const redisReply *reply, char *buffer, size_t bsize) {
@@ -216,11 +222,11 @@ size_t serializeRedisReply(const redisReply *reply, char *buffer, size_t bsize) 
  * Return the response serialized
  */
 char *sendRedisCmd(char *cmd, int expRetType, char *expRsp) {
-    static char rspbuf[1000];
+    static char rspbuf[1024];
 
-    assert_non_null(redisConnContext);
+    assert_int_not_equal(currRedisInst, -1);
 
-    redisReply *reply = redisCommand(redisConnContext, cmd);
+    redisReply *reply = redisCommand(redisServersStack[currRedisInst], cmd);
 
     //printf ("Command:%s\n", cmd);
 
@@ -241,20 +247,29 @@ char *sendRedisCmd(char *cmd, int expRetType, char *expRsp) {
     return rspbuf;
 }
 
-void setupRedisServer(const char *installFolder) {
+void setRedisInstallFolder(const char *path) {
+    redisInstallFolder = path;
+}
+
+void setupRedisServer(const char *extraArgs) {
+
+    /* If redis not installed return gracefully */
+    if (!redisInstallFolder) return;
+
+    /* execl() not accept empty string */
+    const char *_extraArgs = (extraArgs) ? extraArgs : "--loglevel verbose";
+
     pid_t pid = fork();
     assert_int_not_equal (pid, -1);
 
-    redisPort = findFreePort(6500, 6600);
+    int port = findFreePort(6500, 6600);
 
     if (pid == 0) { /* child */
         char redisPortStr[10], fullpath[256], testrdbModulePath[256];
 
-        printf("Found free port to run Redis: %d\n", redisPort);
-
-        snprintf(fullpath, sizeof(fullpath), "%s/redis-server", installFolder);
-        snprintf(testrdbModulePath, sizeof(testrdbModulePath), "%s/../tests/modules/testrdb.so", installFolder);
-        snprintf(redisPortStr, sizeof(redisPortStr), "%d", redisPort);
+        snprintf(fullpath, sizeof(fullpath), "%s/redis-server", redisInstallFolder);
+        snprintf(testrdbModulePath, sizeof(testrdbModulePath), "%s/../tests/modules/testrdb.so", redisInstallFolder);
+        snprintf(redisPortStr, sizeof(redisPortStr), "%d", port);
 
         /* if module testrdb.so exists (ci.yaml takes care to build testrdb), part
          * of redis repo testing, then load it for test_rdb_to_redis_module. The
@@ -266,12 +281,14 @@ void setupRedisServer(const char *installFolder) {
                   "--dir", "./test/tmp/",
                   "--logfile", "./redis.log",
                   "--loadmodule", testrdbModulePath, "4",
+                  _extraArgs,
                   (char *) NULL);
         } else {
             execl(fullpath, fullpath,
                   "--port", redisPortStr,
                   "--dir", "./test/tmp/",
                   "--logfile", "./redis.log",
+                  _extraArgs,
                   (char *) NULL);
        }
 
@@ -281,7 +298,7 @@ void setupRedisServer(const char *installFolder) {
     } else { /* parent */
         int retryCount = 3;
 
-        redisConnContext = redisConnect("localhost", redisPort);
+        redisContext *redisConnContext = redisConnect("localhost", port);
         while ((!redisConnContext) || (redisConnContext->err)) {
 
             if (redisConnContext) redisFree(redisConnContext);
@@ -295,10 +312,14 @@ void setupRedisServer(const char *installFolder) {
             struct timespec req = {0, 50000*1000}, rem;
             nanosleep(&req, &rem);
 
-            redisConnContext = redisConnect("localhost", redisPort);
+            redisConnContext = redisConnect("localhost", port);
         }
 
-        redisPID = pid;
+        assert_true(++currRedisInst<MAX_NUM_REDIS_INST);
+        redisPort[currRedisInst] = port;
+        redisServersStack[currRedisInst] = redisConnContext;
+        redisPID[currRedisInst]  = pid;
+        printf(">> Redis Server(%d) started on port %d with PID %d\n", currRedisInst, port, pid);
 
         /* Close any subprocess in case of exit due to error flow */
         atexit(cleanupRedisServer);
@@ -306,23 +327,28 @@ void setupRedisServer(const char *installFolder) {
 }
 
 void teardownRedisServer(void) {
-    if (redisConnContext) {
-        assert_non_null(redisConnContext);
-        assert_null(redisCommand(redisConnContext, "SHUTDOWN"));
-        redisFree(redisConnContext);
-        redisConnContext = NULL;
+    if (currRedisInst>=0) {
+        redisContext *ctx = redisServersStack[currRedisInst];
+        assert_non_null(ctx);
+        assert_null(redisCommand(ctx, "SHUTDOWN"));
+        redisFree(ctx);
+        --currRedisInst;
         wait(NULL);
     }
 }
 
 int isSetRedisServer(void) {
-    return (redisConnContext != NULL);
+    return (currRedisInst>=0);
 }
 
+int getRedisPort(void) {
+    assert_true(currRedisInst>=0);
+    return redisPort[currRedisInst];
+}
 /* Redis OSS does not support restoring module auxiliary data. This feature
  * is currently available only in Redis Enterprise. There are plans to bring
  * this functionality to Redis OSS in the near future. */
-int isSupportRestoreModuleAux(void) {
+int isSupportRestoreModuleAux() {
     static int supported = -1;   /* -1=UNINIT, 0=NO, 1=YES */
     if (supported == -1) {
         char *res = sendRedisCmd("RESTOREMODAUX", REDIS_REPLY_ERROR, NULL);
@@ -413,11 +439,12 @@ static unsigned char xorstr(const char *str) {
 
 /* sanitize, sort, and compare */
 #define MAX_LINE_LENGTH  4096
+#define MAX_LINES 4096
 void assert_json_equal(const char* filename1, const char* filename2, int ignoreListOrder) {
     char line1[MAX_LINE_LENGTH];
     char line2[MAX_LINE_LENGTH];
-    char* lines1[MAX_LINE_LENGTH];
-    char* lines2[MAX_LINE_LENGTH];
+    char* lines1[MAX_LINES];
+    char* lines2[MAX_LINES];
     int lineCount1 = 0;
     int lineCount2 = 0;
     int res = -1;
@@ -481,4 +508,60 @@ end_cmp:
     printf("\n------------\n");
 
     assert_true(0);
+}
+
+
+/* printHexDump() Generates a formatted hexadecimal and ASCII representation of binary
+ * data. Given a memory address and its length, it produces a human-readable obuf,
+ * displaying byte offsets in hexadecimal and replacing non-printable characters with
+ * dots ('.').
+ *
+ * Returns how many bytes written to obuf buffer. -1 Otherwise.
+ *
+ * Output example for input: "A123456789B123456789C123456789D123456789"
+ *    000000  41 31 32 33 34 35 36 37    38 39 42 31 32 33 34 35  A1234567  89B12345
+ *    000010  36 37 38 39 43 31 32 33    34 35 36 37 38 39 44 31  6789C123  456789D1
+ *    000020  32 33 34 35 36 37 38 39                             23456789
+ */
+int printHexDump(const char *input, size_t len, char *obuf, int obuflen) {
+    size_t i;
+    int iout=0, j, llen = 16; /* line len */
+    unsigned char buff[llen + 10];
+
+    if (input == NULL || len <= 0 || obuf == NULL || obuflen < 200 || obuflen > 0xFFFFFF)
+        return -1;
+
+    for (i = 0, j = 0; (i < len) && (iout + 100 < obuflen) ; i++) {
+        if ((i % llen) == 0) {
+            if (i > 0) {
+                buff[j] = '\0';
+                iout += snprintf(obuf + iout, obuflen - iout, "  %s\n", buff);
+            }
+            iout += snprintf(obuf + iout, obuflen - iout, "%06zx ", i);
+            j = 0;
+        }
+
+        if (((int)i % llen) == (llen / 2)) { /* middle of the line */
+            iout += snprintf(obuf + iout, obuflen - iout, "   ");
+            buff[j++] = ' ';
+            buff[j++] = ' ';
+        }
+
+        iout += snprintf(obuf + iout, obuflen - iout, " %02x", (unsigned char)input[i]);
+        buff[j++] = (isprint(input[i])) ? input[i] : '.';
+    }
+
+    /* pad the last line */
+    for (; (i % llen) != 0; i++) {
+        iout += snprintf(obuf + iout, obuflen - iout, "   ");
+        if (( (int)i % llen) == (llen / 2)) {
+            iout += snprintf(obuf + iout, obuflen - iout, "   ");
+        }
+    }
+
+    buff[j] = '\0';
+    iout += snprintf(obuf + iout, obuflen - iout, "  %s\n", buff);
+    if (i < len)
+        iout += snprintf(obuf + iout, obuflen - iout, "...");
+    return iout;
 }

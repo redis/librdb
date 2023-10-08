@@ -29,12 +29,10 @@
  *                 the next item in the queue.
  * c) Flush      - Clean the entire queue and deletes corresponding referenced buffers.
  *
- * The bulk-pool utilizes three distinct types of allocators:
- * a) Stack allocator
- * b) Heap allocator
- * c) External allocator
+ * The bulk-pool utilizes 3 distinct types of allocators:
  *
- * The Stack Allocator  is specifically designed to work in tandem with the BulkPool
+ * 1) STACK ALLOCATOR
+ * The Stack Allocator is specifically designed to work in tandem with the BulkPool
  * and supports the Allocate, Rollback, and Flush commands. When the pool
  * receives small allocation requests and the application has not restricted
  * allocation to a specific type, it prefers to allocate from the stack. If
@@ -42,8 +40,10 @@
  * to replay. If the parser reaches a new state, then the stack will be flushed
  * along with the pool.
  *
+ * 2) HEAP ALLOCATOR
  * The Heap Allocator allocates memory from the heap with refcount support.
  *
+ * 3) EXTERNAL ALLOCATOR
  * The External Allocator is not mandatory and can be provided by the application
  * client to allocate only the buffers that will be passed to the application's
  * callbacks. These buffers are referred to as RQ_ALLOC_APP_BULK within this API.

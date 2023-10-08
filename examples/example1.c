@@ -31,7 +31,7 @@ int main(void) {
     RdbParser *parser;
     RdbxReaderFile *reader;
     RdbxToJson *rdbToJson;
-    RdbxFilterKey *filterKey;
+    RdbxFilter *filterKey;
     RdbRes err=RDB_OK;
 
     const char *infile = "./dumps/multiple_lists_strings.rdb";
@@ -53,7 +53,7 @@ int main(void) {
     if (!rdbToJson) goto PARSER_ERROR;
 
     /* Filter keys that starts with the word `mylist` */
-    filterKey = RDBX_createHandlersFilterKey(parser, "mylist.*", 0 /*flags*/);
+    filterKey = RDBX_createHandlersFilterKey(parser, "mylist.*", 0 /*exclude*/);
     if (!filterKey) goto PARSER_ERROR;
 
     /* Run the parser */

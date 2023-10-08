@@ -394,7 +394,7 @@ static RdbRes toJsonHash(RdbParser *p, void *userData, RdbBulk field, RdbBulk va
         fprintf(ctx->outfile, ",");
         outputQuotedEscaping(ctx, field, RDB_bulkLen(p, field));
         fprintf(ctx->outfile, ":");
-        outputQuotedEscaping(ctx, field, RDB_bulkLen(p, field));
+        outputQuotedEscaping(ctx, value, RDB_bulkLen(p, value));
 
     } else {
         RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
@@ -453,65 +453,70 @@ static RdbRes toJsonRawEnd(RdbParser *p, void *userData) {
     return RDB_OK;
 }
 
+#define COMMON_HANDLERS_INIT(commonPart, incAuxField) \
+    if (incAuxField) \
+        commonPart.handleAuxField = handlingAuxField; \
+    commonPart.handleNewKey = toJsonNewKey; \
+    commonPart.handleEndKey = toJsonEndKey; \
+    commonPart.handleNewDb = toJsonNewDb; \
+    commonPart.handleStartRdb = toJsonNewRdb; \
+    commonPart.handleEndRdb = toJsonEndRdb;
+
 RdbxToJson *RDBX_createHandlersToJson(RdbParser *p, const char *filename, RdbxToJsonConf *conf) {
     RdbxToJson *ctx = initRdbToJsonCtx(p, filename, conf);
     if (ctx == NULL) return NULL;
 
-    CallbacksUnion callbacks;
-    memset (&callbacks, 0, sizeof(callbacks));
-
-    if (ctx->conf.includeAuxField)
-        callbacks.common.handleAuxField = handlingAuxField;
-
-    callbacks.common.handleNewKey = toJsonNewKey;
-    callbacks.common.handleEndKey = toJsonEndKey;
-    callbacks.common.handleNewDb = toJsonNewDb;
-    callbacks.common.handleStartRdb = toJsonNewRdb;
-    callbacks.common.handleEndRdb = toJsonEndRdb;
-
     if (ctx->conf.level == RDB_LEVEL_DATA) {
+        RdbHandlersDataCallbacks dataCb;
+        memset(&dataCb, 0 , sizeof(dataCb));
+        COMMON_HANDLERS_INIT(dataCb, ctx->conf.includeAuxField);
 
-        callbacks.dataCb.handleStringValue = toJsonString;
-        callbacks.dataCb.handleListItem = toJsonList;
-        callbacks.dataCb.handleHashField = toJsonHash;
-        callbacks.dataCb.handleSetMember = toJsonSet;
-        callbacks.dataCb.handleZsetMember = toJsonZset;
-        callbacks.dataCb.handleFunction = (conf->includeFunc) ? toJsonFunction : NULL;
-        callbacks.dataCb.handleModule = toJsonModule;
-        RDB_createHandlersData(p, &callbacks.dataCb, ctx, deleteRdbToJsonCtx);
+        dataCb.handleStringValue = toJsonString;
+        dataCb.handleListItem = toJsonList;
+        dataCb.handleHashField = toJsonHash;
+        dataCb.handleSetMember = toJsonSet;
+        dataCb.handleZsetMember = toJsonZset;
+        dataCb.handleFunction = (ctx->conf.includeFunc) ? toJsonFunction : NULL;
+        dataCb.handleModule = toJsonModule;
+        RDB_createHandlersData(p, &dataCb, ctx, deleteRdbToJsonCtx);
 
     } else  if (ctx->conf.level == RDB_LEVEL_STRUCT) {
+        RdbHandlersStructCallbacks structCb;
+        memset(&structCb, 0 , sizeof(structCb));
+        COMMON_HANDLERS_INIT(structCb, ctx->conf.includeAuxField);
 
-        callbacks.structCb.handleString = toJsonString;
+        structCb.handleString = toJsonString;
         /* list */
-        callbacks.structCb.handleListPlain = toJsonList;
-        callbacks.structCb.handleListLP = toJsonStruct;
-        callbacks.structCb.handleListZL = toJsonStruct;
+        structCb.handleListPlain = toJsonList;
+        structCb.handleListLP = toJsonStruct;
+        structCb.handleListZL = toJsonStruct;
         /* hash */
-        callbacks.structCb.handleHashPlain = toJsonHash;
-        callbacks.structCb.handleHashZL = toJsonStruct;
-        callbacks.structCb.handleHashLP = toJsonStruct;
-        callbacks.structCb.handleHashZM = toJsonStruct;
+        structCb.handleHashPlain = toJsonHash;
+        structCb.handleHashZL = toJsonStruct;
+        structCb.handleHashLP = toJsonStruct;
+        structCb.handleHashZM = toJsonStruct;
         /* set */
-        callbacks.structCb.handleSetPlain = toJsonSet;
-        callbacks.structCb.handleSetIS = toJsonStruct;
-        callbacks.structCb.handleSetLP = toJsonStruct;
+        structCb.handleSetPlain = toJsonSet;
+        structCb.handleSetIS = toJsonStruct;
+        structCb.handleSetLP = toJsonStruct;
         /* zset */
-        callbacks.structCb.handleZsetPlain = toJsonZset;
-        callbacks.structCb.handleZsetZL = toJsonStruct;
-        callbacks.structCb.handleZsetLP = toJsonStruct;
+        structCb.handleZsetPlain = toJsonZset;
+        structCb.handleZsetZL = toJsonStruct;
+        structCb.handleZsetLP = toJsonStruct;
         /* function */
-        callbacks.structCb.handleFunction = (conf->includeFunc) ? toJsonFunction : NULL;
+        structCb.handleFunction = (ctx->conf.includeFunc) ? toJsonFunction : NULL;
         /* module */
-        callbacks.structCb.handleModule = toJsonModule;
-        RDB_createHandlersStruct(p, &callbacks.structCb, ctx, deleteRdbToJsonCtx);
+        structCb.handleModule = toJsonModule;
+        RDB_createHandlersStruct(p, &structCb, ctx, deleteRdbToJsonCtx);
 
     } else if (ctx->conf.level == RDB_LEVEL_RAW) {
-
-        callbacks.rawCb.handleFrag = toJsonFrag;
-        callbacks.rawCb.handleBegin = toJsonRawBegin;
-        callbacks.rawCb.handleEnd = toJsonRawEnd;
-        RDB_createHandlersRaw(p, &callbacks.rawCb, ctx, deleteRdbToJsonCtx);
+        RdbHandlersRawCallbacks rawCb;
+        memset(&rawCb, 0 , sizeof(rawCb));
+        COMMON_HANDLERS_INIT(rawCb, ctx->conf.includeAuxField);
+        rawCb.handleFrag = toJsonFrag;
+        rawCb.handleBegin = toJsonRawBegin;
+        rawCb.handleEnd = toJsonRawEnd;
+        RDB_createHandlersRaw(p, &rawCb, ctx, deleteRdbToJsonCtx);
     }
 
     return ctx;

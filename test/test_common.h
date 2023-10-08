@@ -31,8 +31,9 @@ void runSystemCmd(const char *cmdFormat, ...);
 void assert_json_equal(const char *f1, const char *f2, int ignoreListOrder);
 
 /* Test against Redis Server */
-extern int redisPort;
-void setupRedisServer(const char *installFolder);
+void setRedisInstallFolder(const char *path);
+int getRedisPort(void);
+void setupRedisServer(const char *extraArgs);
 void teardownRedisServer(void);
 int isSetRedisServer(void);
 char *sendRedisCmd(char *cmd, int expRetType, char *expRsp);
@@ -42,6 +43,7 @@ int isSupportRestoreModuleAux(void);
 int group_rdb_to_redis(void);
 int group_test_rdb_cli(void);
 int group_rdb_to_resp(void);
+int group_examples(void);
 int group_main(void);
 int group_rdb_to_json(void);
 int group_mem_management(void);
@@ -60,3 +62,5 @@ void cleanTmpFolder(void);
 void setEnvVar (const char *name, const char *val);
 char *substring(char *str, size_t len, char *substr);
 void assert_file_payload(const char *filename, char *expData, int expLen, MatchType matchType, int expMatch);
+
+int printHexDump(const char *addr, size_t len, char *obuf, int obuflen);
