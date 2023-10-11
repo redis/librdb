@@ -51,16 +51,16 @@ valgrind: build_test
 install: all
 	$(INSTALL) -d $(BINDIR)
 	$(INSTALL) -m 755 bin/rdb-cli $(BINDIR)/rdb-cli-$(VERSION)
-	ln -fs $(BINDIR)/rdb-cli-$(VERSION) $(BINDIR)/rdb-cli
+	ln -fsr $(BINDIR)/rdb-cli-$(VERSION) $(BINDIR)/rdb-cli
 	$(INSTALL) -d $(LIBDIR)
 	$(INSTALL) -m 755 lib/librdb.so $(LIBDIR)/librdb.so.$(VERSION)
-	ln -fs $(LIBDIR)/librdb.so.$(VERSION) $(LIBDIR)/librdb.so
+	ln -fsr $(LIBDIR)/librdb.so.$(VERSION) $(LIBDIR)/librdb.so
 	$(INSTALL) -m 755 lib/librdb-ext.so $(LIBDIR)/librdb-ext.so.$(VERSION)
-	ln -fs $(LIBDIR)/librdb-ext.so.$(VERSION) $(LIBDIR)/librdb-ext.so
+	ln -fsr $(LIBDIR)/librdb-ext.so.$(VERSION) $(LIBDIR)/librdb-ext.so
 	$(INSTALL) -m 755 lib/librdb.a $(LIBDIR)/librdb.a.$(VERSION)
-	ln -fs $(LIBDIR)/librdb.a.$(VERSION) $(LIBDIR)/librdb.a
+	ln -fsr $(LIBDIR)/librdb.a.$(VERSION) $(LIBDIR)/librdb.a
 	$(INSTALL) -m 755 lib/librdb-ext.a $(LIBDIR)/librdb-ext.a.$(VERSION)
-	ln -fs $(LIBDIR)/librdb-ext.a.$(VERSION) $(LIBDIR)/librdb-ext.a
+	ln -fsr $(LIBDIR)/librdb-ext.a.$(VERSION) $(LIBDIR)/librdb-ext.a
 	$(INSTALL) -d $(INCDIR)
 	$(INSTALL) -m 644 api/librdb-api.h $(INCDIR)
 	$(INSTALL) -m 644 api/librdb-ext-api.h $(INCDIR)
