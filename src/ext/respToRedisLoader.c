@@ -65,10 +65,7 @@ static void onReadRepliesError(RdbxRespToRedisLoader *ctx) {
     }
 }
 
-/* Read 'numToRead' replies from the socket. * Return 0 for success, 1 otherwise.
- *
- * TODO: Support nonblocking configuration. If EAGAIN, propaagate it to parser's caller
- *       and let it to decide whether it wants to retry now or later or change to blocking mode */
+/* Read 'numToRead' replies from the socket. * Return 0 for success, 1 otherwise. */
 static int readReplies(RdbxRespToRedisLoader *ctx, int numToRead) {
     char buff[REPLY_BUFF_SIZE];
 

@@ -2,6 +2,7 @@
 #include <stdarg.h>
 #include <stdlib.h>
 #include <string.h>
+#include <errno.h>
 #include <limits.h>
 
 /* Rely only on API (and not internal parser headers) */
@@ -18,6 +19,8 @@ typedef struct Options {
     const char *logfilePath;
     RdbRes (*formatFunc)(RdbParser *p, int argc, char **argv);
 } Options;
+
+void loggerWrap(RdbLogLevel l, const char *msg, ...);
 
 static int getOptArg(int argc, char* argv[], int *at, char *abbrvOpt, char *opt, int *flag, const char **arg) {
     if ((strcmp(argv[*at], abbrvOpt) == 0) || (strcmp(argv[*at], opt) == 0)) {
@@ -43,7 +46,7 @@ static int getOptArgVal(int argc, char* argv[], int *at, char *abbrvOpt, char *o
 
         /* check boundaries. Condition support also the limits INT_MAX and INT_MIN. */
         if (!((*val>=min) && (*val <=max))) {
-            fprintf(stderr, "Value of %s (%s) must be a integer between %d and %d", opt, abbrvOpt, min, max);
+            loggerWrap(RDB_LOG_ERR, "Value of %s (%s) must be a integer between %d and %d", opt, abbrvOpt, min, max);
             exit(RDB_ERR_GENERAL);
         }
         return 1;
@@ -84,7 +87,7 @@ static void printUsage(int shortUsage) {
     printf("[v%s] ", RDB_getLibVersion(NULL,NULL,NULL));
     printf("Usage: rdb-cli /path/to/dump.rdb [OPTIONS] {json|resp|redis} [FORMAT_OPTIONS]\n");
     printf("OPTIONS:\n");
-    printf("\t-l, --log-file {<PATH>|-}     Path to the log file or stdout (Default: './rdb-cli.log')\n\n");
+    printf("\t-l, --log-file <PATH>         Path to the log file or stdout (Default: './rdb-cli.log')\n\n");
     printf("\tMultiple filters combination of keys/types/dbs can be specified:\n");
     printf("\t-k, --key <REGEX>             Include only keys that match REGEX\n");
     printf("\t-K  --no-key <REGEX>          Exclude keys that match REGEX\n");
@@ -135,11 +138,11 @@ static RdbRes formatJson(RdbParser *parser, int argc, char **argv) {
             if (strcmp(includeArg, "aux-val") == 0) { includeAuxField = 1; continue; }
             if (strcmp(includeArg, "func") == 0) { includeFunc = 1; continue; }
             if (strcmp(includeArg, "stream-meta") == 0) { includeStreamMeta = 1; continue; }
-            fprintf(stderr, "Invalid argument for '--include': %s\n", includeArg);
+            loggerWrap(RDB_LOG_ERR, "Invalid argument for '--include': %s\n", includeArg);
             return RDB_ERR_GENERAL;
         }
 
-        fprintf(stderr, "Invalid 'json' [FORMAT_OPTIONS] argument: %s\n", opt);
+        loggerWrap(RDB_LOG_ERR, "Invalid 'json' [FORMAT_OPTIONS] argument: %s\n", opt);
         printUsage(1);
         return RDB_ERR_GENERAL;
     }
@@ -185,7 +188,7 @@ static RdbRes formatRedis(RdbParser *parser, int argc, char **argv) {
         if (getOptArgVal(argc, argv, &at, "-a", "--auth", NULL, &(auth.cmd.argc), 1, INT_MAX)) {
             auth.cmd.argv = argv + at + 1;
             if ((1 + at + auth.cmd.argc) >= argc) {
-                fprintf(stderr, "Insufficient number of arguments to option --auth\n");
+                loggerWrap(RDB_LOG_ERR, "Insufficient number of arguments to option --auth\n");
                 printUsage(1);
                 return RDB_ERR_GENERAL;
             }
@@ -193,13 +196,13 @@ static RdbRes formatRedis(RdbParser *parser, int argc, char **argv) {
             continue;
         }
 
-        fprintf(stderr, "Invalid 'redis' [FORMAT_OPTIONS] argument: %s\n", opt);
+        loggerWrap(RDB_LOG_ERR, "Invalid 'redis' [FORMAT_OPTIONS] argument: %s\n", opt);
         printUsage(1);
         return RDB_ERR_GENERAL;
     }
 
     if (((auth.user) || (auth.pwd)) && (auth.cmd.argc > 0)) {
-        fprintf(stderr, "Invalid AUTH arguments. --auth(-a) is mutually exclusive with --password(-P) and --user(-u)\n");
+        loggerWrap(RDB_LOG_ERR, "Invalid AUTH arguments. --auth(-a) is mutually exclusive with --password(-P) and --user(-u)\n");
         return RDB_ERR_GENERAL;
     }
 
@@ -253,7 +256,7 @@ static RdbRes formatResp(RdbParser *parser, int argc, char **argv) {
         if (getOptArg(argc, argv, &at, "-e", "--enum-commands", &commandEnum, NULL)) continue;
         if (getOptArgVal(argc, argv, &at, "-n", "--start-cmd-num", NULL, &startCmdNum, 1, INT_MAX)) continue;
 
-        fprintf(stderr, "Invalid 'resp' [FORMAT_OPTIONS] argument: %s\n", opt);
+        loggerWrap(RDB_LOG_ERR, "Invalid 'resp' [FORMAT_OPTIONS] argument: %s\n", opt);
         printUsage(1);
         return RDB_ERR_GENERAL;
     }
@@ -283,8 +286,8 @@ int matchRdbDataType(const char *dataTypeStr) {
     if (!strcmp(dataTypeStr, "stream")) return RDB_DATA_TYPE_STREAM;
     if (!strcmp(dataTypeStr, "func")) return RDB_DATA_TYPE_FUNCTION;
 
-    fprintf(stderr, "Invalid TYPE argument (%s). Valid values: str, list, set, zset, hash, module, stream, func",
-            dataTypeStr);
+    loggerWrap(RDB_LOG_ERR, "Invalid TYPE argument (%s). Valid values: str, list, set, zset, hash, module, stream, func",
+               dataTypeStr);
     exit(RDB_ERR_GENERAL);
 }
 
@@ -344,7 +347,7 @@ int readCommonOptions(RdbParser *p, int argc, char* argv[], Options *options, in
         else if (strcmp(opt, "resp") == 0) { options->formatFunc = formatResp; break; }
         else if (strcmp(opt, "redis") == 0) { options->formatFunc = formatRedis; break; }
 
-        fprintf(stderr, "At argv[%d], unexpected OPTIONS argument: %s\n", at, opt);
+        loggerWrap(RDB_LOG_ERR, "At argv[%d], unexpected OPTIONS argument: %s\n", at, opt);
         printUsage(1);
         exit(RDB_ERR_GENERAL);
     }
@@ -377,13 +380,9 @@ int main(int argc, char **argv)
         return RDB_ERR_GENERAL;
     }
 
-    if (strcmp(options.logfilePath, "-") == 0) {
-        logfile = stdout;
-    } else {
-        if ((logfile = fopen(options.logfilePath, "w")) == NULL) {
-            printf("Error opening log file for writing: %s \n", options.logfilePath);
-            return RDB_ERR_GENERAL;
-        }
+    if ((logfile = fopen(options.logfilePath, "w")) == NULL) {
+        printf("Error opening log file for writing `%s`: %s\n", options.logfilePath, strerror(errno));
+        return RDB_ERR_GENERAL;
     }
 
     /* create the parser and attach it a file reader */
@@ -415,8 +414,7 @@ int main(int argc, char **argv)
 
     RDB_deleteParser(parser);
 
-    if (logfile != stdout)
-        fclose(logfile);
+    fclose(logfile);
 
     return 0;
 }

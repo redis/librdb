@@ -7,7 +7,7 @@
 
 struct RdbxToJson;
 
-#define _RDB_TYPE_MODULE_2 7
+
 #define _STDOUT_STR "<stdout>"
 
 typedef enum
@@ -82,8 +82,7 @@ static void outputQuotedEscaping(RdbxToJson *ctx, char *data, size_t len) {
 static void deleteRdbToJsonCtx(RdbParser *p, void *data) {
     RdbxToJson *ctx = (RdbxToJson *) data;
 
-    if (ctx->keyCtx.key)
-        RDB_bulkCopyFree(p, ctx->keyCtx.key);
+    RDB_bulkCopyFree(p, ctx->keyCtx.key);
 
     RDB_log(p, RDB_LOG_DBG, "handlersToJson: Closing file %s", ctx->outfileName);
 
@@ -139,7 +138,7 @@ static RdbxToJson *initRdbToJsonCtx(RdbParser *p, const char *outfilename, RdbxT
 
 /*** Handling common ***/
 
-static RdbRes handlingAuxField(RdbParser *p, void *userData, RdbBulk auxkey, RdbBulk auxval) {
+static RdbRes toJsonAuxField(RdbParser *p, void *userData, RdbBulk auxkey, RdbBulk auxval) {
     RdbxToJson *ctx = userData;
     UNUSED(p);
 
@@ -443,7 +442,7 @@ static RdbRes toJsonFunction(RdbParser *p, void *userData, RdbBulk func) {
     return RDB_OK;
 }
 
-static RdbRes toJsonStreamItem(RdbParser *p, void *userData, RdbStreamID *id, RdbBulk field, RdbBulk value, int64_t pairsLeft) {
+static RdbRes toJsonStreamItem(RdbParser *p, void *userData, RdbStreamID *id, RdbBulk field, RdbBulk value, int64_t itemsLeft) {
     RdbxToJson *ctx = userData;
 
     if ( (ctx->state == R2J_IN_KEY) || (ctx->state == R2J_IN_STREAM_ENTRIES)) {
@@ -455,7 +454,7 @@ static RdbRes toJsonStreamItem(RdbParser *p, void *userData, RdbStreamID *id, Rd
         fprintf(ctx->outfile, "%c\n        { \"id\":\"%lu-%lu\", ",
                 (ctx->state == R2J_IN_STREAM_ENTRIES) ? ',' : ' ',
                 id->ms, id->seq );
-        fprintf(ctx->outfile, "\"values\":{");
+        fprintf(ctx->outfile, "\"items\":{");
         outputQuotedEscaping(ctx, field, RDB_bulkLen(p, field));
         fprintf(ctx->outfile, ":");
         outputQuotedEscaping(ctx, value, RDB_bulkLen(p, value));
@@ -469,7 +468,7 @@ static RdbRes toJsonStreamItem(RdbParser *p, void *userData, RdbStreamID *id, Rd
         return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
     }
 
-    if (pairsLeft) {
+    if (itemsLeft) {
         fprintf(ctx->outfile, ", ");
         ctx->state = R2J_IN_STREAM_ENTRIES_PAIRS;
     } else {
@@ -479,8 +478,7 @@ static RdbRes toJsonStreamItem(RdbParser *p, void *userData, RdbStreamID *id, Rd
     return RDB_OK;
 }
 
-RdbRes toJsonStreamMetadata(RdbParser *p, void *userData, RdbStreamMeta *meta) {
-    UNUSED(p);
+static RdbRes toJsonStreamMetadata(RdbParser *p, void *userData, RdbStreamMeta *meta) {
     RdbxToJson *ctx = userData;
     if (ctx->state != R2J_IN_STREAM_ENTRIES) {
         RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
@@ -496,8 +494,7 @@ RdbRes toJsonStreamMetadata(RdbParser *p, void *userData, RdbStreamMeta *meta) {
     return RDB_OK;
 }
 
-RdbRes toJsonStreamNewCGroup(RdbParser *p, void *userData, RdbBulk grpName, RdbStreamGroupMeta *meta) {
-    UNUSED(p);
+static RdbRes toJsonStreamNewCGroup(RdbParser *p, void *userData, RdbBulk grpName, RdbStreamGroupMeta *meta) {
     RdbxToJson *ctx = userData;
     char *prefix;
     if (ctx->state == R2J_IN_STREAM) {
@@ -522,8 +519,7 @@ RdbRes toJsonStreamNewCGroup(RdbParser *p, void *userData, RdbBulk grpName, RdbS
     return RDB_OK;
 }
 
-RdbRes toJsonStreamCGroupPendingEntry(RdbParser *p, void *userData, RdbStreamPendingEntry *pe) {
-    UNUSED(p);
+static RdbRes toJsonStreamCGroupPendingEntry(RdbParser *p, void *userData, RdbStreamPendingEntry *pe) {
     char *prefix;
     RdbxToJson *ctx = userData;
     if (ctx->state == R2J_IN_STREAM_CG) {
@@ -541,8 +537,7 @@ RdbRes toJsonStreamCGroupPendingEntry(RdbParser *p, void *userData, RdbStreamPen
     return RDB_OK;
 }
 
-RdbRes toJsonStreamNewConsumer(RdbParser *p, void *userData, RdbBulk consName, RdbStreamConsumerMeta *meta) {
-    UNUSED(p);
+static RdbRes toJsonStreamNewConsumer(RdbParser *p, void *userData, RdbBulk consName, RdbStreamConsumerMeta *meta) {
     RdbxToJson *ctx = userData;
     char *prefix ="";
 
@@ -568,7 +563,7 @@ RdbRes toJsonStreamNewConsumer(RdbParser *p, void *userData, RdbBulk consName, R
     return RDB_OK;
 }
 
-RdbRes toJsonStreamConsumerPendingEntry(RdbParser *p, void *userData, RdbStreamID *streamId) {
+static RdbRes toJsonStreamConsumerPendingEntry(RdbParser *p, void *userData, RdbStreamID *streamId) {
     UNUSED(p);
     RdbxToJson *ctx = userData;
     char *prefix;
@@ -587,7 +582,6 @@ RdbRes toJsonStreamConsumerPendingEntry(RdbParser *p, void *userData, RdbStreamI
 /*** Handling struct ***/
 
 static RdbRes toJsonStruct(RdbParser *p, void *userData, RdbBulk value) {
-    UNUSED(p);
     RdbxToJson *ctx = userData;
 
     /* output json part */
@@ -598,10 +592,22 @@ static RdbRes toJsonStruct(RdbParser *p, void *userData, RdbBulk value) {
     return RDB_OK;
 }
 
+static RdbRes toJsonStreamLP(RdbParser *p, void *userData, RdbBulk nodekey, RdbBulk streamLP) {
+    RdbxToJson *ctx = userData;
+
+    /* output json part */
+    fprintf(ctx->outfile, "{");
+    outputQuotedEscaping(ctx, nodekey, RDB_bulkLen(p, nodekey));
+    fprintf(ctx->outfile, ":");
+    outputQuotedEscaping(ctx, streamLP, RDB_bulkLen(p, streamLP));
+    fprintf(ctx->outfile, "}");
+
+    return RDB_OK;
+}
+
 /*** Handling raw ***/
 
 static RdbRes toJsonFrag(RdbParser *p, void *userData, RdbBulk frag) {
-    UNUSED(p);
     RdbxToJson *ctx = userData;
     /* output json part */
     ctx->encfunc(ctx, frag, RDB_bulkLen(p, frag));
@@ -609,8 +615,7 @@ static RdbRes toJsonFrag(RdbParser *p, void *userData, RdbBulk frag) {
 }
 
 static RdbRes toJsonRawBegin(RdbParser *p, void *userData, size_t size) {
-    UNUSED(p);
-    UNUSED(size);
+    UNUSED(p, size);
     RdbxToJson *ctx = userData;
     fprintf(ctx->outfile, "\"");
     return RDB_OK;
@@ -623,33 +628,41 @@ static RdbRes toJsonRawEnd(RdbParser *p, void *userData) {
     return RDB_OK;
 }
 
-#define COMMON_HANDLERS_INIT(commonPart, incAuxField) \
-    if (incAuxField) \
-        commonPart.handleAuxField = handlingAuxField; \
-    commonPart.handleNewKey = toJsonNewKey; \
-    commonPart.handleEndKey = toJsonEndKey; \
-    commonPart.handleNewDb = toJsonNewDb; \
-    commonPart.handleStartRdb = toJsonNewRdb; \
-    commonPart.handleEndRdb = toJsonEndRdb;
-
 RdbxToJson *RDBX_createHandlersToJson(RdbParser *p, const char *filename, RdbxToJsonConf *conf) {
     RdbxToJson *ctx = initRdbToJsonCtx(p, filename, conf);
     if (ctx == NULL) return NULL;
 
     if (ctx->conf.level == RDB_LEVEL_DATA) {
-        RdbHandlersDataCallbacks dataCb;
-        memset(&dataCb, 0 , sizeof(dataCb));
-        COMMON_HANDLERS_INIT(dataCb, ctx->conf.includeAuxField);
 
-        dataCb.handleStringValue = toJsonString;
-        dataCb.handleListItem = toJsonList;
-        dataCb.handleHashField = toJsonHash;
-        dataCb.handleSetMember = toJsonSet;
-        dataCb.handleZsetMember = toJsonZset;
-        dataCb.handleFunction = (ctx->conf.includeFunc) ? toJsonFunction : NULL;
-        dataCb.handleModule = toJsonModule;
-        /* stream */
-        dataCb.handleStreamItem = toJsonStreamItem;
+        RdbHandlersDataCallbacks dataCb = {
+                toJsonNewRdb,
+                toJsonEndRdb,
+                toJsonNewDb,
+                NULL, /* handleResizeDb */
+                NULL,
+                toJsonNewKey,
+                toJsonEndKey,
+                toJsonString,
+                toJsonList,
+                toJsonHash,
+                toJsonSet,
+                toJsonZset,
+                NULL, /* handleFunction */
+                toJsonModule,
+                NULL, /*handleStreamMetadata*/
+                toJsonStreamItem,
+                NULL, /* handleStreamNewCGroup */
+                NULL, /* handleStreamCGroupPendingEntry */
+                NULL, /* handleStreamNewConsumer */
+                NULL, /* handleStreamConsumerPendingEntry */
+        };
+
+        if (ctx->conf.includeAuxField)
+            dataCb.handleAuxField = toJsonAuxField;
+
+        if (ctx->conf.includeFunc)
+            dataCb.handleFunction = toJsonFunction;
+
         if (ctx->conf.includeStreamMeta) {
             dataCb.handleStreamMetadata = toJsonStreamMetadata;
             dataCb.handleStreamNewCGroup = toJsonStreamNewCGroup;
@@ -657,45 +670,76 @@ RdbxToJson *RDBX_createHandlersToJson(RdbParser *p, const char *filename, RdbxTo
             dataCb.handleStreamNewConsumer = toJsonStreamNewConsumer;
             dataCb.handleStreamConsumerPendingEntry = toJsonStreamConsumerPendingEntry;
         }
+
         RDB_createHandlersData(p, &dataCb, ctx, deleteRdbToJsonCtx);
 
     } else  if (ctx->conf.level == RDB_LEVEL_STRUCT) {
-        RdbHandlersStructCallbacks structCb;
-        memset(&structCb, 0 , sizeof(structCb));
-        COMMON_HANDLERS_INIT(structCb, ctx->conf.includeAuxField);
+        RdbHandlersStructCallbacks structCb = {
+                toJsonNewRdb,
+                toJsonEndRdb,
+                toJsonNewDb,
+                NULL, /* handleResizeDb */
+                NULL,
+                toJsonNewKey,
+                toJsonEndKey,
+                toJsonString,
+                /*list*/
+                toJsonList,
+                toJsonStruct, /* handleListZL*/
+                toJsonStruct, /* handleListLP*/
+                /*hash*/
+                toJsonHash,
+                toJsonStruct, /* handleHashZL*/
+                toJsonStruct, /* handleHashLP*/
+                toJsonStruct, /* handleHashZM*/
+                /*set*/
+                toJsonSet,
+                toJsonStruct, /* handleSetIS*/
+                toJsonStruct, /* handleSetLP*/
+                /*zset*/
+                toJsonZset,
+                toJsonStruct, /* handleZsetZL*/
+                toJsonStruct, /* handleZsetLP*/
+                /*function*/
+                NULL, /* handleFunction */
+                /*module*/
+                toJsonModule,
+                /*stream*/
+                toJsonStreamLP,
+        };
 
-        structCb.handleString = toJsonString;
-        /* list */
-        structCb.handleListPlain = toJsonList;
-        structCb.handleListLP = toJsonStruct;
-        structCb.handleListZL = toJsonStruct;
-        /* hash */
-        structCb.handleHashPlain = toJsonHash;
-        structCb.handleHashZL = toJsonStruct;
-        structCb.handleHashLP = toJsonStruct;
-        structCb.handleHashZM = toJsonStruct;
-        /* set */
-        structCb.handleSetPlain = toJsonSet;
-        structCb.handleSetIS = toJsonStruct;
-        structCb.handleSetLP = toJsonStruct;
-        /* zset */
-        structCb.handleZsetPlain = toJsonZset;
-        structCb.handleZsetZL = toJsonStruct;
-        structCb.handleZsetLP = toJsonStruct;
-        /* function */
-        structCb.handleFunction = (ctx->conf.includeFunc) ? toJsonFunction : NULL;
-        /* module */
-        structCb.handleModule = toJsonModule;
+        if (ctx->conf.includeAuxField)
+            structCb.handleAuxField = toJsonAuxField;
+
+        if (ctx->conf.includeFunc)
+            structCb.handleFunction = toJsonFunction;
+
         RDB_createHandlersStruct(p, &structCb, ctx, deleteRdbToJsonCtx);
 
     } else if (ctx->conf.level == RDB_LEVEL_RAW) {
-        RdbHandlersRawCallbacks rawCb;
-        memset(&rawCb, 0 , sizeof(rawCb));
-        COMMON_HANDLERS_INIT(rawCb, ctx->conf.includeAuxField);
-        rawCb.handleFrag = toJsonFrag;
-        rawCb.handleBegin = toJsonRawBegin;
-        rawCb.handleEnd = toJsonRawEnd;
+        RdbHandlersRawCallbacks rawCb = {
+                toJsonNewRdb,
+                toJsonEndRdb,
+                toJsonNewDb,
+                NULL, /* handleResizeDb */
+                NULL,
+                toJsonNewKey,
+                toJsonEndKey,
+                NULL, /*handleBeginModuleAux*/
+                toJsonRawBegin,
+                toJsonFrag,
+                toJsonRawEnd,
+        };
+
+        if (ctx->conf.includeAuxField)
+            rawCb.handleAuxField = toJsonAuxField;
+
         RDB_createHandlersRaw(p, &rawCb, ctx, deleteRdbToJsonCtx);
+
+    } else {
+        RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_LEVEL,
+                        "RDBX_createHandlersToJson(): Invalid level value: %d", ctx->conf.level);
+        return NULL;
     }
 
     return ctx;

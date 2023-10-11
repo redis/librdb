@@ -38,7 +38,7 @@
 #ifndef RAX_ALLOC_H
 #define RAX_ALLOC_H
 //#include "zmalloc.h"
-#include "malloc.h"
+#include <stdlib.h>
 #define rax_malloc malloc
 #define rax_realloc realloc
 #define rax_free free

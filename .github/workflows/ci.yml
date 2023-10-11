@@ -79,11 +79,9 @@ jobs:
           export LD_LIBRARY_PATH=/usr/local/lib/
           export LIBRDB_REDIS_FOLDER=~/redis/src
           
-          # Verify that rule "noopt" being build and tested
-          make noopt
-          make test
+          # Verify that "debug" rule being build and tested
+          make clean debug test
           # Verify that rule "example and "all" being build and tested
-          make distclean
-          make example 
-          make test
+          make clean all test
+          make example
         working-directory: ${{github.workspace}}

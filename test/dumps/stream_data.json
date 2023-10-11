@@ -1,9 +1,9 @@
 "mystream":{
 "entries":[
-{ "id":"1695649068107-0", "values":{"message":"Message1"} },
-{ "id":"1695649068110-0", "values":{"message":"Message2"} },
-{ "id":"1695649069139-0", "values":{"message":"Message3"} },
-{ "id":"1695649446276-0", "values":{"message":"Message4"} },
-{ "id":"1695649456516-0", "values":{"message":"Message5"} },
-{ "id":"1695893015933-0", "values":{"field1":"value1", "field2":"value2", "field3":"value3"} }
+{ "id":"1695649068107-0", "items":{"message":"Message1"} },
+{ "id":"1695649068110-0", "items":{"message":"Message2"} },
+{ "id":"1695649069139-0", "items":{"message":"Message3"} },
+{ "id":"1695649446276-0", "items":{"message":"Message4"} },
+{ "id":"1695649456516-0", "items":{"message":"Message5"} },
+{ "id":"1695893015933-0", "items":{"field1":"value1", "field2":"value2", "field3":"value3"} }
 ]}

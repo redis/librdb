@@ -18,8 +18,8 @@ static void test_createReader_missingFile(void **state) {
     assert_int_equal(err, RDB_ERR_FAILED_OPEN_RDB_FILE);
 
     /* verify returned error string */
-    assert_string_equal(RDB_getErrorMessage(parser), "Failed to open RDB file: ./test/dumps/non_exist_file.rdb");
-
+    assert_string_equal(RDB_getErrorMessage(parser),
+                        "Failed to open RDB file `./test/dumps/non_exist_file.rdb`: No such file or directory\n");
     RDB_deleteParser(parser);
 }
 
@@ -69,8 +69,8 @@ static void test_mixed_levels_registration(void **state) {
     assert_non_null(RDBX_createHandlersToJson(parser, jsonfileRaw, &conf2));
 
     /* configure at what level of the parser each obj type should be handled and callback */
-    RDB_handleByLevel(parser, RDB_DATA_TYPE_STRING, RDB_LEVEL_RAW, 0);
-    RDB_handleByLevel(parser, RDB_DATA_TYPE_LIST, RDB_LEVEL_DATA, 0);
+    RDB_handleByLevel(parser, RDB_DATA_TYPE_STRING, RDB_LEVEL_RAW);
+    RDB_handleByLevel(parser, RDB_DATA_TYPE_LIST, RDB_LEVEL_DATA);
 
     while ((status = RDB_parse(parser)) == RDB_STATUS_WAIT_MORE_DATA);
     assert_int_equal( status, RDB_STATUS_OK);

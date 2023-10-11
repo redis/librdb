@@ -22,8 +22,14 @@ STD      = -std=c99
 STACK    = -fstack-protector-all -Wstack-protector
 WARNS    = -Wall -Wextra -pedantic -Werror
 CFLAGS   = -fPIC $(OPTIMIZATION) $(STD) $(STACK) $(WARNS)
-DEBUG    = -g3 -DLIBRDB_DEBUG=$(LIBRDB_DEBUG)
+DEBUG    = -g3
 LIBS     =
+
+ifeq ($(LIBRDB_DEBUG), 1)
+    CFLAGS += -DLIBRDB_DEBUG=1
+else
+	CFLAGS += -DNDEBUG=1
+endif
 
 ######################################### RULES #######################################
 all: $(TARGET_LIB) $(TARGET_LIB_STATIC)

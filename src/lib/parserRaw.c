@@ -797,12 +797,11 @@ RdbStatus elementRawStreamLP(RdbParser *p) {
         ST_LOAD_GLOBAL_PEL,                /*   Load CG's global PEL (Pending Entries List)                            */
         ST_LOAD_NUM_CONSUMERS,             /*   Load number of consumers of current CG                                 */
         ST_LOAD_NEXT_CONSUMER,             /*     Load next consumer                                                   */
-        ST_LOAD_NEXT_CONSUMER_STR_RETURN,  /*     Complete loading consumer name. Load consumder PEL.                  */
+        ST_LOAD_NEXT_CONSUMER_STR_RETURN,  /*     Complete loading consumer name. Load consumer PEL.                   */
     } ;
 
     ElementRawStreamCtx *streamCtx = &p->elmCtx.rawStream;
     RawContext *rawCtx = &p->rawCtx;
-    UNUSED(p, rawCtx);
 
     switch (p->elmCtx.state) {
 

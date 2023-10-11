@@ -11,8 +11,6 @@ extern "C" {
 #define _LIBRDB_API
 #endif
 
-#define MAX_RDB_VER_SUPPORT 11
-
 typedef char *RdbBulk;
 typedef char *RdbBulkCopy;
 
@@ -297,16 +295,16 @@ typedef struct RdbHandlersDataCallbacks {
     RdbRes (*handleHashField)(RdbParser *p, void *userData, RdbBulk field, RdbBulk value);
     /* Callback to handle a member within a set */
     RdbRes (*handleSetMember)(RdbParser *p, void *userData, RdbBulk member);
+    /* Callback to handle a member within a sorted set along with its score */
+    RdbRes (*handleZsetMember)(RdbParser *p, void *userData, RdbBulk member, double score);
     /* Callback to handle function code */
     RdbRes (*handleFunction)(RdbParser *p, void *userData, RdbBulk func);
     /* Callback to handle module. Currently only reports about the name & size */
     RdbRes (*handleModule)(RdbParser *p, void *userData, RdbBulk moduleName, size_t serializedSize);
-    /* Callback to handle a member within a sorted set along with its score */
-    RdbRes (*handleZsetMember)(RdbParser *p, void *userData, RdbBulk member, double score);
     /* Callback to handle metadata associated with a stream */
     RdbRes (*handleStreamMetadata)(RdbParser *p, void *userData, RdbStreamMeta *meta);
     /* Callback to handle an item within a stream along with its field and value */
-    RdbRes (*handleStreamItem)(RdbParser *p, void *userData, RdbStreamID *id, RdbBulk field, RdbBulk value, int64_t pairsLeft);
+    RdbRes (*handleStreamItem)(RdbParser *p, void *userData, RdbStreamID *id, RdbBulk field, RdbBulk value, int64_t itemsLeft);
     /* Callback to handle the creation of a new consumer group within a stream */
     RdbRes (*handleStreamNewCGroup)(RdbParser *p, void *userData, RdbBulk grpName, RdbStreamGroupMeta *meta);
     /* Callback to handle a pending entry within a consumer group */
@@ -390,10 +388,19 @@ _LIBRDB_API void RDB_dontPropagate(RdbParser *p);
  * Parser setters & getters
  ****************************************************************/
 
+/* set deep integrity check */
 _LIBRDB_API void RDB_setDeepIntegCheck(RdbParser *p, int deep);
+
+/* get number of bytes processed so far */
 _LIBRDB_API size_t RDB_getBytesProcessed(RdbParser *p);
+
+/* get current state of the parser */
 _LIBRDB_API RdbState RDB_getState(RdbParser *p);
+
+/* get number of handlers registered at given level */
 _LIBRDB_API int RDB_getNumHandlers(RdbParser *p, RdbHandlersLevel lvl);
+
+/* set the parser to ignore checksum errors */
 _LIBRDB_API void RDB_IgnoreChecksum(RdbParser *p);
 
 /* There could be relatively large strings stored within Redis, which are
@@ -579,8 +586,11 @@ typedef enum RdbDataType {
     RDB_DATA_TYPE_MAX
 } RdbDataType;
 
-/* Can be called at any point along parsing (Useful after parsing source rdb version) */
-_LIBRDB_API void RDB_handleByLevel(RdbParser *p, RdbDataType t, RdbHandlersLevel lvl, unsigned int flags);
+/* Return 0 on success, 1 otherwise. Can be called at any point along parsing
+ * (Useful after parsing source rdb version) */
+_LIBRDB_API int RDB_handleByLevel(RdbParser *p,
+                                  RdbDataType t,
+                                  RdbHandlersLevel lvl);
 
 /*****************************************************************
  * LIBRDB Versioning
@@ -589,6 +599,8 @@ _LIBRDB_API void RDB_handleByLevel(RdbParser *p, RdbDataType t, RdbHandlersLevel
  *****************************************************************/
 
 _LIBRDB_API const char* RDB_getLibVersion(int* major, int* minor, int* patch);
+
+_LIBRDB_API int RDB_getMaxSuppportRdbVersion(void);
 
 #ifdef __cplusplus
 }

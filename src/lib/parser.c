@@ -511,8 +511,7 @@ _LIBRDB_API RdbHandlers *RDB_createHandlersData(RdbParser *p,
     return hndl;
 }
 
-_LIBRDB_API void RDB_handleByLevel(RdbParser *p, RdbDataType type, RdbHandlersLevel lvl, unsigned int flags) {
-    UNUSED(flags);
+_LIBRDB_API int RDB_handleByLevel(RdbParser *p, RdbDataType type, RdbHandlersLevel lvl) {
     switch (type) {
         case RDB_DATA_TYPE_STRING:
             p->handleTypeObjByLevel[RDB_TYPE_STRING] = lvl;
@@ -553,9 +552,9 @@ _LIBRDB_API void RDB_handleByLevel(RdbParser *p, RdbDataType type, RdbHandlersLe
             p->handleTypeObjByLevel[RDB_OPCODE_FUNCTION2] = lvl;
             break;
         default:
-            assert(0);
+            return 1;
     }
-
+    return 0;
 }
 
 _LIBRDB_API const char *RDB_getLibVersion(int *major, int *minor, int *patch) {
@@ -563,6 +562,10 @@ _LIBRDB_API const char *RDB_getLibVersion(int *major, int *minor, int *patch) {
     if (minor) *minor = LIBRDB_MINOR_VERSION;
     if (patch) *patch = LIBRDB_PATCH_VERSION;
     return LIBRDB_VERSION_STRING;
+}
+
+_LIBRDB_API int RDB_getMaxSuppportRdbVersion(void) {
+    return LIBRDB_SUPPORT_MAX_RDB_VER;
 }
 
 /*** various functions ***/
@@ -574,7 +577,9 @@ static const char *getStatusString(RdbStatus status) {
         case RDB_STATUS_PAUSED: return "PAUSED";
         case RDB_STATUS_ERROR: return "ERROR";
         case RDB_STATUS_ENDED: return "(ENDED)";  /* internal state. (Not part of API) */
-        default: assert(0);
+        default:
+            assert(0);
+            return "INVALID_STATUS!";
     }
 }
 
@@ -653,10 +658,9 @@ static RdbStatus parserMainLoop(RdbParser *p) {
             bulkPoolAssertFlushedDbg(p);
         }
     } else {
-        /* If this loop become too much performance intensive, then we can optimize
-         * certain transitions by avoiding passing through the main loop. It can be
-         * done by flushing the cache with function bulkPoolFlush(), and then make
-         * direct call to next state */
+        /* Certain state transitions doesn't pass through the main loop. It is done
+         * by flushing the cache via function updateElementState(), and then make
+         * direct call or simply pass-through to next state */
         while ((status = peInfo[p->parsingElement].func(p)) == RDB_STATUS_OK);
     }
     return updateStateAfterParse(p, status);
@@ -1199,7 +1203,7 @@ static RdbStatus unzipStreamListpack(RdbParser *p, char *nodekey, unsigned char 
             registerAppBulkForNextCb(p, &embField.binfo);
             registerAppBulkForNextCb(p, &embValue.binfo);
             CALL_HANDLERS_CB(p,
-                             restoreEmbeddedBulk(p, &embField);restoreEmbeddedBulk(p, &embValue);,
+                             restoreEmbeddedBulk(p, &embField);restoreEmbeddedBulk(p, &embValue),
                              RDB_LEVEL_DATA,
                              rdbData.handleStreamItem,
                              &id,
@@ -1229,7 +1233,7 @@ RdbStatus elementRdbHeader(RdbParser *p) {
 
     /* read rdb version */
     p->rdbversion = atoi(((char *) binfo->ref) + 5);
-    if (p->rdbversion < 1 || p->rdbversion > MAX_RDB_VER_SUPPORT) {
+    if (p->rdbversion < 1 || p->rdbversion > LIBRDB_SUPPORT_MAX_RDB_VER) {
         RDB_reportError(p, RDB_ERR_UNSUPPORTED_RDB_VERSION,
                         "Can't handle RDB format version: %d", p->rdbversion);
         return RDB_STATUS_ERROR;

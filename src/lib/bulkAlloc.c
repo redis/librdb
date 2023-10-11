@@ -51,6 +51,7 @@ static inline BulkType bulkUnmanagedResolveAllocType(RdbParser *p, AllocUnmngTyp
 /*** LIB API functions ***/
 
 _LIBRDB_API void RDB_bulkCopyFree(RdbParser *p, RdbBulkCopy b) {
+    if (!b) return;
     switch (p->mem.bulkAllocType) {
         case RDB_BULK_ALLOC_STACK:
             /* fall through - Note that even when bulkAllocType is set to RDB_BULK_ALLOC_STACK,
@@ -293,6 +294,7 @@ int bulkPoolIsNewNextAllocDbg(RdbParser *p) {
 
 void bulkPoolAssertFlushedDbg(RdbParser *p) {
     BulkPool *pool = p->cache;
+    UNUSED(pool); /* if assert() disabled */
     assert(pool->qwrite == pool->queue);
     assert(pool->qread == pool->queue);
 }

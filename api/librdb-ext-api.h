@@ -28,6 +28,7 @@ typedef enum {
     /* rdb2json errors */
     RDBX_ERR_FAILED_OPEN_FILE,
     RDBX_ERR_R2J_INVALID_STATE,
+    RDBX_ERR_R2J_INVALID_LEVEL,
 
     /* HandlersFilterKey errors */
     RDBX_ERR_FILTER_FAILED_COMPILE_REGEX,
@@ -73,7 +74,7 @@ typedef struct RdbxToJsonConf {
     RdbxToJsonEnc encoding;  /* Encoding format for the resulting JSON */
     int includeAuxField;     /* Set to include auxiliary fields in JSON output */
     int includeFunc;         /* Set to include functions in JSON output */
-    int includeStreamMeta;   /* Set to include Stream meatadata in JSON output */
+    int includeStreamMeta;   /* Set to include Stream metadata in JSON output */
     int flatten;             /* Set to create a flattened JSON structure */
 } RdbxToJsonConf;
 

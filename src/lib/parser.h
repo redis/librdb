@@ -77,7 +77,7 @@ static inline void unused(void *dummy, ...) { (void)(dummy);}
  * passing through the parser main loop. When switch compilation LIBRDB_DEBUG is
  * set, DBG_RETURN() enforces return to main loop, and in turn, to print the
  * state transition */
-#if (LIBRDB_DEBUG)
+#ifdef LIBRDB_DEBUG
     #define DBG_RETURN(cmd) return (cmd)
 #else
     #define DBG_RETURN(cmd) cmd

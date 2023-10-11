@@ -33,7 +33,7 @@ example: all
 
 # ------------------------- DEBUG -------------------------------------
 
-noopt:
+debug:
 	OPTIMIZATION="-O0" LIBRDB_DEBUG=1 $(MAKE)
 
 # ------------------------- TEST --------------------------------------
@@ -84,14 +84,16 @@ uninstall:
 help:
 	@echo "librdb (v$(VERSION)) target rules:"
 	@echo "    all        - Build parser libraries, tests, and run tests"
+	@echo "    debug      - Build without compiler optimization and with assert() enabled"
 	@echo "    test       - Run tests with shared lib"
 	@echo "    valgrind   - Run tests with static lib and valgrind"
 	@echo "    example    - Run the example"
 	@echo "    clean      - Clean without deps folders"
 	@echo "    distclean  - Clean including deps folders"
-	@echo "    install    - Build parser libraries and copy to (DESTDIR)\(PREFIX)"
-	@echo "    uninstall  - Remove libraries from (DESTDIR)\(PREFIX)"
+	@echo "    install    - install to (DESTDIR)/(PREFIX)/bin and (DESTDIR)/(PREFIX)/lib"
+	@echo "                 By default PREFIX=/usr/local"
+	@echo "    uninstall  - Remove from (DESTDIR)\(PREFIX)/bin and (DESTDIR)/(PREFIX)/lib"
 	@echo "    help       - Prints this message"
 
 
-.PHONY: all test valgrind example clean distclean install uninstall build_test help version
+.PHONY: all debug test valgrind example clean distclean install uninstall build_test help

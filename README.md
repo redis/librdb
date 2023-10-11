@@ -22,9 +22,15 @@ To build and run tests, you need to have cmocka unit testing framework installed
 
     % make test
 
-Install and run CLI extension of this library. Parse RDB file to json:
+To install into /usr/local/bin and /usr/local/lib, just use:
 
     % make install
+
+You can use `make PREFIX=/some/other/directory install` if you wish to use a
+different destination. 
+
+run CLI extension of this library. Parse RDB file to json:
+
     % rdb-cli mixed_data_types.rdb json
 
     [{
@@ -228,6 +234,7 @@ destruction, or when newer block replacing old one.
     
     FORMAT_OPTIONS ('redis'|'resp'):
             -r, --support-restore         Use the RESTORE command when possible
+            -d, --del-before-write        Delete each key before writing. Relevant for non-empty db
             -t, --target-redis-ver <VER>  Specify the target Redis version. Helps determine which commands can
                                           be applied. Particularly crucial if support-restore being used
                                           as RESTORE is closely tied to specific RDB versions. If versions not
