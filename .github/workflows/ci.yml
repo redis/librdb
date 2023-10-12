@@ -39,7 +39,6 @@ jobs:
           popd
           export LIBRDB_REDIS_FOLDER=~/redis/src
           make test
-          sleep 10000
         working-directory: ${{github.workspace}}
 
       - name: Build and test librdb vs. redis-unstable
