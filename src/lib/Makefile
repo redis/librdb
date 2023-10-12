@@ -26,7 +26,7 @@ DEBUG    = -g3
 LIBS     =
 
 ifeq ($(LIBRDB_DEBUG), 1)
-    CFLAGS += -DLIBRDB_DEBUG=1
+	CFLAGS += -DLIBRDB_DEBUG=1
 else
 	CFLAGS += -DNDEBUG=1
 endif

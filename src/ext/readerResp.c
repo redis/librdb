@@ -11,6 +11,7 @@ static inline void unused(void *dummy, ...) { (void)(dummy);}
 
 #define MAX_RSP_BULK_SIZE 1024*1024
 
+/* This limit doesn't really exist in redis but at client side (hiredis) */
 #define MAX_ARRAY_ELEMENTS ((1LL<<32) - 1)
 
 typedef enum RespReplyType {

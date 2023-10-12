@@ -41,7 +41,7 @@ jobs:
           make test
         working-directory: ${{github.workspace}}
 
-      - name: Build and test librdb vs. redis-unstable
+      - name: Test librdb vs. redis-unstable
         run: |
           pushd ~/redis
           git checkout unstable
@@ -88,7 +88,7 @@ jobs:
           make test
         working-directory: ${{github.workspace}}
 
-      - name: Build and test librdb vs. redis-6.2
+      - name: Test librdb vs. redis-6.2
         run: |
           # clang is more strict to shared-obj versioning. Satisfy its needs.
           pushd ~/redis
@@ -97,7 +97,6 @@ jobs:
           make -C ~/redis/tests/modules
           popd
           export LIBRDB_REDIS_FOLDER=~/redis/src
-          make test
           make clean debug test
         working-directory: ${{github.workspace}}
 

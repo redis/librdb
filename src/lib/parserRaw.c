@@ -162,7 +162,7 @@ RdbStatus elementRawList(RdbParser *p) {
 
         }
 
-        DBG_RETURN(updateElementState(p, ST_RAW_LIST_NEXT_NODE_CALL_STR, 0)); /* fall-thru */
+        updateElementState(p, ST_RAW_LIST_NEXT_NODE_CALL_STR, 0); /* fall-thru */
 
         case ST_RAW_LIST_NEXT_NODE_CALL_STR:
             return subElementCall(p, PE_RAW_STRING, ST_RAW_LIST_NEXT_NODE_STR_RETURN);
@@ -219,7 +219,7 @@ RdbStatus elementRawQuickList(RdbParser *p) {
 
         }
 
-            DBG_RETURN(updateElementState(p, ST_RAW_LIST_NEXT_NODE_CALL_STR, 0)); /* fall-thru */
+            updateElementState(p, ST_RAW_LIST_NEXT_NODE_CALL_STR, 0); /* fall-thru */
 
         case ST_RAW_LIST_NEXT_NODE_CALL_STR: {
             listCtx->container = QUICKLIST_NODE_CONTAINER_PACKED;
@@ -331,7 +331,7 @@ RdbStatus elementRawString(RdbParser *p) {
                 return updateElementState(p, ST_RAW_STRING_PASS_AND_REPLY_CALLER, 0);
         }
 
-            DBG_RETURN(updateElementState(p, ST_RAW_STRING_PASS_CHUNKS, 0)); /* fall-thru */
+            updateElementState(p, ST_RAW_STRING_PASS_CHUNKS, 0); /* fall-thru */
 
         case ST_RAW_STRING_PASS_CHUNKS: {
 
@@ -360,7 +360,7 @@ RdbStatus elementRawString(RdbParser *p) {
                 if (!(strCtx->len))   /* stop condition */
                     return nextParsingElement(p, PE_RAW_END_KEY);
 
-                DBG_RETURN(updateElementState(p, ST_RAW_STRING_PASS_CHUNKS, 0));
+                updateElementState(p, ST_RAW_STRING_PASS_CHUNKS, 0);
             }
         }
 
@@ -466,7 +466,7 @@ RdbStatus elementRawHash(RdbParser *p) {
             IF_NOT_OK_RETURN(cbHandleBegin(p, DATA_SIZE_UNKNOWN_AHEAD));
             IF_NOT_OK_RETURN(aggUpdateWritten(p, headerLen));
         }
-        DBG_RETURN(updateElementState(p, ST_RAW_HASH_READ_NEXT_FIELD_STR, 0)); /* fall-thru */
+        updateElementState(p, ST_RAW_HASH_READ_NEXT_FIELD_STR, 0); /* fall-thru */
 
         case ST_RAW_HASH_READ_NEXT_FIELD_STR:
             /*** ENTER SAFE STATE ***/
@@ -545,7 +545,7 @@ RdbStatus elementRawSet(RdbParser *p) {
             IF_NOT_OK_RETURN(cbHandleBegin(p, DATA_SIZE_UNKNOWN_AHEAD));
             IF_NOT_OK_RETURN(aggUpdateWritten(p, headerLen));
         }
-        DBG_RETURN(updateElementState(p, ST_RAW_SET_NEXT_ITEM_CALL_STR, 0)); /* fall-thru */
+        updateElementState(p, ST_RAW_SET_NEXT_ITEM_CALL_STR, 0); /* fall-thru */
 
         case ST_RAW_SET_NEXT_ITEM_CALL_STR:
             return subElementCall(p, PE_RAW_STRING, ST_RAW_SET_NEXT_ITEM_STR_RETURN);
@@ -676,14 +676,14 @@ RdbStatus elementRawModule(RdbParser *p) {
                     /*** ENTER SAFE STATE ***/
                     IF_NOT_OK_RETURN(cbHandleBegin(p, DATA_SIZE_UNKNOWN_AHEAD));
                     IF_NOT_OK_RETURN(aggUpdateWritten(p, len));
-                    DBG_RETURN(updateElementState(p, ST_NEXT_OPCODE, 0));
+                    updateElementState(p, ST_NEXT_OPCODE, 0);
                     break;
                 }
 
                 /* No new-key precedes module aux. Init Aggregator of bulks here.
                  * Note that the call is made from a safe state */
                 aggAllocFirstBulk(p);
-                DBG_RETURN(updateElementState(p, ST_AUX_START, 0));
+                updateElementState(p, ST_AUX_START, 0);
             } /* fall-thru */
 
             case ST_AUX_START: {
@@ -700,7 +700,7 @@ RdbStatus elementRawModule(RdbParser *p) {
                 /*** ENTER SAFE STATE ***/
                 IF_NOT_OK_RETURN(cbHandleBegin(p, DATA_SIZE_UNKNOWN_AHEAD));
                 IF_NOT_OK_RETURN(aggUpdateWritten(p, len));
-                DBG_RETURN(updateElementState(p, ST_NEXT_OPCODE, 0));
+                updateElementState(p, ST_NEXT_OPCODE, 0);
                 break;
             }
 
@@ -713,7 +713,7 @@ RdbStatus elementRawModule(RdbParser *p) {
                 IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &val, (unsigned char *) rawCtx->at, &len));
                 /*** ENTER SAFE STATE ***/
                 IF_NOT_OK_RETURN(aggUpdateWritten(p, len));
-                DBG_RETURN(updateElementState(p, ST_NEXT_OPCODE, 0));
+                updateElementState(p, ST_NEXT_OPCODE, 0);
                 break;
             }
 
@@ -722,7 +722,7 @@ RdbStatus elementRawModule(RdbParser *p) {
                 IF_NOT_OK_RETURN(rdbLoadFloatValue(p, (float *) rawCtx->at));
                 /*** ENTER SAFE STATE ***/
                 IF_NOT_OK_RETURN(aggUpdateWritten(p, sizeof(float)));
-                DBG_RETURN(updateElementState(p, ST_NEXT_OPCODE, 0));
+                updateElementState(p, ST_NEXT_OPCODE, 0);
                 break;
             }
 
@@ -731,7 +731,7 @@ RdbStatus elementRawModule(RdbParser *p) {
                 IF_NOT_OK_RETURN(rdbLoadBinaryDoubleValue(p, (double *) rawCtx->at));
                 /*** ENTER SAFE STATE ***/
                 IF_NOT_OK_RETURN(aggUpdateWritten(p, sizeof(double)));
-                DBG_RETURN(updateElementState(p, ST_NEXT_OPCODE, 0));
+                updateElementState(p, ST_NEXT_OPCODE, 0);
                 break;
             }
 
@@ -745,7 +745,7 @@ RdbStatus elementRawModule(RdbParser *p) {
                 size_t len;
                 char *dataRet;
                 subElementCallEnd(p, &dataRet, &len);
-                DBG_RETURN(updateElementState(p, ST_NEXT_OPCODE, 1));
+                updateElementState(p, ST_NEXT_OPCODE, 1);
                 break;
             }
 
@@ -760,7 +760,7 @@ RdbStatus elementRawModule(RdbParser *p) {
 
                 if ((int) opcode != RDB_MODULE_OPCODE_EOF) {
                     /* Valid cast. Took care to align opcode with module states */
-                    DBG_RETURN(updateElementState(p, (RAW_MODULE_STATES) opcode, 0));
+                    updateElementState(p, (RAW_MODULE_STATES) opcode, 0);
                     break;
                 }
 
@@ -814,7 +814,7 @@ RdbStatus elementRawStreamLP(RdbParser *p) {
                 IF_NOT_OK_RETURN(cbHandleBegin(p, DATA_SIZE_UNKNOWN_AHEAD));
                 IF_NOT_OK_RETURN(aggUpdateWritten(p, headerLen));
             }
-            DBG_RETURN(updateElementState(p, ST_LOAD_NEXT_LP_IS_MORE, 0)); /* fall-thru */
+            updateElementState(p, ST_LOAD_NEXT_LP_IS_MORE, 0); /* fall-thru */
 
         case ST_LOAD_NEXT_LP_IS_MORE:
             /*** ENTER SAFE STATE ***/
@@ -845,7 +845,7 @@ RdbStatus elementRawStreamLP(RdbParser *p) {
                     return RDB_STATUS_ERROR;
                 }
             }
-            DBG_RETURN(updateElementState(p, ST_LOAD_NEXT_LP_IS_MORE, 1)); /* fall-thru */
+            updateElementState(p, ST_LOAD_NEXT_LP_IS_MORE, 1); /* fall-thru */
 
         case ST_LOAD_METADATA: {
                 uint64_t dummyVal;
@@ -882,7 +882,7 @@ RdbStatus elementRawStreamLP(RdbParser *p) {
 
                 IF_NOT_OK_RETURN(aggUpdateWritten(p, written));
             }
-            DBG_RETURN(updateElementState(p, ST_LOAD_NEXT_CG_IS_MORE, 0)); /* fall-thru */
+            updateElementState(p, ST_LOAD_NEXT_CG_IS_MORE, 0); /* fall-thru */
 
         case ST_LOAD_NEXT_CG_IS_MORE:
             /*** ENTER SAFE STATE (no rdb read)***/
@@ -922,7 +922,7 @@ RdbStatus elementRawStreamLP(RdbParser *p) {
                     return updateElementState(p, ST_LOAD_NUM_CONSUMERS, 0);
             }
 
-            DBG_RETURN(updateElementState(p, ST_LOAD_GLOBAL_PEL, 0)); /* fall-thru */
+            updateElementState(p, ST_LOAD_GLOBAL_PEL, 0); /* fall-thru */
 
         case ST_LOAD_GLOBAL_PEL:
             while (streamCtx->globPelLeft) {
@@ -945,7 +945,7 @@ RdbStatus elementRawStreamLP(RdbParser *p) {
 
                 streamCtx->globPelLeft--;
             }
-            DBG_RETURN(updateElementState(p, ST_LOAD_NUM_CONSUMERS, 0)); /* fall-thru */
+            updateElementState(p, ST_LOAD_NUM_CONSUMERS, 0); /* fall-thru */
 
         case ST_LOAD_NUM_CONSUMERS: {
                 int written = 0;
@@ -956,7 +956,7 @@ RdbStatus elementRawStreamLP(RdbParser *p) {
 
                 IF_NOT_OK_RETURN(aggUpdateWritten(p, written)); /* fall-thru */
             }
-            DBG_RETURN(updateElementState(p, ST_LOAD_NEXT_CONSUMER, 0)); /* fall-thru */
+            updateElementState(p, ST_LOAD_NEXT_CONSUMER, 0); /* fall-thru */
 
         case ST_LOAD_NEXT_CONSUMER:
             /*** ENTER SAFE STATE (no rdb read) ***/

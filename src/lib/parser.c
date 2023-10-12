@@ -1474,7 +1474,7 @@ RdbStatus elementList(RdbParser *p) {
 
             /*** ENTER SAFE STATE ***/
 
-            DBG_RETURN(updateElementState(p, ST_LIST_NEXT_NODE, 0)); /* fall-thru */
+            updateElementState(p, ST_LIST_NEXT_NODE, 0); /* fall-thru */
 
         case ST_LIST_NEXT_NODE:
             while (ctx->list.numNodes) {
@@ -1491,7 +1491,7 @@ RdbStatus elementList(RdbParser *p) {
                 else
                     CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_DATA, rdbData.handleListItem, binfoNode->ref);
 
-                DBG_RETURN(updateElementState(p, ST_LIST_NEXT_NODE, 0));
+                updateElementState(p, ST_LIST_NEXT_NODE, 0);
             }
             return nextParsingElement(p, PE_END_KEY);
 
@@ -1515,7 +1515,7 @@ RdbStatus elementQuickList(RdbParser *p) {
 
             /*** ENTER SAFE STATE ***/
 
-            DBG_RETURN(updateElementState(p, ST_LIST_NEXT_NODE, 0)); /* fall-thru */
+            updateElementState(p, ST_LIST_NEXT_NODE, 0); /* fall-thru */
 
         case ST_LIST_NEXT_NODE:
             while (ctx->list.numNodes) {
@@ -1569,7 +1569,7 @@ RdbStatus elementQuickList(RdbParser *p) {
                     }
                 }
 
-                DBG_RETURN(updateElementState(p, ST_LIST_NEXT_NODE, 0));
+                updateElementState(p, ST_LIST_NEXT_NODE, 0);
             }
             return nextParsingElement(p, PE_END_KEY);
 
@@ -1609,7 +1609,7 @@ RdbStatus elementHash(RdbParser *p) {
 
             /*** ENTER SAFE STATE ***/
 
-            DBG_RETURN(updateElementState(p, ST_HASH_NEXT, 0)); /* fall-thru */
+            updateElementState(p, ST_HASH_NEXT, 0); /* fall-thru */
 
         case ST_HASH_NEXT: {
             BulkInfo *binfoField, *binfoValue;
@@ -1699,7 +1699,7 @@ RdbStatus elementSet(RdbParser *p) {
 
             ctx->set.left = ctx->key.numItemsHint;
 
-            DBG_RETURN(updateElementState(p, ST_SET_NEXT_ITEM, 0)); /* fall-thru */
+            updateElementState(p, ST_SET_NEXT_ITEM, 0); /* fall-thru */
 
         case ST_SET_NEXT_ITEM:
             while(ctx->set.left) {
@@ -1716,7 +1716,7 @@ RdbStatus elementSet(RdbParser *p) {
                 else
                     CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_DATA, rdbData.handleSetMember, binfoItem->ref);
 
-                DBG_RETURN(updateElementState(p, ST_SET_NEXT_ITEM, 0));
+                updateElementState(p, ST_SET_NEXT_ITEM, 0);
             }
             return nextParsingElement(p, PE_END_KEY);
 
@@ -1818,7 +1818,7 @@ RdbStatus elementZset(RdbParser *p) {
 
             ctx->zset.left = ctx->key.numItemsHint;
 
-            DBG_RETURN(updateElementState(p, ST_ZSET_NEXT_ITEM, 0)); /* fall-thru */
+            updateElementState(p, ST_ZSET_NEXT_ITEM, 0); /* fall-thru */
 
         case ST_ZSET_NEXT_ITEM: {
             double score;
@@ -1842,7 +1842,7 @@ RdbStatus elementZset(RdbParser *p) {
                     CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_DATA, rdbData.handleZsetMember, binfoItem->ref, score);
 
                 if (--ctx->zset.left)
-                    DBG_RETURN(updateElementState(p, ST_ZSET_NEXT_ITEM, 0));
+                    updateElementState(p, ST_ZSET_NEXT_ITEM, 0);
                 else
                     return nextParsingElement(p, PE_END_KEY);
             }
@@ -2000,7 +2000,7 @@ RdbStatus elementModule(RdbParser *p) {
                 }
                 /*** ENTER SAFE STATE ***/
                 ctx->module.startBytesRead = p->bytesRead - hdrSize ;
-                DBG_RETURN(updateElementState(p, ST_MODULE_NEXT_OPCODE, 0));
+                updateElementState(p, ST_MODULE_NEXT_OPCODE, 0);
                 break;
             }
             case ST_MODULE_OPCODE_SINT:
@@ -2008,28 +2008,28 @@ RdbStatus elementModule(RdbParser *p) {
                 uint64_t val; /*UNUSED*/
                 IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &val, NULL, NULL));
                 /*** ENTER SAFE STATE ***/
-                DBG_RETURN(updateElementState(p, ST_MODULE_NEXT_OPCODE, 0));
+                updateElementState(p, ST_MODULE_NEXT_OPCODE, 0);
                 break;
             }
             case ST_MODULE_OPCODE_FLOAT: {
                 float val; /*UNUSED*/
                 IF_NOT_OK_RETURN(rdbLoadFloatValue(p, &val));
                 /*** ENTER SAFE STATE ***/
-                DBG_RETURN(updateElementState(p, ST_MODULE_NEXT_OPCODE, 0));
+                updateElementState(p, ST_MODULE_NEXT_OPCODE, 0);
                 break;
             }
             case ST_MODULE_OPCODE_DOUBLE: {
                 double val; /*UNUSED*/
                 IF_NOT_OK_RETURN(rdbLoadBinaryDoubleValue(p, &val));
                 /*** ENTER SAFE STATE ***/
-                DBG_RETURN(updateElementState(p, ST_MODULE_NEXT_OPCODE, 0));
+                updateElementState(p, ST_MODULE_NEXT_OPCODE, 0);
                 break;
             }
             case ST_MODULE_OPCODE_STRING: {
                 BulkInfo *bInfo; /*UNUSED*/
                 IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC, NULL, &bInfo));
                 /*** ENTER SAFE STATE ***/
-                DBG_RETURN(updateElementState(p, ST_MODULE_NEXT_OPCODE, 0));
+                updateElementState(p, ST_MODULE_NEXT_OPCODE, 0);
                 break;
             }
             case ST_MODULE_NEXT_OPCODE: {
@@ -2040,7 +2040,7 @@ RdbStatus elementModule(RdbParser *p) {
 
                 if ((int) opcode != RDB_MODULE_OPCODE_EOF) {
                     /* Valid cast. Took care to align opcode with module states */
-                    DBG_RETURN(updateElementState(p, (int) opcode, 0));
+                    updateElementState(p, (int) opcode, 0);
                     break;
                 }
 
@@ -2154,9 +2154,9 @@ RdbStatus elementStreamLP(RdbParser *p) {
 
                     ctx->stream.numListPacks--;
 
-                    DBG_RETURN(updateElementState(p, ST_LOAD_ALL_LP, 0));
+                    updateElementState(p, ST_LOAD_ALL_LP, 0);
                 }
-                DBG_RETURN(updateElementState(p, ST_LOAD_METADATA, 1)); /* fall-thru */
+                updateElementState(p, ST_LOAD_METADATA, 1); /* fall-thru */
 
             case ST_LOAD_METADATA: {
                     RdbStreamMeta *streamMeta = &ctx->stream.streamMeta;
@@ -2197,7 +2197,7 @@ RdbStatus elementStreamLP(RdbParser *p) {
 
                     CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_DATA, rdbData.handleStreamMetadata, streamMeta);
                 }
-                DBG_RETURN(updateElementState(p, ST_LOAD_NEXT_CONS_GROUP, 0)); /* fall-thru */
+                updateElementState(p, ST_LOAD_NEXT_CONS_GROUP, 0); /* fall-thru */
 
             case ST_LOAD_NEXT_CONS_GROUP: {
                     /* Get the consumer group name and ID. We can then create the consumer
@@ -2230,7 +2230,7 @@ RdbStatus elementStreamLP(RdbParser *p) {
 
                         ctx->stream.cgroupsLeft--;
                 }
-                DBG_RETURN(updateElementState(p, ST_LOAD_GLOBAL_PEL, 0)); /* fall-thru */
+                updateElementState(p, ST_LOAD_GLOBAL_PEL, 0); /* fall-thru */
 
             case ST_LOAD_GLOBAL_PEL:
                 while (p->elmCtx.stream.pelLeft) {
@@ -2246,19 +2246,19 @@ RdbStatus elementStreamLP(RdbParser *p) {
 
                     CALL_HANDLERS_CB(p,NOP, RDB_LEVEL_DATA, rdbData.handleStreamCGroupPendingEntry, pel);
                     p->elmCtx.stream.pelLeft--;
-                    DBG_RETURN(updateElementState(p, ST_LOAD_GLOBAL_PEL, 0));
+                    updateElementState(p, ST_LOAD_GLOBAL_PEL, 0);
                 }
-                DBG_RETURN(updateElementState(p, ST_LOAD_NUM_CONSUMERS, 0)); /* fall-thru */
+                updateElementState(p, ST_LOAD_NUM_CONSUMERS, 0); /* fall-thru */
 
             case ST_LOAD_NUM_CONSUMERS:
                 /* Now that we loaded our global PEL, we need to load the consumers and their local PELs. */
                 IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &(p->elmCtx.stream.consumersLeft), NULL, NULL));
                 /*** ENTER SAFE STATE ***/
-                DBG_RETURN(updateElementState(p, ST_LOAD_NEXT_CONSUMER, 0)); /* fall-thru */
+                updateElementState(p, ST_LOAD_NEXT_CONSUMER, 0); /* fall-thru */
 
             case ST_LOAD_NEXT_CONSUMER:
                 if (p->elmCtx.stream.consumersLeft == 0) {
-                    DBG_RETURN(updateElementState(p, ST_LOAD_NEXT_CONS_GROUP, 0));
+                    updateElementState(p, ST_LOAD_NEXT_CONS_GROUP, 0);
                     break;
                 }
                 BulkInfo *bConsName;
@@ -2286,7 +2286,7 @@ RdbStatus elementStreamLP(RdbParser *p) {
 
                 p->elmCtx.stream.consumersLeft--;
 
-                DBG_RETURN(updateElementState(p, ST_LOAD_NEXT_CONSUMER_PEL, 0)); /* fall-thru */
+                updateElementState(p, ST_LOAD_NEXT_CONSUMER_PEL, 0); /* fall-thru */
 
             case ST_LOAD_NEXT_CONSUMER_PEL:
                 while (p->elmCtx.stream.consumer.pelLeft) {
@@ -2299,12 +2299,12 @@ RdbStatus elementStreamLP(RdbParser *p) {
 
                     CALL_HANDLERS_CB(p,NOP, RDB_LEVEL_DATA, rdbData.handleStreamConsumerPendingEntry, (RdbStreamID *) binfo->ref);
                     p->elmCtx.stream.consumer.pelLeft--;
-                    DBG_RETURN(updateElementState(p, ST_LOAD_NEXT_CONSUMER_PEL, 0));
+                    updateElementState(p, ST_LOAD_NEXT_CONSUMER_PEL, 0);
                 }
                 if (p->elmCtx.stream.consumersLeft)
-                    DBG_RETURN(updateElementState(p, ST_LOAD_NEXT_CONSUMER, 0));
+                    updateElementState(p, ST_LOAD_NEXT_CONSUMER, 0);
                 else
-                    DBG_RETURN(updateElementState(p, ST_LOAD_NEXT_CONS_GROUP, 0));
+                    updateElementState(p, ST_LOAD_NEXT_CONS_GROUP, 0);
                 break;
 
             default:

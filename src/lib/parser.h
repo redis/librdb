@@ -73,16 +73,6 @@ static inline void unused(void *dummy, ...) { (void)(dummy);}
     finalize_cmd; \
   } while (0)
 
-/* To save cycles, some places in code makes direct state-transition without
- * passing through the parser main loop. When switch compilation LIBRDB_DEBUG is
- * set, DBG_RETURN() enforces return to main loop, and in turn, to print the
- * state transition */
-#ifdef LIBRDB_DEBUG
-    #define DBG_RETURN(cmd) return (cmd)
-#else
-    #define DBG_RETURN(cmd) cmd
-#endif
-
 typedef enum BulkType {
     BULK_TYPE_STACK,    /* from stack bulk */
     BULK_TYPE_HEAP,     /* from heap bulk */
