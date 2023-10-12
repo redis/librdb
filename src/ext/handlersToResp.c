@@ -9,6 +9,7 @@
 #include "../../deps/redis/rax.h"
 
 /* RDB opcode defines */
+#define _RDB_TYPE_MODULE_2 7
 #define _RDB_TYPE_STRING 0
 #define _RDB_TYPE_STREAM_LISTPACKS_2 19
 #define _REDISMODULE_AUX_BEFORE_RDB (1<<0)
@@ -871,9 +872,20 @@ static RdbRes toRespRawFragEnd(RdbParser *p, void *userData) {
     if ( (ctx->rawCtx.isModuleAux) && (!ctx->conf.supportRestoreModuleAux))
         return RDB_OK;
 
-    /* Add RDB version 2 bytes */
-    cmd[0] = ctx->srcRdbVer & 0xff;
-    cmd[1] = (ctx->srcRdbVer >> 8) & 0xff;
+    /* Add RDB version 2 bytes. If it is module  */
+
+    if (unlikely(ctx->keyCtx.info.opcode == _RDB_TYPE_MODULE_2)) {
+        /* Module object cannot forwarded to destination as a set of Redis commands.
+         * (Function resolveSupportRestore() enforced the parser to use RESTORE in case
+         * of modules) In order to avoid failure on downgrade when using RESTORE
+         * command, we are using the target rdb version for it */
+        int rdbVer = (ctx->srcRdbVer > ctx->dstRdbVer) ? ctx->dstRdbVer : ctx->srcRdbVer;
+        cmd[0] = rdbVer & 0xff;
+        cmd[1] = (rdbVer >> 8) & 0xff;
+    } else {
+        cmd[0] = ctx->srcRdbVer & 0xff;
+        cmd[1] = (ctx->srcRdbVer >> 8) & 0xff;
+    }
 
     /* Add CRC64 8 bytes */
     *crc = crc64(*crc, (unsigned char *) cmd, 2);
