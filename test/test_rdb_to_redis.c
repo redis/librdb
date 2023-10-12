@@ -22,7 +22,7 @@ void rdb_to_tcp(const char *rdbfile, int pipelineDepth, int isRestore, char *res
 
     RdbxToRespConf rdb2respConf = {
         .supportRestore = isRestore,
-        .dstRedisVersion = "45.67.89",
+        .dstRedisVersion = getTargetRedisVersion(NULL, NULL),
         .supportRestoreModuleAux = isSupportRestoreModuleAux()
     };
 
@@ -92,10 +92,12 @@ static void test_rdb_to_redis_common(const char *rdbfile, int ignoreListOrder, c
         rdb_to_tcp(rdbfile, 1, isRestore, TMP_FOLDER("cmd.resp"));
         sendRedisCmd("SAVE", REDIS_REPLY_STATUS, NULL);
 
-        if (expRespCmd) {
-            /* Verify corresponding RESP commands includes `expRespCmd` or `RESTORE` */
-            char *exp = (isRestore) ?  "RESTORE" : expRespCmd;
-             assert_file_payload(TMP_FOLDER("cmd.resp"), exp, strlen(exp), M_SUBSTR, 1);
+        if (expRespCmd && !isRestore) {
+            /* Verify corresponding RESP commands includes `expRespCmd` */
+             assert_file_payload(TMP_FOLDER("cmd.resp"),
+                                 expRespCmd,
+                                 strlen(expRespCmd),
+                                 M_SUBSTR, 1);
         }
 
         /* 3. From DUMP-RDB generate Json (out2.json) */
@@ -230,6 +232,11 @@ static void test_rdb_to_redis_policy_lru(void **state) {
 
 static void test_rdb_to_redis_function(void **state) {
     UNUSED(state);
+    int major;
+    getTargetRedisVersion(&major, NULL);
+    /* function available since 7.0 */
+    if (major < 7)
+        skip();
     test_rdb_to_redis_common(DUMP_FOLDER("function.rdb"), 1, NULL, NULL);
 }
 
@@ -282,7 +289,7 @@ static void test_rdb_to_redis_del_before_write(void **state) {
         RdbxToRespConf rdb2respConf = {
                 .delKeyBeforeWrite = delKeyBeforeWrite,
                 .supportRestore = 1,
-                .dstRedisVersion = "45.67.89"
+                .dstRedisVersion = getTargetRedisVersion(NULL, NULL),
         };
 
         /* create key `mylist62` that goanna appear as well in the RDB file */

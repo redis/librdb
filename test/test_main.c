@@ -140,7 +140,15 @@ int main(int argc, char *argv[]) {
 
     char *redisInstallFolder = getenv("LIBRDB_REDIS_FOLDER");
 
-    const char *USAGE ="<cmd> [-h|--help] [f|--redis-folder <folder>] [-g|--test-group <group-prefix>] [-t|--test <filter>]";
+    const char *USAGE = "Usage: <cmd> [OPTIONS]\n"
+                        "Options:\n"
+                        "  -h, --help                       Show this help message\n"
+                        "  -f, --redis-folder <folder>      Specify the Redis folder to use for the tests\n"
+                        "  -g, --test-group <group-prefix>  Selected test group to run\n"
+                        "  -t, --test <filter>              Selected test to run";
+
+
+
     /* Parse command-line arguments */
     for (int i = 1; i < argc; i++) {
         if ((strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0)) {

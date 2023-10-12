@@ -14,10 +14,10 @@ jobs:
         with:
           submodules: 'recursive'
 
-      - name: Install Prerequisites
+      - name: Install Prerequisites and clone Redis
         run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake libssl-dev valgrind git
+          apt-get update
+          apt-get install -y cmake libssl-dev valgrind git
           git clone https://git.cryptomilk.org/projects/cmocka.git
           cd cmocka
           mkdir build
@@ -25,19 +25,31 @@ jobs:
           cmake .. -DCMAKE_INSTALL_PREFIX=/usr/local
           make
           ctest
-          sudo make install
-          # Install redis for tests against external Redis server
-                              
-          # Build Redis to run it against librdb tests
+          make install
           git clone https://github.com/redis/redis.git ~/redis
-          make -j 4 -C ~/redis
-          make -C ~/redis/tests/modules
-          
+
         shell: bash
 
-      - name: Build and run project
+      - name: Build and test project vs. redis-unstable
         run: |
+          pushd ~/redis
+          git checkout unstable
+          make -j 4 -C ~/redis
+          make -C ~/redis/tests/modules
+          popd
+          export LIBRDB_REDIS_FOLDER=~/redis/src
           make all example valgrind
+        working-directory: ${{github.workspace}}
+
+      - name: Test project vs. redis-5.0
+        run: |
+          pushd ~/redis
+          git checkout 5.0
+          make distclean
+          make -j 4 -C ~/redis
+          popd
+          export LIBRDB_REDIS_FOLDER=~/redis/src
+          make test
         working-directory: ${{github.workspace}}
 
   build-clang:
@@ -50,33 +62,41 @@ jobs:
         with:
           submodules: 'recursive'
 
-      - name: Install Prerequisites
+      - name: Install Prerequisites and clone Redis
         run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake libssl-dev git
+          apt-get update
+          apt-get install -y cmake libssl-dev git clang
           git clone https://git.cryptomilk.org/projects/cmocka.git
           cd cmocka
           mkdir build
           cd build
           cmake .. -DCMAKE_INSTALL_PREFIX=/usr/local
           make
-          sudo make install
-          # Install redis for tests against external Redis server
-
-          # Build Redis to run it against librdb tests
+          make install
+          
           git clone https://github.com/redis/redis.git ~/redis
-          make -j 4 -C ~/redis
-          make -C ~/redis/tests/modules
-
         shell: bash
 
-      - name: Build and run project
+      - name: Build and test project vs. redis-6.2
         run: |
           # clang is more strict to shared-obj versioning. Satisfy its needs.
-          
-          # Verify that "debug" rule being build and tested
+          pushd ~/redis
+          git checkout 6.2
+          make -j 4 -C ~/redis
+          make -C ~/redis/tests/modules
+          popd
+          export LIBRDB_REDIS_FOLDER=~/redis/src
+          make test
           make clean debug test
-          # Verify that rule "example and "all" being build and tested
-          make clean all test
-          make example
+        working-directory: ${{github.workspace}}
+
+      - name: Test project vs. redis-6.0
+        run: |
+          pushd ~/redis
+          git checkout 6.0
+          make distclean
+          make -j 4 -C ~/redis
+          popd
+          export LIBRDB_REDIS_FOLDER=~/redis/src
+          make test
         working-directory: ${{github.workspace}}

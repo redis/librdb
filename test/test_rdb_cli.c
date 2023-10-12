@@ -144,9 +144,17 @@ static void test_rdb_cli_redis_auth(void **state) {
     runSystemCmd(" ./bin/rdb-cli ./test/dumps/single_key.rdb redis --password abc -p %d  > /dev/null ", getRedisPort());
 
     /* auth user */
-    sendRedisCmd("ACL SETUSER newuser on >newpwd  +@all ~*", REDIS_REPLY_STATUS, NULL);
-    sendRedisCmd("FLUSHALL", REDIS_REPLY_STATUS, NULL);
-    runSystemCmd(" ./bin/rdb-cli ./test/dumps/single_key.rdb redis -P newpwd -u newuser -p %d  > /dev/null ", getRedisPort());
+    int major;
+    getTargetRedisVersion(&major, NULL);
+    /* ACL available since 6.0 */
+    if (major>=6) {
+        sendRedisCmd("ACL SETUSER newuser on >newpwd  +@all ~*",
+                     REDIS_REPLY_STATUS, NULL);
+        sendRedisCmd("FLUSHALL", REDIS_REPLY_STATUS, NULL);
+        runSystemCmd(
+                " ./bin/rdb-cli ./test/dumps/single_key.rdb redis -P newpwd -u newuser -p %d  > /dev/null ",
+                getRedisPort());
+    }
 
     teardownRedisServer();
 }
