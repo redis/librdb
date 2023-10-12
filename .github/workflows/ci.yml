@@ -16,8 +16,8 @@ jobs:
 
       - name: Install Prerequisites and clone Redis
         run: |
-          apt-get update
-          apt-get install -y cmake libssl-dev valgrind git
+          sudo apt-get update
+          sudo apt-get install -y cmake libssl-dev valgrind git
           git clone https://git.cryptomilk.org/projects/cmocka.git
           cd cmocka
           mkdir build
@@ -25,7 +25,7 @@ jobs:
           cmake .. -DCMAKE_INSTALL_PREFIX=/usr/local
           make
           ctest
-          make install
+          sudo make install
           git clone https://github.com/redis/redis.git ~/redis
 
         shell: bash
@@ -64,15 +64,15 @@ jobs:
 
       - name: Install Prerequisites and clone Redis
         run: |
-          apt-get update
-          apt-get install -y cmake libssl-dev git clang
+          sudo apt-get update
+          sudo apt-get install -y cmake libssl-dev git clang
           git clone https://git.cryptomilk.org/projects/cmocka.git
           cd cmocka
           mkdir build
           cd build
           cmake .. -DCMAKE_INSTALL_PREFIX=/usr/local
           make
-          make install
+          sudo make install
           
           git clone https://github.com/redis/redis.git ~/redis
         shell: bash
