@@ -37,8 +37,6 @@ jobs:
 
       - name: Build and run project
         run: |
-          export LIBRDB_REDIS_FOLDER=~/redis/src
-          export LD_LIBRARY_PATH=/usr/local/lib/
           make all example valgrind
         working-directory: ${{github.workspace}}
 
@@ -75,9 +73,6 @@ jobs:
       - name: Build and run project
         run: |
           # clang is more strict to shared-obj versioning. Satisfy its needs.
-          (cd ./deps/hiredis ; ln -s ./libhiredis.so ./libhiredis.so.1.2.1-dev)
-          export LD_LIBRARY_PATH=/usr/local/lib/
-          export LIBRDB_REDIS_FOLDER=~/redis/src
           
           # Verify that "debug" rule being build and tested
           make clean debug test
