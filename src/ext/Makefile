@@ -13,13 +13,14 @@ TARGET_LIB_STATIC_EXT = $(LIB_DIR)/lib$(LIB_NAME_EXT).a
 SOURCES  = $(notdir $(basename $(wildcard *.c)))
 OBJECTS  = $(patsubst %,%.o,$(SOURCES))
 
+
 OPTIMIZATION?=-O3
 LIBRDB_DEBUG?=0
 
 STD      = -std=c99
 STACK    = -fstack-protector-all -Wstack-protector
 WARNS    = -Wall -Wextra -pedantic -Werror
-CFLAGS   = -fPIC $(OPTIMIZATION) $(STD) $(STACK) $(WARNS)
+CFLAGS   = -fPIC $(OPTIMIZATION) $(STD) $(STACK) $(WARNS) -fvisibility=hidden
 DEBUG    = -g3 -DLIBRDB_DEBUG=$(LIBRDB_DEBUG)
 LDFLAGS  =
 LIBS     = -L $(LIB_DIR) -l $(LIB_NAME)
@@ -37,6 +38,7 @@ $(TARGET_LIB_EXT): $(OBJECTS)
 $(TARGET_LIB_STATIC_EXT): $(OBJECTS)
 	ar rcs $@ $^
 
+# Include object file dependencies
 -include $(OBJECTS:.o=.d)
 
 %.o: %.c

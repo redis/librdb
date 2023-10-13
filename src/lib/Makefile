@@ -21,7 +21,7 @@ LIBRDB_DEBUG?=0
 STD      = -std=c99
 STACK    = -fstack-protector-all -Wstack-protector
 WARNS    = -Wall -Wextra -pedantic -Werror
-CFLAGS   = -fPIC $(OPTIMIZATION) $(STD) $(STACK) $(WARNS)
+CFLAGS   = -fPIC $(OPTIMIZATION) $(STD) $(STACK) $(WARNS) -fvisibility=hidden
 DEBUG    = -g3
 LIBS     =
 

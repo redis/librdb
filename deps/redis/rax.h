@@ -32,6 +32,7 @@
 #define RAX_H
 
 #include <stdint.h>
+#include "librdb-hidden-api.h"
 
 /* Representation of a radix tree as implemented in this file, that contains
  * the strings "foo", "foobar" and "footer" after the insertion of each
@@ -186,19 +187,19 @@ typedef struct raxIterator {
 } raxIterator;
 
 /* A special pointer returned for not found items. */
-extern void *raxNotFound;
+_LIBRDB_HIDDEN_API extern void *raxNotFound;
 
 /* Exported API. */
-rax *raxNew(void);
+_LIBRDB_HIDDEN_API rax *raxNew(void);
 int raxInsert(rax *rax, unsigned char *s, size_t len, void *data, void **old);
-int raxTryInsert(rax *rax, unsigned char *s, size_t len, void *data, void **old);
+_LIBRDB_HIDDEN_API int raxTryInsert(rax *rax, unsigned char *s, size_t len, void *data, void **old);
 int raxRemove(rax *rax, unsigned char *s, size_t len, void **old);
-void *raxFind(rax *rax, unsigned char *s, size_t len);
-void raxFree(rax *rax);
+_LIBRDB_HIDDEN_API void *raxFind(rax *rax, unsigned char *s, size_t len);
+_LIBRDB_HIDDEN_API void raxFree(rax *rax);
 void raxFreeWithCallback(rax *rax, void (*free_callback)(void*));
-void raxStart(raxIterator *it, rax *rt);
-int raxSeek(raxIterator *it, const char *op, unsigned char *ele, size_t len);
-int raxNext(raxIterator *it);
+_LIBRDB_HIDDEN_API void raxStart(raxIterator *it, rax *rt);
+_LIBRDB_HIDDEN_API int raxSeek(raxIterator *it, const char *op, unsigned char *ele, size_t len);
+_LIBRDB_HIDDEN_API int raxNext(raxIterator *it);
 int raxPrev(raxIterator *it);
 //int raxRandomWalk(raxIterator *it, size_t steps);
 int raxCompare(raxIterator *iter, const char *op, unsigned char *key, size_t key_len);

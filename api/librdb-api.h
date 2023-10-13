@@ -8,7 +8,7 @@ extern "C" {
 #endif
 
 #ifndef _LIBRDB_API
-#define _LIBRDB_API
+#define _LIBRDB_API __attribute__((visibility("default")))
 #endif
 
 typedef char *RdbBulk;

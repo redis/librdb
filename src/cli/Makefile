@@ -1,8 +1,8 @@
 default: all
 
-LIB_NAME              = rdb
 LIB_DIR               = ../../lib
-LIB_NAME_EXT          = $(LIB_NAME)-ext
+LIB_NAME              = librdb.a
+LIB_NAME_EXT          = librdb-ext.a
 
 # Artifacts:
 TARGET_APP           = rdb-cli
@@ -19,7 +19,7 @@ STACK       = -fstack-protector-all -Wstack-protector
 WARNS       = -Wall -Wextra -pedantic -Werror
 CFLAGS      = -fPIC $(OPTIMIZATION) $(STD) $(STACK) $(WARNS)
 DEBUG       = -g3 -DDEBUG=1
-LIBS        = -L /usr/lib -L $(LIB_DIR) -l $(LIB_NAME) -l $(LIB_NAME_EXT)
+LIBS        = -L /usr/lib -L $(LIB_DIR) -l:$(LIB_NAME_EXT)  -l:$(LIB_NAME)
 
 ifeq ($(BUILD_TLS),yes)
 CFLAGS+=-DUSE_OPENSSL=1
