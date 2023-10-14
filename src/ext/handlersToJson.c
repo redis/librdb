@@ -65,9 +65,7 @@ static void outputPlainEscaping(RdbxToJson *ctx, char *p, size_t len) {
             case '\t': fprintf(ctx->outfile, "\\t"); break;
             case '\b': fprintf(ctx->outfile, "\\b"); break;
             default:
-                /* TODO: formalize rdb2json supported outputs */
-                //fprintf(ctx->outfile, (*p >= 0 && *p <= 0x1f) ? "\\u%04x" : "%c",*p);
-                fprintf(ctx->outfile, (isprint(*p)) ? "%c" : "\\x%02x", (unsigned char)*p);
+                fprintf(ctx->outfile, (isprint(*p)) ? "%c" : "\\u%04x", (unsigned char)*p);
         }
         p++;
     }

@@ -3,4 +3,4 @@
 "ctime":"1690533464",
 "used-mem":"865216",
 "aof-preamble":"0",
-"myhash":"\r99\x00\x00\x002\x00\x00\x00\f\x00\x00\xf2\x02\xf3\x02\xf4\x02\xf5\x02\xf6\x02\xf7\x02\x037.0\x05\x038.0\x05\x04str1\x06\x04str2\x06\x04str3\x06\x04str4\xff"
+"myhash":"\r99\u0000\u0000\u00002\u0000\u0000\u0000\f\u0000\u0000\u00f2\u0002\u00f3\u0002\u00f4\u0002\u00f5\u0002\u00f6\u0002\u00f7\u0002\u00037.0\u0005\u00038.0\u0005\u0004str1\u0006\u0004str2\u0006\u0004str3\u0006\u0004str4\u00ff"

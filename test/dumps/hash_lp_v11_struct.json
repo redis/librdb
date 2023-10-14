@@ -3,5 +3,5 @@
 "ctime":"1695280472",
 "used-mem":"1062024",
 "aof-base":"0",
-"hash2":["V\x00\x00\x00\f\x00\x86field7\x07\x86value7\x07\x86field8\x07\x86value8\x07\t\x01\x86value9\x07\x87field10\b\x87value10\b\x87field11\b\x0b\x01\f\x01\x8412.0\x05\xff"],
-"hash1":[">\x00\x00\x00\n\x00\x86field2\x07\x02\x01\x86field3\x07\x03\x01\x86field4\x07\x88value4.0\t\x86field5\x07\x835.0\x04\x06\x01\x06\x01\xff"]
+"hash2":["V\u0000\u0000\u0000\f\u0000\u0086field7\u0007\u0086value7\u0007\u0086field8\u0007\u0086value8\u0007\t\u0001\u0086value9\u0007\u0087field10\b\u0087value10\b\u0087field11\b\u000b\u0001\f\u0001\u008412.0\u0005\u00ff"],
+"hash1":[">\u0000\u0000\u0000\n\u0000\u0086field2\u0007\u0002\u0001\u0086field3\u0007\u0003\u0001\u0086field4\u0007\u0088value4.0\t\u0086field5\u0007\u00835.0\u0004\u0006\u0001\u0006\u0001\u00ff"]
