@@ -996,7 +996,10 @@ static RdbStatus hashZiplist(RdbParser *p, BulkInfo *ziplistBulk) {
         registerAppBulkForNextCb(p, &embBulk1.binfo);
         registerAppBulkForNextCb(p, &embBulk2.binfo);
         CALL_HANDLERS_CB(p,
-                         restoreEmbeddedBulk(p, &embBulk1); restoreEmbeddedBulk(p, &embBulk2);, /*finalize*/
+                         {  /* Finalization (on either success or failure) */
+                             restoreEmbeddedBulk(p, &embBulk1);
+                             restoreEmbeddedBulk(p, &embBulk2);
+                         },
                          RDB_LEVEL_DATA,
                          rdbData.handleHashField,
                          embBulk1.binfo.ref,
@@ -1048,7 +1051,10 @@ static RdbStatus hashListPack(RdbParser *p, BulkInfo *lpBulk) {
         registerAppBulkForNextCb(p, &embBulk1.binfo);
         registerAppBulkForNextCb(p, &embBulk2.binfo);
         CALL_HANDLERS_CB(p,
-                         restoreEmbeddedBulk(p, &embBulk1); restoreEmbeddedBulk(p, &embBulk2);, /*finalize*/
+                         {  /* Finalization (on either success or failure) */
+                             restoreEmbeddedBulk(p, &embBulk1);
+                             restoreEmbeddedBulk(p, &embBulk2);
+                         },
                          RDB_LEVEL_DATA,
                          rdbData.handleHashField,
                          embBulk1.binfo.ref,
@@ -1088,7 +1094,10 @@ static RdbStatus hashZipMap(RdbParser *p, BulkInfo *zpBulk) {
         registerAppBulkForNextCb(p, &embBulk1.binfo);
         registerAppBulkForNextCb(p, &embBulk2.binfo);
         CALL_HANDLERS_CB(p,
-                         restoreEmbeddedBulk(p, &embBulk1); restoreEmbeddedBulk(p, &embBulk2);, /*finalize*/
+                         {  /* Finalization (on either success or failure) */
+                             restoreEmbeddedBulk(p, &embBulk1);
+                             restoreEmbeddedBulk(p, &embBulk2);
+                         },
                          RDB_LEVEL_DATA,
                          rdbData.handleHashField,
                          embBulk1.binfo.ref,
@@ -1203,7 +1212,10 @@ static RdbStatus unzipStreamListpack(RdbParser *p, char *nodekey, unsigned char 
             registerAppBulkForNextCb(p, &embField.binfo);
             registerAppBulkForNextCb(p, &embValue.binfo);
             CALL_HANDLERS_CB(p,
-                             restoreEmbeddedBulk(p, &embField);restoreEmbeddedBulk(p, &embValue),
+                             {  /* Finalization (on either success or failure) */
+                                 restoreEmbeddedBulk(p, &embField);
+                                 restoreEmbeddedBulk(p, &embValue);
+                             },
                              RDB_LEVEL_DATA,
                              rdbData.handleStreamItem,
                              &id,
