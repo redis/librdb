@@ -6,4 +6,5 @@
 #define LIBRDB_VERSION_STRING "0.0.1"
 
 /* Update Maximum supported RDB version */
-#define LIBRDB_SUPPORT_MAX_RDB_VER 11
+/* TODO: Update librdb to truly support RDB version 12 */
+#define LIBRDB_SUPPORT_MAX_RDB_VER 12
