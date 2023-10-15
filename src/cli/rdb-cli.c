@@ -90,7 +90,7 @@ static void printUsage(int shortUsage) {
     printf("\t-l, --log-file <PATH>         Path to the log file or stdout (Default: './rdb-cli.log')\n\n");
     printf("\tMultiple filters combination of keys/types/dbs can be specified:\n");
     printf("\t-k, --key <REGEX>             Include only keys that match REGEX\n");
-    printf("\t-K  --no-key <REGEX>          Exclude keys that match REGEX\n");
+    printf("\t-K  --no-key <REGEX>          Exclude all keys that match REGEX\n");
     printf("\t-t, --type <TYPE>             Include only selected TYPE {str|list|set|zset|hash|module|func}\n");
     printf("\t-T, --no-type <TYPE>          Exclude TYPE {str|list|set|zset|hash|module|func}\n");
     printf("\t-d, --dbnum <DBNUM>           Include only selected db number\n");
