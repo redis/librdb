@@ -12,27 +12,26 @@ parsing Redis RDB files. It also provides an extension library for parsing to JS
 protocols.
 
 ## Getting Started
-If you just wish to get a basic understanding of the library's functionality, without
-running tests (To see parser internal state printouts, execute the command
-`export LIBRDB_DEBUG_DATA=1` beforehand):
+If you just wish to get a basic understanding of the library's functionality:
 
-    % make all example
+    % make example
+
+To see cool internal state printouts of the parser, set env-var `LIBRDB_DEBUG_DATA` beforehand:
+
+    % export LIBRDB_DEBUG_DATA=1
+    % make example
 
 To build and run tests, you need to have cmocka unit testing framework installed:
 
     % make test
 
-To install into /usr/local/bin and /usr/local/lib, just use:
+To install into /usr/local/:
 
     % make install
 
-You can use `make PREFIX=/some/other/directory install` if you wish to use a
-different destination. 
-
-run CLI extension of this library. Parse RDB file to json:
+To run CLI extension of this library and let it parse RDB file to json:
 
     % rdb-cli mixed_data_types.rdb json
-
     [{
       "my_key":"Hello, Redis!",
       "my_set":["member1","member2"],
@@ -43,30 +42,25 @@ run CLI extension of this library. Parse RDB file to json:
         "entries":[
           { "id":"1695649068107-0", "values":{"message":"Message1"} },
           { "id":"1695649068110-0", "values":{"message":"Message2"} },
-          { "id":"1695649069139-0", "values":{"message":"Message3"} },
-          { "id":"1695649446276-0", "values":{"message":"Message4"} },
-          { "id":"1695649456516-0", "values":{"message":"Message5"} },
           { "id":"1695893015933-0", "values":{"field1":"value1", "field2":"value2", "field3":"value3"} }
       ]}
     }]
 
 
-Run CLI extension to generate RESP commands (this time read file from standard input):
+To generate RESP commands:
 
-    % gzip -dc multiple_lists_strings.rdb.gz | rdb-cli - resp
-    *3
-    $3
-    SET
-    $7
-    string2
+    % rdb-cli multiple_lists_strings.rdb resp
+    *2
+    $6
+    SELECT
+    $1
     ...
 
-Run against live Redis server and upload RDB file (example assumes Redis is installed locally):
+To run against live Redis server and upload RDB file, assuming Redis is installed as well:
 
     % redis-server --port 6379 & 
     % rdb-cli multiple_lists_strings.rdb redis -h 127.0.0.1 -p 6379
     % redis-cli keys "*"
-
     1) "string2"
     2) "mylist3"
     3) "mylist2"
