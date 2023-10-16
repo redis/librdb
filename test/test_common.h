@@ -23,7 +23,7 @@ static inline void unused(void *dummy, ...) { (void)(dummy);}
     do { \
         if (!(exp)) { \
             fprintf(stderr, "Assertion failed: %s\n", #exp); \
-            fprintf(stderr, "Error: " format "\n", ##__VA_ARGS__); \
+            fprintf(stderr, "Error: " format "\n", __VA_ARGS__); \
             assert_true(0); \
         } \
     } while (0)
