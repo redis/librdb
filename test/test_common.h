@@ -19,6 +19,15 @@ static inline void unused(void *dummy, ...) { (void)(dummy);}
 
 #define STR_AND_SIZE(str) str, (sizeof(str)-1)
 
+#define ASSERT_TRUE(exp, format, ...) \
+    do { \
+        if (!(exp)) { \
+            fprintf(stderr, "Assertion failed: %s\n", #exp); \
+            fprintf(stderr, "Error: " format "\n", ##__VA_ARGS__); \
+            assert_true(0); \
+        } \
+    } while (0)
+
 typedef enum MatchType {
     M_PREFIX,
     M_ENTIRE,

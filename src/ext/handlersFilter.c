@@ -272,6 +272,7 @@ static void defaultFilterDataCb(RdbHandlersDataCallbacks *dataCb) {
         NULL,                               /*handleEndRdb*/
         filterNewDb,                        /*handleNewDb*/
         filterDbSize,                       /*handleDbSize*/
+        NULL,                               /*handleSlotInfo*/
         NULL,                               /*handleAuxField*/
         filterNewKey,                       /*handleNewKey*/
         filterEndKey,                       /*handleEndKey*/
@@ -298,6 +299,7 @@ static void defaultFilterStructCb(RdbHandlersStructCallbacks *structCb) {
         NULL,                               /*handleEndRdb*/
         filterNewDb,                        /*handleNewDb*/
         filterDbSize,                       /*handleDbSize*/
+        NULL,                               /*handleSlotInfo*/
         NULL,                               /*handleAuxField*/
         filterNewKey,                       /*handleNewKey*/
         filterEndKey,                       /*handleEndKey*/
@@ -328,6 +330,7 @@ static void defaultFilterRawCb(RdbHandlersRawCallbacks *rawCb) {
         NULL,                               /*handleEndRdb*/
         filterNewDb,                        /*handleNewDb*/
         filterDbSize,                       /*handleDbSize*/
+        NULL,                               /*handleSlotInfo*/
         NULL,                               /*handleAuxField*/
         filterNewKey,                       /*handleNewKey*/
         filterEndKey,                       /*handleEndKey*/

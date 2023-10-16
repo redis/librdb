@@ -441,25 +441,15 @@ static void test_r2j_function (void **state) {
 
 static void test_r2j_module_raw(void **state) {
     UNUSED(state);
-    RdbxToJsonConf r2jConf = {
-        .level = RDB_LEVEL_RAW,
-        .encoding = RDBX_CONV_JSON_ENC_PLAIN,
-        .includeAuxField = 0,
-        .includeFunc = 0,
-        .flatten = 1,
-    };
+    RdbxToJsonConf r2jConf = DEF_CONF(RDB_LEVEL_RAW);
+    r2jConf.includeAuxField = 0;
     testRdbToJsonCommon(DUMP_FOLDER("module.rdb"), DUMP_FOLDER("module_raw.json"), &r2jConf);
 }
 
 static void test_r2j_module_data(void **state) {
     UNUSED(state);
-    RdbxToJsonConf r2jConf = {
-        .level = RDB_LEVEL_DATA,
-        .encoding = RDBX_CONV_JSON_ENC_PLAIN,
-        .includeAuxField = 0,
-        .includeFunc = 0,
-        .flatten = 1,
-    };
+    RdbxToJsonConf r2jConf = DEF_CONF(RDB_LEVEL_DATA);
+    r2jConf.includeAuxField = 0;
     testRdbToJsonCommon(DUMP_FOLDER("module.rdb"), DUMP_FOLDER("module_data.json"), &r2jConf);
 }
 

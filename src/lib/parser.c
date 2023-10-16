@@ -40,6 +40,7 @@ struct ParsingElementInfo peInfo[PE_MAX] = {
         [PE_RDB_HEADER]       = {elementRdbHeader, "elementRdbHeader", "Start parsing RDB header"},
         [PE_NEXT_RDB_TYPE]    = {elementNextRdbType, "elementNextRdbType", "Parsing next RDB type"},
         [PE_AUX_FIELD]        = {elementAuxField, "elementAuxField", "Parsing auxiliary field" },
+        [PE_SLOT_INFO]        = {elementSlotInfo, "elementSlotInfo", "xxxxxxxxxxxxxxxxxxxxxxxxxxxx"},
         [PE_SELECT_DB]        = {elementSelectDb, "elementSelectDb", "Parsing select-db"},
         [PE_RESIZE_DB]        = {elementResizeDb, "elementResizeDb", "Parsing resize-db"},
         [PE_EXPIRETIME]       = {elementExpireTime, "elementExpireTime", "Parsing expire-time"},
@@ -1288,6 +1289,19 @@ RdbStatus elementSelectDb(RdbParser *p) {
     return nextParsingElement(p, PE_NEXT_RDB_TYPE);
 }
 
+RdbStatus elementSlotInfo(RdbParser *p) {
+    RdbSlotInfo info;
+    IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &info.slot_id, NULL, NULL));
+    IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &info.slot_size, NULL, NULL));
+    IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &info.expires_slot_size, NULL, NULL));
+
+    /*** ENTER SAFE STATE ***/
+
+    CALL_COMMON_HANDLERS_CB(p, handleSlotInfo, &info);
+
+    return nextParsingElement(p, PE_NEXT_RDB_TYPE);
+}
+
 RdbStatus elementResizeDb(RdbParser *p) {
     /* RESIZEDB: Hint about the size of the keys in the currently
      * selected data base, in order to avoid useless rehashing. */
@@ -1376,6 +1390,7 @@ RdbStatus elementNextRdbType(RdbParser *p) {
         case RDB_OPCODE_EXPIRETIME_MS:      return nextParsingElement(p, PE_EXPIRETIMEMSEC);
         case RDB_OPCODE_AUX:                return nextParsingElement(p, PE_AUX_FIELD);
         case RDB_OPCODE_SELECTDB:           return nextParsingElement(p, PE_SELECT_DB);
+        case RDB_OPCODE_SLOT_INFO:          return nextParsingElement(p, PE_SLOT_INFO);
         case RDB_OPCODE_RESIZEDB:           return nextParsingElement(p, PE_RESIZE_DB);
         case RDB_OPCODE_FREQ:               return nextParsingElement(p, PE_FREQ);
         case RDB_OPCODE_IDLE:               return nextParsingElement(p, PE_IDLE);

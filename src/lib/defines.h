@@ -36,6 +36,7 @@
 /* NOTE: WHEN ADDING NEW RDB TYPE, UPDATE rdbIsObjectType() BELOW */
 
 /* Special RDB opcodes (saved/loaded with rdbSaveType/rdbLoadType). */
+#define RDB_OPCODE_SLOT_INFO  244   /* Individual slot info, such as slot id and size (cluster mode only). */
 #define RDB_OPCODE_FUNCTION2  245   /* function library data */
 #define RDB_OPCODE_FUNCTION   246   /* old function library data for 7.0 rc1 and rc2 */
 #define RDB_OPCODE_MODULE_AUX 247   /* Module auxiliary data. */

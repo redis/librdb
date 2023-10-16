@@ -146,6 +146,12 @@ typedef struct RdbKeyInfo {
     int opcode;
 } RdbKeyInfo;
 
+typedef struct RdbSlotInfo {
+    uint64_t slot_id;
+    uint64_t slot_size;
+    uint64_t expires_slot_size;
+} RdbSlotInfo;
+
 typedef struct RdbStreamID {
     uint64_t ms;   /* Unix time in milliseconds. */
     uint64_t seq;  /* sequence number */
@@ -198,6 +204,8 @@ typedef void (*RdbLoggerCB) (RdbLogLevel l, const char *msg);
     RdbRes (*handleNewDb)(RdbParser *p, void *userData,  int dbnum);                                          \
     /* Callback per db before the keys, with the key count and the total voletaile key count */               \
     RdbRes (*handleDbSize)(RdbParser *p, void *userData, uint64_t db_size, uint64_t exp_size);                \
+    /* Callback per cluster slot with related info */                                                         \
+    RdbRes (*handleSlotInfo)(RdbParser *p, void *userData, RdbSlotInfo *info);                                \
     /* Callback in the beginning of the RDB with various keys and values. exists since redis 3.2 (RDB v7) */  \
     RdbRes (*handleAuxField)(RdbParser *p, void *userData, RdbBulk auxkey, RdbBulk auxval);                   \
     /* Callback on each new key along with additional info, such as, expire-time, LRU, etc. */                \

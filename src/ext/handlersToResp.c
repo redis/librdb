@@ -25,7 +25,7 @@ typedef struct RedisToRdbVersion {
 } RedisToRdbVersion;
 
 const RedisToRdbVersion redisToRdbVersion[] = {
-        {"7.2", VER_VAL(7,2), 12}, // TODO: Truly support 12 and update released redis version.
+        {"99.99", VER_VAL(8,0), 12}, // TODO: Update released version
         {"7.2", VER_VAL(7,2), 11},
         {"7.0", VER_VAL(7,0), 10},
         {"5.0", VER_VAL(5,0), 9}, //6 and 6.2 had v9 too
@@ -949,8 +949,9 @@ _LIBRDB_API RdbxToResp *RDBX_createHandlersToResp(RdbParser *p, RdbxToRespConf *
             toRespStartRdb,
             toRespEndRdb,
             toRespNewDb,
-            NULL,
-            NULL,
+            NULL, /*db-size*/
+            NULL, /*slot-info*/
+            NULL, /*aux-field*/
             toRespNewKey,
             toRespEndKey,
             toRespString,
@@ -959,7 +960,7 @@ _LIBRDB_API RdbxToResp *RDBX_createHandlersToResp(RdbParser *p, RdbxToRespConf *
             toRespSet,
             toRespZset,
             toRespFunction,
-            NULL,
+            NULL, /*module*/
             toRespStreamMetaData,
             toRespStreamItem,
             toRespStreamNewCGroup,
@@ -978,7 +979,7 @@ _LIBRDB_API RdbxToResp *RDBX_createHandlersToResp(RdbParser *p, RdbxToRespConf *
             NULL,
             NULL,
             NULL,
-
+            NULL,
             toRespNewKey,
             toRespEndKey,
             toRespRestoreBeginModuleAux,

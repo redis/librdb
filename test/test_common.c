@@ -517,10 +517,10 @@ void assert_json_equal(const char* filename1, const char* filename2, int ignoreL
     int res = -1;
 
     FILE* file1 = fopen(filename1, "r");
-    assert_non_null(file1);
+    ASSERT_TRUE(file1, "Failed to open file: %s", filename1);
 
     FILE* file2 = fopen(filename2, "r");
-    assert_non_null(file2);
+    ASSERT_TRUE(file2, "Failed to open file: %s", filename2);
 
     while (fgets(line1, MAX_LINE_LENGTH, file1)) {
         sanitize_json_line(line1);

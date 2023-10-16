@@ -117,6 +117,7 @@ typedef enum ParsingElementType {
     PE_NEXT_RDB_TYPE,
     PE_AUX_FIELD,
     PE_SELECT_DB,
+    PE_SLOT_INFO,
     PE_RESIZE_DB,
     PE_EXPIRETIME,
     PE_EXPIRETIMEMSEC,
@@ -507,6 +508,7 @@ RdbStatus elementRdbHeader(RdbParser *p);
 RdbStatus elementNextRdbType(RdbParser *p);
 RdbStatus elementAuxField(RdbParser *p);
 RdbStatus elementSelectDb(RdbParser *p);
+RdbStatus elementSlotInfo(RdbParser *p);
 RdbStatus elementResizeDb(RdbParser *p);
 RdbStatus elementExpireTime(RdbParser *p);
 RdbStatus elementExpireTimeMsec(RdbParser *p);

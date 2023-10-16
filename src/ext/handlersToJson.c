@@ -638,6 +638,7 @@ RdbxToJson *RDBX_createHandlersToJson(RdbParser *p, const char *filename, RdbxTo
                 toJsonNewDb,
                 NULL, /* handleResizeDb */
                 NULL,
+                NULL,
                 toJsonNewKey,
                 toJsonEndKey,
                 toJsonString,
@@ -677,6 +678,7 @@ RdbxToJson *RDBX_createHandlersToJson(RdbParser *p, const char *filename, RdbxTo
                 toJsonEndRdb,
                 toJsonNewDb,
                 NULL, /* handleResizeDb */
+                NULL,
                 NULL,
                 toJsonNewKey,
                 toJsonEndKey,
@@ -720,6 +722,7 @@ RdbxToJson *RDBX_createHandlersToJson(RdbParser *p, const char *filename, RdbxTo
                 toJsonEndRdb,
                 toJsonNewDb,
                 NULL, /* handleResizeDb */
+                NULL,
                 NULL,
                 toJsonNewKey,
                 toJsonEndKey,
