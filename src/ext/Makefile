@@ -13,6 +13,11 @@ TARGET_LIB_STATIC_EXT = $(LIB_DIR)/lib$(LIB_NAME_EXT).a
 SOURCES  = $(notdir $(basename $(wildcard *.c)))
 OBJECTS  = $(patsubst %,%.o,$(SOURCES))
 
+# Source files in deps/redis directory. For now, librdb.so and librdb-ext.so,
+# each will have its own copy. Take care not to pass Redis structs  from one lib
+# to another!
+REDIS_SOURCES = $(notdir $(basename $(wildcard ../../deps/redis/*.c)))
+REDIS_OBJECTS = $(patsubst %,../../deps/redis/%.o,$(REDIS_SOURCES))
 
 OPTIMIZATION?=-O3
 LIBRDB_DEBUG?=0
@@ -32,14 +37,14 @@ endif
 all: $(TARGET_LIB_EXT) $(TARGET_LIB_STATIC_EXT)
 	@echo "Done.";
 
-$(TARGET_LIB_EXT): $(OBJECTS)
+$(TARGET_LIB_EXT): $(OBJECTS) $(REDIS_OBJECTS)
 	$(CC) -o $@ -shared ${LDFLAGS} $^  $(LIBS)
 
-$(TARGET_LIB_STATIC_EXT): $(OBJECTS)
+$(TARGET_LIB_STATIC_EXT): $(OBJECTS) $(REDIS_OBJECTS)
 	ar rcs $@ $^
 
 # Include object file dependencies
--include $(OBJECTS:.o=.d)
+-include $(OBJECTS:.o=.d) $(REDIS_OBJECTS:.o=.d)
 
 %.o: %.c
 	$(CC) $(CFLAGS) -c $*.c -o $*.o $(DEBUG)

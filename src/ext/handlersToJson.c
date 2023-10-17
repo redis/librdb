@@ -7,7 +7,6 @@
 
 struct RdbxToJson;
 
-
 #define _STDOUT_STR "<stdout>"
 
 typedef enum

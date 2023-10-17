@@ -142,28 +142,6 @@ static void deleteRdbToRespCtx(RdbParser *p, void *context) {
     RDB_free(p, ctx);
 }
 
-/* Example:: Input: length=123  return: buf="\r\n$123\r\n" */
-static void iov_length(struct iovec *iov, long long length, char *buf, int bufsize) {
-    int len = 0;
-    buf[0] = '\r';
-    buf[1] = '\n';
-    buf[2] = '$';
-    len = ll2string(buf+3, bufsize-5, length);
-    buf[len + 3] = '\r';
-    buf[len + 4] = '\n';
-    iov_plain(iov, buf, len+5);
-}
-
-/* For value 123 the function will return in buf: "123\r\n" */
-int iov_value(struct iovec *iov, long long value, char *buf, int bufsize) {
-    int len = 0;
-    len = ll2string(buf, bufsize-2, value); /* -2 for: 'r' and '\n' */
-    buf[len] = '\r';
-    buf[len+1] = '\n';
-    iov_plain(iov, buf, len+2);
-    return len;
-}
-
 static int setRdbVerFromDestRedisVer(RdbxToResp *ctx) {
 
     const char *ver = ctx->conf.dstRedisVersion;
@@ -725,8 +703,7 @@ static RdbRes toRespStreamCGroupPendingEntry(RdbParser *p, void *userData, RdbSt
 
     memcpy(pe, pendingEntry, sizeof(RdbStreamPendingEntry));
 
-    if (!raxTryInsert(ctx->streamCtx.groupPel, (unsigned char *) &(pe->id),
-                      sizeof(pe->id), pe, NULL))
+    if (!raxTryInsert(ctx->streamCtx.groupPel, (unsigned char *) &(pe->id), sizeof(pe->id), pe, NULL))
         return (RdbRes) RDBX_ERR_STREAM_DUPLICATE_PEL;
 
     return RDB_OK;
@@ -930,6 +907,12 @@ static RdbRes toRespRestoreFragEnd(RdbParser *p, void *userData) {
 
 _LIBRDB_API RdbxToResp *RDBX_createHandlersToResp(RdbParser *p, RdbxToRespConf *conf) {
     RdbxToResp *ctx;
+    static int crcInitalized = 0;
+
+    if (!crcInitalized) {
+        ++crcInitalized;
+        crc64_init();
+    }
 
     /* Verify table is aligned with LIBRDB_SUPPORT_MAX_RDB_VER */
     assert(redisToRdbVersion[0].rdb == RDB_getMaxSuppportRdbVersion());

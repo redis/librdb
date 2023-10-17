@@ -11,7 +11,9 @@ TARGET_LIB_STATIC     = $(LIB_DIR)/lib$(LIB_NAME).a
 SOURCES  = $(notdir $(basename $(wildcard *.c)))
 OBJECTS  = $(patsubst %,%.o,$(SOURCES))
 
-# Source files in deps/redis directory
+# Source files in deps/redis directory. For now, librdb.so and librdb-ext.so,
+# each will have its own copy. Take care not to pass Redis structs  from one lib
+# to another!
 REDIS_SOURCES = $(notdir $(basename $(wildcard ../../deps/redis/*.c)))
 REDIS_OBJECTS = $(patsubst %,../../deps/redis/%.o,$(REDIS_SOURCES))
 

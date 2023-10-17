@@ -19,6 +19,8 @@ static inline void unused(void *dummy, ...) { (void)(dummy);}
 #define unlikely(x)     (x)
 #endif
 
+#define IF_NOT_OK_RETURN(cmd) do {RdbRes s; s = cmd; if (unlikely(s!=RDB_OK)) return s;} while (0)
+
 /*** IOVEC manipulation ***/
 // INPUT: str="ABC"         OUTPUT: iov={ "ABC" , 3 }
 #define IOV_CONST(iov, str)       iov_plain(iov, str, sizeof(str)-1)
@@ -41,11 +43,11 @@ static inline void unused(void *dummy, ...) { (void)(dummy);}
 
 int iov_value(struct iovec *iov, long long count, char *buf, int bufsize);
 
+void iov_length(struct iovec *iov, long long length, char *buf, int bufsize);
+
 static inline void iov_plain(struct iovec *iov, const char *s, size_t l) {
     iov->iov_base = (void *) s;
     iov->iov_len = l;
 }
-
-#define IF_NOT_OK_RETURN(cmd) do {RdbRes s; s = cmd; if (unlikely(s!=RDB_OK)) return s;} while (0)
 
 #endif /*define RDBX_COMMON_H*/
