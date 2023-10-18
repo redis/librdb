@@ -907,12 +907,8 @@ static RdbRes toRespRestoreFragEnd(RdbParser *p, void *userData) {
 
 _LIBRDB_API RdbxToResp *RDBX_createHandlersToResp(RdbParser *p, RdbxToRespConf *conf) {
     RdbxToResp *ctx;
-    static int crcInitalized = 0;
 
-    if (!crcInitalized) {
-        ++crcInitalized;
-        crc64_init();
-    }
+    crc64_init_thread_safe();
 
     /* Verify table is aligned with LIBRDB_SUPPORT_MAX_RDB_VER */
     assert(redisToRdbVersion[0].rdb == RDB_getMaxSuppportRdbVersion());

@@ -740,15 +740,11 @@ static void resolveMultipleLevelsRegistration(RdbParser *p) {
 }
 
 static RdbStatus finalizeConfig(RdbParser *p, int isParseFromBuff) {
-    static int is_crc_init = 0;
     assert(p->state == RDB_STATE_CONFIGURING);
 
     RDB_log(p, RDB_LOG_INF, "Finalizing parser configuration");
 
-    if (!is_crc_init) {
-        crc64_init();
-        is_crc_init = 1;
-    }
+    crc64_init_thread_safe();
 
     if ((p->debugData = getEnvVar(ENV_VAR_DEBUG_DATA, 0)) != 0) {
         RDB_setLogLevel(p, RDB_LOG_DBG);

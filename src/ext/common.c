@@ -1,9 +1,4 @@
 #include "common.h"
-
-
-#include <stdio.h>
-#include <pthread.h>
-#include "../../deps/redis/rax.h"
 #include "../../deps/redis/util.h"
 
 /* Example:: Input: length=123  return: buf="\r\n$123\r\n" */
@@ -27,4 +22,3 @@ int iov_value(struct iovec *iov, long long value, char *buf, int bufsize) {
     iov_plain(iov, buf, len+2);
     return len;
 }
-
