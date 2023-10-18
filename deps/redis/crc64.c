@@ -126,14 +126,13 @@ uint64_t crc64(uint64_t crc, const unsigned char *s, uint64_t l) {
 void crc64_init_thread_safe(void) {
     static int crcInitalized = 0;
     static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+
+    pthread_mutex_lock(&mutex);
     if (!crcInitalized) {
-        pthread_mutex_lock(&mutex);
-        if (!crcInitalized) {
-            crc64_init();
-            crcInitalized = 1;
-        }
-        pthread_mutex_unlock(&mutex);
+        crc64_init();
+        crcInitalized = 1;
     }
+    pthread_mutex_unlock(&mutex);
 }
 
 /* Test main */
