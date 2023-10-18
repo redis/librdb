@@ -14,7 +14,7 @@ jobs:
         with:
           submodules: 'recursive'
 
-      - name: Install Prerequisites
+      - name: Install Prerequisites and clone Redis
         run: |
           sudo apt-get update
           sudo apt-get install -y cmake libssl-dev valgrind git
@@ -26,20 +26,30 @@ jobs:
           make
           ctest
           sudo make install
-          # Install redis for tests against external Redis server
-                              
-          # Build Redis to run it against librdb tests
           git clone https://github.com/redis/redis.git ~/redis
-          make -j 4 -C ~/redis
-          make -C ~/redis/tests/modules
-          
+
         shell: bash
 
-      - name: Build and run project
+      - name: Test librdb vs. redis-5.0
         run: |
+          pushd ~/redis
+          git checkout 5.0
+          make distclean
+          make -j 4 -C ~/redis
+          popd
           export LIBRDB_REDIS_FOLDER=~/redis/src
-          export LD_LIBRARY_PATH=/usr/local/lib/
-          make all valgrind
+          make test
+        working-directory: ${{github.workspace}}
+
+      - name: Test librdb vs. redis-unstable
+        run: |
+          pushd ~/redis
+          git checkout unstable
+          make -j 4 -C ~/redis
+          make -C ~/redis/tests/modules
+          popd
+          export LIBRDB_REDIS_FOLDER=~/redis/src
+          make all example valgrind
         working-directory: ${{github.workspace}}
 
   build-clang:
@@ -52,10 +62,10 @@ jobs:
         with:
           submodules: 'recursive'
 
-      - name: Install Prerequisites
+      - name: Install Prerequisites and clone Redis
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake libssl-dev git
+          sudo apt-get install -y cmake libssl-dev git clang
           git clone https://git.cryptomilk.org/projects/cmocka.git
           cd cmocka
           mkdir build
@@ -63,20 +73,30 @@ jobs:
           cmake .. -DCMAKE_INSTALL_PREFIX=/usr/local
           make
           sudo make install
-          # Install redis for tests against external Redis server
-
-          # Build Redis to run it against librdb tests
+          
           git clone https://github.com/redis/redis.git ~/redis
-          make -j 4 -C ~/redis
-          make -C ~/redis/tests/modules
-
         shell: bash
 
-      - name: Build and run project
+      - name: Test librdb vs. redis-6.0
+        run: |
+          pushd ~/redis
+          git checkout 6.0
+          make distclean
+          make -j 4 -C ~/redis
+          popd
+          export LIBRDB_REDIS_FOLDER=~/redis/src
+          make test
+        working-directory: ${{github.workspace}}
+
+      - name: Test librdb vs. redis-6.2
         run: |
           # clang is more strict to shared-obj versioning. Satisfy its needs.
-          (cd ./deps/hiredis ; ln -s ./libhiredis.so ./libhiredis.so.1.2.1-dev)
-          export LD_LIBRARY_PATH=/usr/local/lib/
+          pushd ~/redis
+          git checkout 6.2
+          make -j 4 -C ~/redis
+          make -C ~/redis/tests/modules
+          popd
           export LIBRDB_REDIS_FOLDER=~/redis/src
-          make all test
+          make clean debug test
         working-directory: ${{github.workspace}}
+

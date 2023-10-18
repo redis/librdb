@@ -11,18 +11,27 @@ TARGET_LIB_STATIC     = $(LIB_DIR)/lib$(LIB_NAME).a
 SOURCES  = $(notdir $(basename $(wildcard *.c)))
 OBJECTS  = $(patsubst %,%.o,$(SOURCES))
 
-# Source files in deps/redis directory
+# Source files in deps/redis directory. For now, librdb.so and librdb-ext.so,
+# each will have its own copy. Take care not to pass Redis structs  from one lib
+# to another!
 REDIS_SOURCES = $(notdir $(basename $(wildcard ../../deps/redis/*.c)))
 REDIS_OBJECTS = $(patsubst %,../../deps/redis/%.o,$(REDIS_SOURCES))
 
-EXTERN_RP_CONFIG=
+OPTIMIZATION?=-O3
+LIBRDB_DEBUG?=0
 
 STD      = -std=c99
 STACK    = -fstack-protector-all -Wstack-protector
 WARNS    = -Wall -Wextra -pedantic -Werror
-CFLAGS   = -fPIC -O3 $(STD) $(STACK) $(WARNS) $(EXTERN_RP_CONFIG)
-DEBUG    = -g3 -DDEBUG=1
+CFLAGS   = -fPIC $(OPTIMIZATION) $(STD) $(STACK) $(WARNS) -fvisibility=hidden
+DEBUG    = -g3
 LIBS     =
+
+ifeq ($(LIBRDB_DEBUG), 1)
+	CFLAGS += -DLIBRDB_DEBUG=1
+else
+	CFLAGS += -DNDEBUG=1
+endif
 
 ######################################### RULES #######################################
 all: $(TARGET_LIB) $(TARGET_LIB_STATIC)

@@ -3,6 +3,7 @@ default: all
 LIB_NAME              = rdb
 LIB_DIR               = ../lib
 LIB_NAME_EXT          = $(LIB_NAME)-ext
+LIBHIREDIS=../deps/hiredis/libhiredis.a
 
 # Artifacts:
 TARGET_TEST           = test_lib
@@ -16,13 +17,12 @@ STD         = -std=c99
 STACK       = -fstack-protector-all -Wstack-protector
 WARNS       = -Wall -Wextra -pedantic -Werror -Wno-unused-function
 
-CFLAGS      = -fPIC -O3 $(STD) $(STACK) $(WARNS)
+OPTIMIZATION?=-O3
+
+CFLAGS      = -fPIC $(OPTIMIZATION) $(STD) $(STACK) $(WARNS)
 DEBUG       = -g3 -DDEBUG=1
-LIBS        = -l cmocka -L /usr/lib -L $(LIB_DIR) -l $(LIB_NAME) -l $(LIB_NAME_EXT) -L../deps/hiredis -lhiredis
-LIBS_STATIC = -l cmocka -L /usr/lib -L $(LIB_DIR) -l:lib$(LIB_NAME_EXT).a -L../deps/hiredis -lhiredis
-
-LIBHIREDIS=../deps/hiredis/libhiredis.a
-
+LIBS        = -l cmocka -L /usr/lib -L $(LIB_DIR) -l $(LIB_NAME) -l $(LIB_NAME_EXT) -l:$(LIBHIREDIS)
+LIBS_STATIC = -l cmocka -L /usr/lib -L $(LIB_DIR) -l:lib$(LIB_NAME_EXT).a -l:$(LIBHIREDIS)
 
 ifeq ($(BUILD_TLS),yes)
 CFLAGS+=-DUSE_OPENSSL=1
@@ -34,10 +34,10 @@ all: $(TARGET_TEST) $(TARGET_TEST_STATIC)
 	@echo "Done.";
 
 $(TARGET_TEST): $(OBJECTS)
-	$(CC) $(OBJECTS) -o $@ $(LIBHIREDIS) $(DEBUG) $(CFLAGS) $(LIBS)
+	$(CC) $(OBJECTS) -o $@ $(DEBUG) $(CFLAGS) $(LIBS)
 
 $(TARGET_TEST_STATIC): $(OBJECTS)
-	$(CC) $(OBJECTS) -o $@ $(LIBHIREDIS) $(DEBUG) $(CFLAGS) $(LIBS) $(LIBS_STATIC)
+	$(CC) $(OBJECTS) -o $@ $(DEBUG) $(CFLAGS) $(LIBS) $(LIBS_STATIC)
 
 -include $(OBJECTS:.o=.d)
 

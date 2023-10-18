@@ -11,6 +11,7 @@
         .includeAuxField = 1,                  \
         .includeFunc = 0,                      \
         .flatten = 1,                          \
+        .includeStreamMeta = 0,                \
     };
 
 /* Test different use cases to convert given rdb file to json:
@@ -37,7 +38,7 @@ void testRdbToJsonCommon(const char *rdbfile,
         RdbMemAlloc *pMemAlloc = (type != RDB_BULK_ALLOC_MAX) ? &memAlloc : NULL;
 
         /* read file to buffer for testing RDB_parseBuff() */
-        buffer = (unsigned char *) readFile(rdbfile, &bufLen);
+        buffer = (unsigned char *) readFile(rdbfile, &bufLen, NULL);
 
         /*** 1. RDB_parse - parse with RDB reader ***/
         remove(jsonfile);
@@ -440,25 +441,15 @@ static void test_r2j_function (void **state) {
 
 static void test_r2j_module_raw(void **state) {
     UNUSED(state);
-    RdbxToJsonConf r2jConf = {
-        .level = RDB_LEVEL_RAW,
-        .encoding = RDBX_CONV_JSON_ENC_PLAIN,
-        .includeAuxField = 0,
-        .includeFunc = 0,
-        .flatten = 1,
-    };
+    RdbxToJsonConf r2jConf = DEF_CONF(RDB_LEVEL_RAW);
+    r2jConf.includeAuxField = 0;
     testRdbToJsonCommon(DUMP_FOLDER("module.rdb"), DUMP_FOLDER("module_raw.json"), &r2jConf);
 }
 
 static void test_r2j_module_data(void **state) {
     UNUSED(state);
-    RdbxToJsonConf r2jConf = {
-        .level = RDB_LEVEL_DATA,
-        .encoding = RDBX_CONV_JSON_ENC_PLAIN,
-        .includeAuxField = 0,
-        .includeFunc = 0,
-        .flatten = 1,
-    };
+    RdbxToJsonConf r2jConf = DEF_CONF(RDB_LEVEL_DATA);
+    r2jConf.includeAuxField = 0;
     testRdbToJsonCommon(DUMP_FOLDER("module.rdb"), DUMP_FOLDER("module_data.json"), &r2jConf);
 }
 
@@ -475,6 +466,17 @@ static void test_r2j_string_int_encoded(void **state) {
     r2jConf.includeAuxField = 0;
     testRdbToJsonCommon(DUMP_FOLDER("string_int_encoded.rdb"), DUMP_FOLDER("string_int_encoded.json"), &r2jConf);
 }
+
+static void test_r2j_stream_data(void **state) {
+    UNUSED(state);
+    RdbxToJsonConf r2jConf = DEF_CONF(RDB_LEVEL_DATA);
+    r2jConf.includeAuxField = 0;
+    r2jConf.flatten = 1;
+    testRdbToJsonCommon(DUMP_FOLDER("stream_v11.rdb"), DUMP_FOLDER("stream_data.json"), &r2jConf);
+    r2jConf.includeStreamMeta = 1;
+    testRdbToJsonCommon(DUMP_FOLDER("stream_v11.rdb"), DUMP_FOLDER("stream_data_with_meta.json"), &r2jConf);
+}
+
 /*************************** group_rdb_to_json *******************************/
 int group_rdb_to_json(void) {
     const struct CMUnitTest tests[] = {
@@ -548,6 +550,9 @@ int group_rdb_to_json(void) {
         cmocka_unit_test(test_r2j_module_data),
         cmocka_unit_test(test_r2j_module_raw),
         cmocka_unit_test(test_r2j_module_aux_data),
+
+        /* stream */
+         cmocka_unit_test(test_r2j_stream_data),
 
         /* misc */
         cmocka_unit_test(test_r2j_multiple_lists_and_strings_data),

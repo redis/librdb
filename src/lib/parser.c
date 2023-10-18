@@ -24,13 +24,14 @@
 #include "parser.h"
 #include "version.h"
 #include "defines.h"
-#include "../../deps/redis/endianconv.h"
 #include "../../deps/redis/util.h"
+#include "../../deps/redis/endianconv.h"
 #include "../../deps/redis/listpack.h"
 #include "../../deps/redis/ziplist.h"
 #include "../../deps/redis/zipmap.h"
 #include "../../deps/redis/intset.h"
 #include "../../deps/redis/lzf.h"
+#include "../../deps/redis/stream.h"
 #include "../../deps/redis/t_zset.h"
 
 #define DONE_FILL_BULK SIZE_MAX
@@ -39,6 +40,7 @@ struct ParsingElementInfo peInfo[PE_MAX] = {
         [PE_RDB_HEADER]       = {elementRdbHeader, "elementRdbHeader", "Start parsing RDB header"},
         [PE_NEXT_RDB_TYPE]    = {elementNextRdbType, "elementNextRdbType", "Parsing next RDB type"},
         [PE_AUX_FIELD]        = {elementAuxField, "elementAuxField", "Parsing auxiliary field" },
+        [PE_SLOT_INFO]        = {elementSlotInfo, "elementSlotInfo", "Parse cluster slot info"},
         [PE_SELECT_DB]        = {elementSelectDb, "elementSelectDb", "Parsing select-db"},
         [PE_RESIZE_DB]        = {elementResizeDb, "elementResizeDb", "Parsing resize-db"},
         [PE_EXPIRETIME]       = {elementExpireTime, "elementExpireTime", "Parsing expire-time"},
@@ -72,11 +74,13 @@ struct ParsingElementInfo peInfo[PE_MAX] = {
         [PE_ZSET_2]           = {elementZset, "elementZset", "Parsing zset_2"},
         [PE_ZSET_ZL]          = {elementZsetZL, "elementZsetZL", "Parsing zset Ziplist"},
         [PE_ZSET_LP]          = {elementZsetLP, "elementZsetLP", "Parsing zset Listpack"},
-        /* func */
+        /* function */
         [PE_FUNCTION]         = {elementFunction, "elementFunction", "Parsing Function"},
         /* module */
         [PE_MODULE]           = {elementModule, "elementModule", "Parsing silently Module element"},
         [PE_MODULE_AUX]       = {elementModule, "elementModule", "Parsing silently Module Auxiliary data"},
+        /* stream */
+        [PE_STREAM_LP]        = {elementStreamLP, "elementStreamLP", "Parsing stream Listpack"},
 
         /*** parsing raw data (RDB_LEVEL_RAW) ***/
 
@@ -106,6 +110,8 @@ struct ParsingElementInfo peInfo[PE_MAX] = {
         /* module */
         [PE_RAW_MODULE]       = {elementRawModule, "elementRawModule", "Parsing raw Module element"},
         [PE_RAW_MODULE_AUX]   = {elementRawModule, "elementRawModule(aux)", "Parsing Module Auxiliary data"},
+        /* stream */
+        [PE_RAW_STREAM_LP]    = {elementRawStreamLP, "elementRawStreamLP", "Parsing raw stream Listpack"},
 };
 
 /* Strings in ziplist/listpacks are embedded without '\0' termination. To avoid
@@ -506,8 +512,7 @@ _LIBRDB_API RdbHandlers *RDB_createHandlersData(RdbParser *p,
     return hndl;
 }
 
-_LIBRDB_API void RDB_handleByLevel(RdbParser *p, RdbDataType type, RdbHandlersLevel lvl, unsigned int flags) {
-    UNUSED(flags);
+_LIBRDB_API int RDB_handleByLevel(RdbParser *p, RdbDataType type, RdbHandlersLevel lvl) {
     switch (type) {
         case RDB_DATA_TYPE_STRING:
             p->handleTypeObjByLevel[RDB_TYPE_STRING] = lvl;
@@ -548,9 +553,9 @@ _LIBRDB_API void RDB_handleByLevel(RdbParser *p, RdbDataType type, RdbHandlersLe
             p->handleTypeObjByLevel[RDB_OPCODE_FUNCTION2] = lvl;
             break;
         default:
-            assert(0);
+            return 1;
     }
-
+    return 0;
 }
 
 _LIBRDB_API const char *RDB_getLibVersion(int *major, int *minor, int *patch) {
@@ -558,6 +563,10 @@ _LIBRDB_API const char *RDB_getLibVersion(int *major, int *minor, int *patch) {
     if (minor) *minor = LIBRDB_MINOR_VERSION;
     if (patch) *patch = LIBRDB_PATCH_VERSION;
     return LIBRDB_VERSION_STRING;
+}
+
+_LIBRDB_API int RDB_getMaxSuppportRdbVersion(void) {
+    return LIBRDB_SUPPORT_MAX_RDB_VER;
 }
 
 /*** various functions ***/
@@ -569,7 +578,9 @@ static const char *getStatusString(RdbStatus status) {
         case RDB_STATUS_PAUSED: return "PAUSED";
         case RDB_STATUS_ERROR: return "ERROR";
         case RDB_STATUS_ENDED: return "(ENDED)";  /* internal state. (Not part of API) */
-        default: assert(0);
+        default:
+            assert(0);
+            return "INVALID_STATUS!";
     }
 }
 
@@ -648,10 +659,9 @@ static RdbStatus parserMainLoop(RdbParser *p) {
             bulkPoolAssertFlushedDbg(p);
         }
     } else {
-        /* If this loop become too much performance intensive, then we can optimize
-         * certain transitions by avoiding passing through the main loop. It can be
-         * done by flushing the cache with function bulkPoolFlush(), and then make
-         * direct call to next state */
+        /* Certain state transitions doesn't pass through the main loop. It is done
+         * by flushing the cache via function updateElementState(), and then make
+         * direct call or simply pass-through to next state */
         while ((status = peInfo[p->parsingElement].func(p)) == RDB_STATUS_OK);
     }
     return updateStateAfterParse(p, status);
@@ -730,15 +740,11 @@ static void resolveMultipleLevelsRegistration(RdbParser *p) {
 }
 
 static RdbStatus finalizeConfig(RdbParser *p, int isParseFromBuff) {
-    static int is_crc_init = 0;
     assert(p->state == RDB_STATE_CONFIGURING);
 
     RDB_log(p, RDB_LOG_INF, "Finalizing parser configuration");
 
-    if (!is_crc_init) {
-        crc64_init();
-        is_crc_init = 1;
-    }
+    crc64_init_thread_safe();
 
     if ((p->debugData = getEnvVar(ENV_VAR_DEBUG_DATA, 0)) != 0) {
         RDB_setLogLevel(p, RDB_LOG_DBG);
@@ -774,10 +780,9 @@ static RdbStatus finalizeConfig(RdbParser *p, int isParseFromBuff) {
 static void printParserState(RdbParser *p) {
     RDB_log(p, RDB_LOG_ERR, "Parser error message: %s", RDB_getErrorMessage(p));
     RDB_log(p, RDB_LOG_ERR, "Parser error code: %d", RDB_getErrorCode(p));
-    RDB_log(p, RDB_LOG_ERR, "Parser element func name: %s", peInfo[p->parsingElement].funcname);
-    RDB_log(p, RDB_LOG_ERR, "Parser element func description: %s", peInfo[p->parsingElement].description);
-    RDB_log(p, RDB_LOG_ERR, "Parser element state:%d", p->elmCtx.state);
-    //bulkPoolPrintDbg(p);
+    RDB_log(p, RDB_LOG_ERR, "Parser element func name: %s(state=%d)",
+                            peInfo[p->parsingElement].funcname, p->elmCtx.state);
+    RDB_log(p, RDB_LOG_ERR, "Parsed opcode: %d", p->currOpcode);
 }
 
 static void loggerCbDefault(RdbLogLevel l, const char *msg) {
@@ -817,7 +822,7 @@ RdbStatus allocFromCache(RdbParser *p,
     *binfo = bulkPoolAlloc(p, len, type, refBuf);
 
     if (unlikely( (*binfo)->ref == NULL)) {
-        RDB_reportError(p, RDB_ERR_NO_MEMORY,
+        RDB_reportError(p, RDB_ERR_FAIL_ALLOC,
                         "allocFromCache() failed allocating %llu bytes (allocation type=%d)",
                         (unsigned long long)len,
                         type);
@@ -988,7 +993,10 @@ static RdbStatus hashZiplist(RdbParser *p, BulkInfo *ziplistBulk) {
         registerAppBulkForNextCb(p, &embBulk1.binfo);
         registerAppBulkForNextCb(p, &embBulk2.binfo);
         CALL_HANDLERS_CB(p,
-                         restoreEmbeddedBulk(p, &embBulk1); restoreEmbeddedBulk(p, &embBulk2);, /*finalize*/
+                         {  /* Finalization (on either success or failure) */
+                             restoreEmbeddedBulk(p, &embBulk1);
+                             restoreEmbeddedBulk(p, &embBulk2);
+                         },
                          RDB_LEVEL_DATA,
                          rdbData.handleHashField,
                          embBulk1.binfo.ref,
@@ -1040,7 +1048,10 @@ static RdbStatus hashListPack(RdbParser *p, BulkInfo *lpBulk) {
         registerAppBulkForNextCb(p, &embBulk1.binfo);
         registerAppBulkForNextCb(p, &embBulk2.binfo);
         CALL_HANDLERS_CB(p,
-                         restoreEmbeddedBulk(p, &embBulk1); restoreEmbeddedBulk(p, &embBulk2);, /*finalize*/
+                         {  /* Finalization (on either success or failure) */
+                             restoreEmbeddedBulk(p, &embBulk1);
+                             restoreEmbeddedBulk(p, &embBulk2);
+                         },
                          RDB_LEVEL_DATA,
                          rdbData.handleHashField,
                          embBulk1.binfo.ref,
@@ -1080,7 +1091,10 @@ static RdbStatus hashZipMap(RdbParser *p, BulkInfo *zpBulk) {
         registerAppBulkForNextCb(p, &embBulk1.binfo);
         registerAppBulkForNextCb(p, &embBulk2.binfo);
         CALL_HANDLERS_CB(p,
-                         restoreEmbeddedBulk(p, &embBulk1); restoreEmbeddedBulk(p, &embBulk2);, /*finalize*/
+                         {  /* Finalization (on either success or failure) */
+                             restoreEmbeddedBulk(p, &embBulk1);
+                             restoreEmbeddedBulk(p, &embBulk2);
+                         },
                          RDB_LEVEL_DATA,
                          rdbData.handleHashField,
                          embBulk1.binfo.ref,
@@ -1171,6 +1185,45 @@ static RdbStatus zsetZiplistItem(RdbParser *p, BulkInfo *ziplistBulk) {
     return RDB_STATUS_OK;
 }
 
+static RdbStatus unzipStreamListpack(RdbParser *p, char *nodekey, unsigned char *lp) {
+    UNUSED(nodekey);
+    streamIterator si;
+    streamIteratorStart(&si,nodekey,lp);
+    RdbStreamID id;
+    int64_t numfields;
+
+    while(streamIteratorGetID(&si,(streamID *) &id,&numfields)) {
+        while(numfields--) {
+
+            unsigned char *field, *value;
+            int64_t field_len, value_len;
+            streamIteratorGetField(&si,&field,&value,&field_len,&value_len);
+
+            EmbeddedBulk embField, embValue;
+            if (!allocEmbeddedBulk(p, field, field_len, 0, &embField))
+                return RDB_STATUS_ERROR;
+
+            if (!allocEmbeddedBulk(p, value, value_len, 0, &embValue))
+                return RDB_STATUS_ERROR;
+
+            registerAppBulkForNextCb(p, &embField.binfo);
+            registerAppBulkForNextCb(p, &embValue.binfo);
+            CALL_HANDLERS_CB(p,
+                             {  /* Finalization (on either success or failure) */
+                                 restoreEmbeddedBulk(p, &embField);
+                                 restoreEmbeddedBulk(p, &embValue);
+                             },
+                             RDB_LEVEL_DATA,
+                             rdbData.handleStreamItem,
+                             &id,
+                             embField.binfo.ref,
+                             embValue.binfo.ref,
+                             numfields);
+        }
+    }
+    return RDB_STATUS_OK;
+}
+
 /*** Parsing Common Elements ***/
 
 RdbStatus elementRdbHeader(RdbParser *p) {
@@ -1189,7 +1242,7 @@ RdbStatus elementRdbHeader(RdbParser *p) {
 
     /* read rdb version */
     p->rdbversion = atoi(((char *) binfo->ref) + 5);
-    if (p->rdbversion < 1 || p->rdbversion > MAX_RDB_VER_SUPPORT) {
+    if (p->rdbversion < 1 || p->rdbversion > LIBRDB_SUPPORT_MAX_RDB_VER) {
         RDB_reportError(p, RDB_ERR_UNSUPPORTED_RDB_VERSION,
                         "Can't handle RDB format version: %d", p->rdbversion);
         return RDB_STATUS_ERROR;
@@ -1229,6 +1282,19 @@ RdbStatus elementSelectDb(RdbParser *p) {
     p->selectedDb = (int) dbid;
 
     CALL_COMMON_HANDLERS_CB(p, handleNewDb, ((int) dbid));
+    return nextParsingElement(p, PE_NEXT_RDB_TYPE);
+}
+
+RdbStatus elementSlotInfo(RdbParser *p) {
+    RdbSlotInfo info;
+    IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &info.slot_id, NULL, NULL));
+    IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &info.slot_size, NULL, NULL));
+    IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &info.expires_slot_size, NULL, NULL));
+
+    /*** ENTER SAFE STATE ***/
+
+    CALL_COMMON_HANDLERS_CB(p, handleSlotInfo, &info);
+
     return nextParsingElement(p, PE_NEXT_RDB_TYPE);
 }
 
@@ -1320,6 +1386,7 @@ RdbStatus elementNextRdbType(RdbParser *p) {
         case RDB_OPCODE_EXPIRETIME_MS:      return nextParsingElement(p, PE_EXPIRETIMEMSEC);
         case RDB_OPCODE_AUX:                return nextParsingElement(p, PE_AUX_FIELD);
         case RDB_OPCODE_SELECTDB:           return nextParsingElement(p, PE_SELECT_DB);
+        case RDB_OPCODE_SLOT_INFO:          return nextParsingElement(p, PE_SLOT_INFO);
         case RDB_OPCODE_RESIZEDB:           return nextParsingElement(p, PE_RESIZE_DB);
         case RDB_OPCODE_FREQ:               return nextParsingElement(p, PE_FREQ);
         case RDB_OPCODE_IDLE:               return nextParsingElement(p, PE_IDLE);
@@ -1340,6 +1407,12 @@ RdbStatus elementNextRdbType(RdbParser *p) {
         case RDB_TYPE_SET:                  return nextParsingElementKeyValue(p, PE_RAW_SET, PE_SET);
         case RDB_TYPE_SET_LISTPACK:         return nextParsingElementKeyValue(p, PE_RAW_SET_LP, PE_SET_LP);
         case RDB_TYPE_SET_INTSET:           return nextParsingElementKeyValue(p, PE_RAW_SET_IS, PE_SET_IS);
+        /* zset */
+        case RDB_TYPE_ZSET:                 return nextParsingElementKeyValue(p, PE_RAW_ZSET, PE_ZSET);
+        case RDB_TYPE_ZSET_2:               return nextParsingElementKeyValue(p, PE_RAW_ZSET, PE_ZSET);
+        case RDB_TYPE_ZSET_ZIPLIST:         return nextParsingElementKeyValue(p, PE_RAW_ZSET_ZL, PE_ZSET_ZL);
+        case RDB_TYPE_ZSET_LISTPACK:        return nextParsingElementKeyValue(p, PE_RAW_ZSET_LP, PE_ZSET_LP);
+
         /* module */
         case RDB_TYPE_MODULE_2:             return nextParsingElementKeyValue(p, PE_RAW_MODULE, PE_MODULE);
 
@@ -1352,19 +1425,10 @@ RdbStatus elementNextRdbType(RdbParser *p) {
 
         case RDB_OPCODE_EOF:                return nextParsingElement(p, PE_END_OF_FILE);
 
-        /* zset */
-        case RDB_TYPE_ZSET:                 return nextParsingElementKeyValue(p, PE_RAW_ZSET, PE_ZSET);
-        case RDB_TYPE_ZSET_2:               return nextParsingElementKeyValue(p, PE_RAW_ZSET, PE_ZSET);
-        case RDB_TYPE_ZSET_ZIPLIST:         return nextParsingElementKeyValue(p, PE_RAW_ZSET_ZL, PE_ZSET_ZL);
-        case RDB_TYPE_ZSET_LISTPACK:        return nextParsingElementKeyValue(p, PE_RAW_ZSET_LP, PE_ZSET_LP);
-
-        /* stream (TBD) */
+        /* stream */
         case RDB_TYPE_STREAM_LISTPACKS:
         case RDB_TYPE_STREAM_LISTPACKS_2:
-        case RDB_TYPE_STREAM_LISTPACKS_3:
-            RDB_reportError(p, RDB_ERR_NOT_SUPPORTED_RDB_ENCODING_TYPE,
-                            "Not supported RDB encoding type: %d", p->currOpcode);
-            return RDB_STATUS_ERROR;
+        case RDB_TYPE_STREAM_LISTPACKS_3:   return nextParsingElementKeyValue(p, PE_RAW_STREAM_LP, PE_STREAM_LP);
 
         case RDB_OPCODE_FUNCTION:
             RDB_reportError(p, RDB_ERR_PRERELEASE_FUNC_FORMAT_NOT_SUPPORTED,
@@ -1372,7 +1436,7 @@ RdbStatus elementNextRdbType(RdbParser *p) {
             return RDB_STATUS_ERROR;
 
         default:
-            RDB_reportError(p, RDB_ERR_UNKNOWN_RDB_ENCODING_TYPE, "Unknown RDB encoding type");
+            RDB_reportError(p, RDB_ERR_UNKNOWN_RDB_ENCODING_TYPE, "Unknown RDB encoding type: %d", p->currOpcode);
             return RDB_STATUS_ERROR;
     }
 }
@@ -1433,22 +1497,27 @@ RdbStatus elementList(RdbParser *p) {
 
             /*** ENTER SAFE STATE ***/
 
-            updateElementState(p, ST_LIST_NEXT_NODE); /* fall-thru */
+            updateElementState(p, ST_LIST_NEXT_NODE, 0); /* fall-thru */
 
-        case ST_LIST_NEXT_NODE: {
-            BulkInfo *binfoNode;
-            IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC_APP_BULK, NULL, &binfoNode));
+        case ST_LIST_NEXT_NODE:
+            while (ctx->list.numNodes) {
+                BulkInfo *binfoNode;
+                IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC_APP_BULK, NULL, &binfoNode));
 
-            /*** ENTER SAFE STATE ***/
+                /*** ENTER SAFE STATE ***/
 
-            registerAppBulkForNextCb(p, binfoNode);
-            if (p->elmCtx.key.handleByLevel == RDB_LEVEL_STRUCT)
-                CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_STRUCT, rdbStruct.handleListPlain, binfoNode->ref);
-            else
-                CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_DATA, rdbData.handleListItem, binfoNode->ref);
+                --ctx->list.numNodes;
 
-            return (--ctx->list.numNodes) ? updateElementState(p, ST_LIST_NEXT_NODE) : nextParsingElement(p, PE_END_KEY);
-        }
+                registerAppBulkForNextCb(p, binfoNode);
+                if (p->elmCtx.key.handleByLevel == RDB_LEVEL_STRUCT)
+                    CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_STRUCT, rdbStruct.handleListPlain, binfoNode->ref);
+                else
+                    CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_DATA, rdbData.handleListItem, binfoNode->ref);
+
+                updateElementState(p, ST_LIST_NEXT_NODE, 0);
+            }
+            return nextParsingElement(p, PE_END_KEY);
+
         default:
             RDB_reportError(p, RDB_ERR_PLAIN_LIST_INVALID_STATE,
                             "elementList() : invalid parsing element state: %d", ctx->state);
@@ -1469,59 +1538,63 @@ RdbStatus elementQuickList(RdbParser *p) {
 
             /*** ENTER SAFE STATE ***/
 
-            updateElementState(p, ST_LIST_NEXT_NODE); /* fall-thru */
+            updateElementState(p, ST_LIST_NEXT_NODE, 0); /* fall-thru */
 
-        case ST_LIST_NEXT_NODE: {
-            uint64_t container = QUICKLIST_NODE_CONTAINER_PACKED;
-            BulkInfo *binfoNode;
-
-            if (p->currOpcode == RDB_TYPE_LIST_QUICKLIST_2) {
-                IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &container, NULL, NULL));
-
-                if (container != QUICKLIST_NODE_CONTAINER_PACKED &&
-                    container != QUICKLIST_NODE_CONTAINER_PLAIN) {
-                    RDB_reportError(p, RDB_ERR_QUICK_LIST_INTEG_CHECK,
-                                    "elementQuickList(1): Quicklist integrity check failed");
-                    return RDB_STATUS_ERROR;
-                }
-            }
-
-            IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC_APP_BULK, NULL, &binfoNode));
-
-            /* ****************************** ENTER SAFE STATE *********************************
-             * STARTING FROM THIS POINT, UP-TO END OF STATE, WON'T BE ANY MORE READS FROM RDB, *
-             * SO IT IS SAFE NOW TO CALL HANDLERS CALLBACKS WITHOUT THE RISK OF ROLLBACK DUE   *
-             * TO `RDB_STATUS_WAIT_MORE_DATA` (WE CAN ADD LOCK VERIFICATION BY NEED).           *
-             ***********************************************************************************/
-
-            if (container == QUICKLIST_NODE_CONTAINER_PLAIN) {
-                RdbHandlersLevel lvl = p->elmCtx.key.handleByLevel;
-
-                registerAppBulkForNextCb(p, binfoNode);
-                if (lvl == RDB_LEVEL_STRUCT)
-                    CALL_HANDLERS_CB(p, NOP, lvl, rdbStruct.handleListPlain, binfoNode->ref);
-                else
-                    CALL_HANDLERS_CB(p, NOP, lvl, rdbData.handleListItem, binfoNode->ref);
-
-            } else {
-
-                unsigned char *lp = (unsigned char *) binfoNode->ref;
+        case ST_LIST_NEXT_NODE:
+            while (ctx->list.numNodes) {
+                uint64_t container = QUICKLIST_NODE_CONTAINER_PACKED;
+                BulkInfo *binfoNode;
 
                 if (p->currOpcode == RDB_TYPE_LIST_QUICKLIST_2) {
-                    if (!lpValidateIntegrity(lp, binfoNode->len, p->deepIntegCheck, NULL, NULL)) {
+                    IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &container, NULL, NULL));
+
+                    if (container != QUICKLIST_NODE_CONTAINER_PACKED &&
+                        container != QUICKLIST_NODE_CONTAINER_PLAIN) {
                         RDB_reportError(p, RDB_ERR_QUICK_LIST_INTEG_CHECK,
-                                        "elementQuickList(2): Quicklist integrity check failed");
+                                        "elementQuickList(1): Quicklist integrity check failed");
                         return RDB_STATUS_ERROR;
                     }
-                    IF_NOT_OK_RETURN(listListpackItem(p, binfoNode));
-                } else {
-                    if (RDB_STATUS_ERROR == listZiplistItem(p, binfoNode))
-                        return RDB_STATUS_ERROR;
                 }
-            }
 
-            return (--ctx->list.numNodes) ? updateElementState(p, ST_LIST_NEXT_NODE) : nextParsingElement(p, PE_END_KEY);
-        }
+                IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC_APP_BULK, NULL, &binfoNode));
+
+                /* ****************************** ENTER SAFE STATE *********************************
+                 * STARTING FROM THIS POINT, UP-TO END OF STATE, WON'T BE ANY MORE READS FROM RDB, *
+                 * SO IT IS SAFE NOW TO CALL HANDLERS CALLBACKS WITHOUT THE RISK OF ROLLBACK DUE   *
+                 * TO `RDB_STATUS_WAIT_MORE_DATA` (WE CAN ADD LOCK VERIFICATION BY NEED).           *
+                 ***********************************************************************************/
+
+                ctx->list.numNodes--;
+
+                if (container == QUICKLIST_NODE_CONTAINER_PLAIN) {
+                    RdbHandlersLevel lvl = p->elmCtx.key.handleByLevel;
+
+                    registerAppBulkForNextCb(p, binfoNode);
+                    if (lvl == RDB_LEVEL_STRUCT)
+                        CALL_HANDLERS_CB(p, NOP, lvl, rdbStruct.handleListPlain, binfoNode->ref);
+                    else
+                        CALL_HANDLERS_CB(p, NOP, lvl, rdbData.handleListItem, binfoNode->ref);
+
+                } else {
+
+                    unsigned char *lp = (unsigned char *) binfoNode->ref;
+
+                    if (p->currOpcode == RDB_TYPE_LIST_QUICKLIST_2) {
+                        if (!lpValidateIntegrity(lp, binfoNode->len, p->deepIntegCheck, NULL, NULL)) {
+                            RDB_reportError(p, RDB_ERR_QUICK_LIST_INTEG_CHECK,
+                                            "elementQuickList(2): Quicklist integrity check failed");
+                            return RDB_STATUS_ERROR;
+                        }
+                        IF_NOT_OK_RETURN(listListpackItem(p, binfoNode));
+                    } else {
+                        if (RDB_STATUS_ERROR == listZiplistItem(p, binfoNode))
+                            return RDB_STATUS_ERROR;
+                    }
+                }
+
+                updateElementState(p, ST_LIST_NEXT_NODE, 0);
+            }
+            return nextParsingElement(p, PE_END_KEY);
 
         default:
             RDB_reportError(p, RDB_ERR_QUICK_LIST_INVALID_STATE,
@@ -1559,7 +1632,7 @@ RdbStatus elementHash(RdbParser *p) {
 
             /*** ENTER SAFE STATE ***/
 
-            updateElementState(p, ST_HASH_NEXT); /* fall-thru */
+            updateElementState(p, ST_HASH_NEXT, 0); /* fall-thru */
 
         case ST_HASH_NEXT: {
             BulkInfo *binfoField, *binfoValue;
@@ -1586,7 +1659,7 @@ RdbStatus elementHash(RdbParser *p) {
             }
 
             ++ctx->hash.visitingField;
-            return updateElementState(p, ST_HASH_NEXT);
+            return updateElementState(p, ST_HASH_NEXT, 0);
         }
 
         default:
@@ -1603,7 +1676,8 @@ RdbStatus elementHashZL(RdbParser *p) {
 
     /*** ENTER SAFE STATE ***/
 
-    IF_NOT_OK_RETURN(hashZiplist(p, ziplistBulk));
+    if (RDB_STATUS_ERROR == hashZiplist(p, ziplistBulk))
+        return RDB_STATUS_ERROR;
 
     return nextParsingElement(p, PE_END_KEY);
 }
@@ -1615,7 +1689,8 @@ RdbStatus elementHashLP(RdbParser *p) {
 
     /*** ENTER SAFE STATE ***/
 
-    IF_NOT_OK_RETURN(hashListPack(p, listpackBulk));
+    if (RDB_STATUS_ERROR == hashListPack(p, listpackBulk))
+        return RDB_STATUS_ERROR;
 
     return nextParsingElement(p, PE_END_KEY);
 }
@@ -1627,7 +1702,8 @@ RdbStatus elementHashZM(RdbParser *p) {
 
     /*** ENTER SAFE STATE ***/
 
-    IF_NOT_OK_RETURN(hashZipMap(p, zipmapBulk));
+    if (RDB_STATUS_ERROR == hashZipMap(p, zipmapBulk))
+        return RDB_STATUS_ERROR;
 
     return nextParsingElement(p, PE_END_KEY);
 }
@@ -1646,22 +1722,27 @@ RdbStatus elementSet(RdbParser *p) {
 
             ctx->set.left = ctx->key.numItemsHint;
 
-            updateElementState(p, ST_SET_NEXT_ITEM); /* fall-thru */
+            updateElementState(p, ST_SET_NEXT_ITEM, 0); /* fall-thru */
 
-        case ST_SET_NEXT_ITEM: {
-            BulkInfo *binfoItem;
-            IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC_APP_BULK, NULL, &binfoItem));
+        case ST_SET_NEXT_ITEM:
+            while(ctx->set.left) {
+                BulkInfo *binfoItem;
+                IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC_APP_BULK, NULL, &binfoItem));
 
-            /*** ENTER SAFE STATE ***/
+                /*** ENTER SAFE STATE ***/
 
-            registerAppBulkForNextCb(p, binfoItem);
-            if (p->elmCtx.key.handleByLevel == RDB_LEVEL_STRUCT)
-                CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_STRUCT, rdbStruct.handleSetPlain, binfoItem->ref);
-            else
-                CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_DATA, rdbData.handleSetMember, binfoItem->ref);
+                ctx->set.left--;
 
-            return (--ctx->set.left) ? updateElementState(p, ST_SET_NEXT_ITEM) : nextParsingElement(p, PE_END_KEY);
-        }
+                registerAppBulkForNextCb(p, binfoItem);
+                if (p->elmCtx.key.handleByLevel == RDB_LEVEL_STRUCT)
+                    CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_STRUCT, rdbStruct.handleSetPlain, binfoItem->ref);
+                else
+                    CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_DATA, rdbData.handleSetMember, binfoItem->ref);
+
+                updateElementState(p, ST_SET_NEXT_ITEM, 0);
+            }
+            return nextParsingElement(p, PE_END_KEY);
+
         default:
             RDB_reportError(p, RDB_ERR_PLAIN_SET_INVALID_STATE,
                             "elementSet() : invalid parsing element state: %d", ctx->state);
@@ -1719,7 +1800,6 @@ RdbStatus elementSetLP(RdbParser *p) {
         return RDB_STATUS_ERROR;
     }
 
-    /* TODO: handle empty listpack */
     p->elmCtx.key.numItemsHint = lpLength(listpackBulk->ref);
 
     if (p->elmCtx.key.handleByLevel == RDB_LEVEL_STRUCT) {
@@ -1761,30 +1841,34 @@ RdbStatus elementZset(RdbParser *p) {
 
             ctx->zset.left = ctx->key.numItemsHint;
 
-            updateElementState(p, ST_ZSET_NEXT_ITEM); /* fall-thru */
+            updateElementState(p, ST_ZSET_NEXT_ITEM, 0); /* fall-thru */
 
         case ST_ZSET_NEXT_ITEM: {
             double score;
             BulkInfo *binfoItem;
 
+            while (1) {
+                IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC_APP_BULK, NULL, &binfoItem));
 
-            IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC_APP_BULK, NULL, &binfoItem));
+                if (p->currOpcode == RDB_TYPE_ZSET_2) {
+                    IF_NOT_OK_RETURN(rdbLoadBinaryDoubleValue(p, &score));
+                } else {
+                    IF_NOT_OK_RETURN(rdbLoadDoubleValue(p, &score));
+                }
 
-            if (p->currOpcode == RDB_TYPE_ZSET_2) {
-                IF_NOT_OK_RETURN(rdbLoadBinaryDoubleValue(p, &score));
-            } else {
-                IF_NOT_OK_RETURN(rdbLoadDoubleValue(p, &score));
+                /*** ENTER SAFE STATE ***/
+
+                registerAppBulkForNextCb(p, binfoItem);
+                if (p->elmCtx.key.handleByLevel == RDB_LEVEL_STRUCT)
+                    CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_STRUCT, rdbStruct.handleZsetPlain, binfoItem->ref, score);
+                else
+                    CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_DATA, rdbData.handleZsetMember, binfoItem->ref, score);
+
+                if (--ctx->zset.left)
+                    updateElementState(p, ST_ZSET_NEXT_ITEM, 0);
+                else
+                    return nextParsingElement(p, PE_END_KEY);
             }
-
-            /*** ENTER SAFE STATE ***/
-
-            registerAppBulkForNextCb(p, binfoItem);
-            if (p->elmCtx.key.handleByLevel == RDB_LEVEL_STRUCT)
-                CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_STRUCT, rdbStruct.handleZsetPlain, binfoItem->ref, score);
-            else
-                CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_DATA, rdbData.handleZsetMember, binfoItem->ref, score);
-
-            return (--ctx->zset.left) ? updateElementState(p, ST_ZSET_NEXT_ITEM) : nextParsingElement(p, PE_END_KEY);
         }
         default:
             RDB_reportError(p, RDB_ERR_PLAIN_ZSET_INVALID_STATE,
@@ -1939,7 +2023,7 @@ RdbStatus elementModule(RdbParser *p) {
                 }
                 /*** ENTER SAFE STATE ***/
                 ctx->module.startBytesRead = p->bytesRead - hdrSize ;
-                updateElementState(p, ST_MODULE_NEXT_OPCODE);
+                updateElementState(p, ST_MODULE_NEXT_OPCODE, 0);
                 break;
             }
             case ST_MODULE_OPCODE_SINT:
@@ -1947,28 +2031,28 @@ RdbStatus elementModule(RdbParser *p) {
                 uint64_t val; /*UNUSED*/
                 IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &val, NULL, NULL));
                 /*** ENTER SAFE STATE ***/
-                updateElementState(p, ST_MODULE_NEXT_OPCODE);
+                updateElementState(p, ST_MODULE_NEXT_OPCODE, 0);
                 break;
             }
             case ST_MODULE_OPCODE_FLOAT: {
                 float val; /*UNUSED*/
                 IF_NOT_OK_RETURN(rdbLoadFloatValue(p, &val));
                 /*** ENTER SAFE STATE ***/
-                updateElementState(p, ST_MODULE_NEXT_OPCODE);
+                updateElementState(p, ST_MODULE_NEXT_OPCODE, 0);
                 break;
             }
             case ST_MODULE_OPCODE_DOUBLE: {
                 double val; /*UNUSED*/
                 IF_NOT_OK_RETURN(rdbLoadBinaryDoubleValue(p, &val));
                 /*** ENTER SAFE STATE ***/
-                updateElementState(p, ST_MODULE_NEXT_OPCODE);
+                updateElementState(p, ST_MODULE_NEXT_OPCODE, 0);
                 break;
             }
             case ST_MODULE_OPCODE_STRING: {
                 BulkInfo *bInfo; /*UNUSED*/
                 IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC, NULL, &bInfo));
                 /*** ENTER SAFE STATE ***/
-                updateElementState(p, ST_MODULE_NEXT_OPCODE);
+                updateElementState(p, ST_MODULE_NEXT_OPCODE, 0);
                 break;
             }
             case ST_MODULE_NEXT_OPCODE: {
@@ -1979,7 +2063,7 @@ RdbStatus elementModule(RdbParser *p) {
 
                 if ((int) opcode != RDB_MODULE_OPCODE_EOF) {
                     /* Valid cast. Took care to align opcode with module states */
-                    updateElementState(p, (int) opcode);
+                    updateElementState(p, (int) opcode, 0);
                     break;
                 }
 
@@ -2013,7 +2097,271 @@ RdbStatus elementModule(RdbParser *p) {
     }
 }
 
+/*** stream ***/
+
+/* The decoded ID will be stored
+ * in the 'id' structure passed by reference. The buffer 'buf' must point
+ * to a 128 bit big-endian encoded ID. */
+void streamDecodeID(void *buf, RdbStreamID *id) {
+    uint64_t e[2];
+    memcpy(e,buf,sizeof(e));
+    id->ms = ntohu64(e[0]);
+    id->seq = ntohu64(e[1]);
+}
+
+
+RdbStatus elementStreamLP(RdbParser *p) {
+
+    enum STREAM_STATES {              /* STATES FLOW: (Indentation represent conceptual nested loop among states) */
+        ST_READ_NUM_LP=0,             /* Read number of LP (lpLeft) to load                                       */
+        ST_LOAD_ALL_LP,               /* Load all listpack                                                        */
+        ST_LOAD_METADATA,             /* Load Stream metadata                                                     */
+        ST_LOAD_NEXT_CONS_GROUP,      /* While more consumer-groups to load                                       */
+        ST_LOAD_GLOBAL_PEL,           /*   Load the global PEL for this consumer group                            */
+        ST_LOAD_NUM_CONSUMERS,        /*   Load the number of consumers                                           */
+        ST_LOAD_NEXT_CONSUMER,        /*   While more consumers to load                                           */
+        ST_LOAD_NEXT_CONSUMER_PEL,    /*       Load the PEL about entries owned by next consumer                  */
+    };
+
+    ElementCtx *ctx = &p->elmCtx;
+
+    while (1) {
+        switch (ctx->state) {
+            case ST_READ_NUM_LP:
+                IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &ctx->stream.numListPacks, NULL, NULL));
+                /*** ENTER SAFE STATE ***/
+                return updateElementState(p, ST_LOAD_ALL_LP, 0); /* fall-thru */
+
+            case ST_LOAD_ALL_LP:
+                while (ctx->stream.numListPacks > 0) {
+                    BulkInfo *binfoNodekey, *binfoListPack;
+
+                    /* Get the master ID, the one we'll use as key of the radix tree node: the
+                       entries inside the listpack itself are delta-encoded relatively to this ID. */
+                    IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC_APP_BULK, NULL, &binfoNodekey));
+
+                    if (binfoNodekey->len != sizeof(RdbStreamID)) {
+                        RDB_reportError(p, RDB_ERR_STREAM_LP_INTEG_CHECK, "elementStreamLP(): Invalid node key entry");
+                        return RDB_STATUS_ERROR;
+                    }
+
+                    /* Load the listpack. */
+                    IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC_APP_BULK, NULL, &binfoListPack));
+
+                    /*** ENTER SAFE STATE ***/
+
+                    if (unlikely(!lpValidateIntegrity(binfoListPack->ref, binfoListPack->len,
+                                                      p->deepIntegCheck, NULL, 0)))
+                    {
+                        RDB_reportError(p, RDB_ERR_STREAM_LP_INTEG_CHECK,
+                                        "elementStreamLP(): LISTPACK integrity check failed");
+                        return RDB_STATUS_ERROR;
+                    }
+
+                    if (unlikely(lpFirst(binfoListPack->ref) == NULL)) {
+                        /* Serialized listpacks should never be empty, since on deletion we should
+                         * remove the radix tree key if the resulting listpack is empty. */
+                        RDB_reportError(p, RDB_ERR_STREAM_LP_INTEG_CHECK,
+                                        "elementStreamLP(): Empty listpack inside stream");
+                        return RDB_STATUS_ERROR;
+                    }
+
+                    if (p->elmCtx.key.handleByLevel == RDB_LEVEL_STRUCT) {
+                        registerAppBulkForNextCb(p, binfoListPack);
+                        registerAppBulkForNextCb(p, binfoNodekey);
+                        CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_STRUCT, rdbStruct.handleStreamLP, binfoNodekey->ref,
+                                         binfoListPack->ref);
+                    } else {
+                        IF_NOT_OK_RETURN(unzipStreamListpack(p, binfoNodekey->ref, binfoListPack->ref));
+                    }
+
+                    ctx->stream.numListPacks--;
+
+                    updateElementState(p, ST_LOAD_ALL_LP, 0);
+                }
+                updateElementState(p, ST_LOAD_METADATA, 1); /* fall-thru */
+
+            case ST_LOAD_METADATA: {
+                    RdbStreamMeta *streamMeta = &ctx->stream.streamMeta;
+                    /* Load total number of items inside the stream. */
+                    IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &streamMeta->length, NULL, NULL));
+
+                    /* Load the last entry ID. */
+                    IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &streamMeta->lastID.ms, NULL, NULL));
+                    IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &streamMeta->lastID.seq, NULL, NULL));
+
+                    if (p->currOpcode >= RDB_TYPE_STREAM_LISTPACKS_2) {
+                        /* Load the first entry ID. */
+                        IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &streamMeta->firstID.ms, NULL, NULL));
+                        IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &streamMeta->firstID.seq, NULL, NULL));
+
+                        /* Load the maximal deleted entry ID. */
+                        IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &streamMeta->maxDelEntryID.ms, NULL, NULL));
+                        IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &streamMeta->maxDelEntryID.seq, NULL, NULL));
+
+                        /* Load entries added */
+                        IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &streamMeta->entriesAdded, NULL, NULL));
+
+                    } else {
+                        /* During migration the offset can be initialized to the stream's
+                         * length. At this point, we also don't care about tombstones
+                         * because CG offsets will be later initialized as well. */
+                        streamMeta->firstID.ms = 0;
+                        streamMeta->firstID.seq = 0;
+                        streamMeta->maxDelEntryID.ms = 0;
+                        streamMeta->maxDelEntryID.seq = 0;
+                        streamMeta->entriesAdded = streamMeta->length;
+                    }
+
+                    /* Load total number of items inside the stream. */
+                    IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &ctx->stream.cgroupsLeft, NULL, NULL)); /* fall-thru */
+
+                    /*** ENTER SAFE STATE ***/
+
+                    CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_DATA, rdbData.handleStreamMetadata, streamMeta);
+                }
+                updateElementState(p, ST_LOAD_NEXT_CONS_GROUP, 0); /* fall-thru */
+
+            case ST_LOAD_NEXT_CONS_GROUP: {
+                    /* Get the consumer group name and ID. We can then create the consumer
+                     * group ASAP and populate its structure as we read more data. */
+                    RdbStreamGroupMeta cgMeta;
+                    BulkInfo *binfoNameCG;
+
+                    /* if not more consumer groups */
+                    if (!(ctx->stream.cgroupsLeft))
+                        return nextParsingElement(p, PE_END_KEY);
+
+                    IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC_APP_BULK, NULL, &binfoNameCG));
+                    IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &cgMeta.lastId.ms, NULL, NULL));
+                    IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &cgMeta.lastId.seq, NULL, NULL));
+
+                    /* Load group offset. */
+                    if (p->currOpcode >= RDB_TYPE_STREAM_LISTPACKS_2) {
+                        IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, (uint64_t *) &cgMeta.entriesRead,
+                                                    NULL, NULL));
+                    } else {
+                        cgMeta.entriesRead = UNINIT_STREAM_ENTRIES_READ;
+                    }
+
+                    IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &(p->elmCtx.stream.pelLeft), NULL, NULL));
+
+                    /*** ENTER SAFE STATE ***/
+
+                    registerAppBulkForNextCb(p, binfoNameCG);
+                        CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_DATA, rdbData.handleStreamNewCGroup, binfoNameCG->ref, &cgMeta);
+
+                        ctx->stream.cgroupsLeft--;
+                }
+                updateElementState(p, ST_LOAD_GLOBAL_PEL, 0); /* fall-thru */
+
+            case ST_LOAD_GLOBAL_PEL:
+                while (p->elmCtx.stream.pelLeft) {
+                    BulkInfo *binfoStreamID;
+                    RdbStreamPendingEntry *pel = &p->elmCtx.stream.pel;
+                    IF_NOT_OK_RETURN(rdbLoad(p, sizeof(RdbStreamID), RQ_ALLOC, NULL, &binfoStreamID));
+                    IF_NOT_OK_RETURN(rdbLoadMillisecTime(p, (int64_t *) &pel->deliveryTime));
+                    IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &pel->deliveryCount, NULL, NULL));
+
+                    /*** ENTER SAFE STATE ***/
+
+                    streamDecodeID(binfoStreamID->ref, &pel->id);
+
+                    CALL_HANDLERS_CB(p,NOP, RDB_LEVEL_DATA, rdbData.handleStreamCGroupPendingEntry, pel);
+                    p->elmCtx.stream.pelLeft--;
+                    updateElementState(p, ST_LOAD_GLOBAL_PEL, 0);
+                }
+                updateElementState(p, ST_LOAD_NUM_CONSUMERS, 0); /* fall-thru */
+
+            case ST_LOAD_NUM_CONSUMERS:
+                /* Now that we loaded our global PEL, we need to load the consumers and their local PELs. */
+                IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &(p->elmCtx.stream.consumersLeft), NULL, NULL));
+                /*** ENTER SAFE STATE ***/
+                updateElementState(p, ST_LOAD_NEXT_CONSUMER, 0); /* fall-thru */
+
+            case ST_LOAD_NEXT_CONSUMER:
+                if (p->elmCtx.stream.consumersLeft == 0) {
+                    updateElementState(p, ST_LOAD_NEXT_CONS_GROUP, 0);
+                    break;
+                }
+                BulkInfo *bConsName;
+                RdbStreamConsumerMeta consMeta;
+                int64_t int64tmp;
+
+                IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC_APP_BULK, NULL, &bConsName));
+                IF_NOT_OK_RETURN(rdbLoadMillisecTime(p, &int64tmp));
+                consMeta.seenTime = (long long) int64tmp;
+
+                if (p->currOpcode >= RDB_TYPE_STREAM_LISTPACKS_3) {
+                    IF_NOT_OK_RETURN(rdbLoadMillisecTime(p, &int64tmp));
+                    consMeta.activeTime = (long long) int64tmp;
+                } else {
+                    /* That's the best estimate we got */
+                    consMeta.activeTime = consMeta.seenTime;
+                }
+
+                IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &(p->elmCtx.stream.consumer.pelLeft), NULL, NULL));
+
+                /*** ENTER SAFE STATE ***/
+
+                registerAppBulkForNextCb(p, bConsName);
+                CALL_HANDLERS_CB(p,NOP, RDB_LEVEL_DATA, rdbData.handleStreamNewConsumer, bConsName->ref, &consMeta);
+
+                p->elmCtx.stream.consumersLeft--;
+
+                updateElementState(p, ST_LOAD_NEXT_CONSUMER_PEL, 0); /* fall-thru */
+
+            case ST_LOAD_NEXT_CONSUMER_PEL:
+                while (p->elmCtx.stream.consumer.pelLeft) {
+                    BulkInfo *binfo;
+                    IF_NOT_OK_RETURN(rdbLoad(p, sizeof(RdbStreamID), RQ_ALLOC, NULL, &binfo));
+
+                    /*** ENTER SAFE STATE ***/
+
+                    streamDecodeID(binfo->ref, binfo->ref);
+
+                    CALL_HANDLERS_CB(p,NOP, RDB_LEVEL_DATA, rdbData.handleStreamConsumerPendingEntry, (RdbStreamID *) binfo->ref);
+                    p->elmCtx.stream.consumer.pelLeft--;
+                    updateElementState(p, ST_LOAD_NEXT_CONSUMER_PEL, 0);
+                }
+                if (p->elmCtx.stream.consumersLeft)
+                    updateElementState(p, ST_LOAD_NEXT_CONSUMER, 0);
+                else
+                    updateElementState(p, ST_LOAD_NEXT_CONS_GROUP, 0);
+                break;
+
+            default:
+                RDB_reportError(p, RDB_ERR_STREAM_INVALID_STATE,
+                                "elementStreamLP() : Invalid parsing element state: %d.", ctx->state);
+                return RDB_STATUS_ERROR;
+                break;
+        }
+    }
+    return RDB_STATUS_OK;
+}
+
 /*** Loaders from RDB ***/
+
+/* This function loads a time from the RDB file. The reason for conditional
+ * conversion below is because before Redis 5 (RDB version 9), the function
+ * failed to convert data to/from little endian, so RDB files with keys having
+ * expires could not be shared between big endian and little endian systems
+ * (because the expire time will be totally wrong). The fix for this is just
+ * to call memrev64ifbe(), however if we fix this for all the RDB versions,
+ * this call will introduce an incompatibility for big endian systems:
+ * after upgrading to Redis version 5 they will no longer be able to load their
+ * own old RDB files. Because of that, we instead fix the function only for new
+ * RDB versions, and load older RDB versions as we used to do in the past,
+ * allowing big endian systems to load their own old RDB files. */
+RdbStatus rdbLoadMillisecTime(RdbParser *p, int64_t *val) {
+    BulkInfo *binfo;
+    IF_NOT_OK_RETURN(rdbLoad(p, 8, RQ_ALLOC, NULL, &binfo));
+    /*** ENTER SAFE STATE ***/
+    *val = *((int64_t *) binfo->ref);
+    if (p->rdbversion >= 9) /* see comment above */
+        memrev64ifbe(val);
+    return RDB_STATUS_OK;
+}
 
 RdbStatus rdbLoadFloatValue(RdbParser *p, float *val) {
     BulkInfo *binfo;

@@ -25,7 +25,7 @@
  * CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
  * ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  * POSSIBILITY OF SUCH DAMAGE. */
-
+#include <pthread.h>
 #include "crc64.h"
 #include "crcspeed.h"
 static uint64_t crc64_table[8][256] = {{0}};
@@ -120,6 +120,20 @@ void crc64_init(void) {
 /* Compute crc64 */
 uint64_t crc64(uint64_t crc, const unsigned char *s, uint64_t l) {
     return crcspeed64native(crc64_table, crc, (void *) s, l);
+}
+
+/* Not sure if it is really required to use mutex here, but just in case */
+void crc64_init_thread_safe(void) {
+    static int crcInitalized = 0;
+    static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
+    if (!crcInitalized) {
+        pthread_mutex_lock(&mutex);
+        if (!crcInitalized) {
+            crc64_init();
+            crcInitalized = 1;
+        }
+        pthread_mutex_unlock(&mutex);
+    }
 }
 
 /* Test main */

@@ -1,3 +1,3 @@
-"string2":"\x00\tHithere!",
-"lzf_compressed":"\x00\xc3\t@v\x01cc\xe0i\x00\x01cc",
-"string1":"\x00\x04blaa",
+"string2":"\u0000\tHi there!",
+"lzf_compressed":"\u0000\u00c3\t@v\u0001cc\u00e0i\u0000\u0001cc",
+"string1":"\u0000\u0004blaa"

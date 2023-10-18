@@ -12,6 +12,8 @@ static void test_resp_reader_common(RespReaderCtx *ctx,
                                     RespRes expRes,
                                     int expReplies)
 {
+    RespReaderCtx alterCtx;
+    if (!ctx) ctx = &alterCtx;
     if (initCtx) readRespInit(ctx);
 
     RespRes res = readRespReplies(ctx, payload, payloadSize);
@@ -21,22 +23,31 @@ static void test_resp_reader_common(RespReaderCtx *ctx,
 
 static void test_single_status(void **state) {
     UNUSED(state);
-    RespReaderCtx ctx;
-    test_resp_reader_common(&ctx, STR_AND_SIZE("+OK\r\n"),
+    test_resp_reader_common(NULL, STR_AND_SIZE("+OK\r\n"),
                             1, RESP_REPLY_OK, 1);
 }
 
 static void test_single_int(void **state) {
     UNUSED(state);
-    RespReaderCtx ctx;
-    test_resp_reader_common(&ctx, STR_AND_SIZE(":1\r\n"),
+    test_resp_reader_common(NULL, STR_AND_SIZE(":1\r\n"),
+                            1, RESP_REPLY_OK, 1);
+}
+
+static void test_array_3_bulks(void **state) {
+    UNUSED(state);
+    test_resp_reader_common(NULL, STR_AND_SIZE("*3\r\n$2\r\n12\r\n$1\r\nA\r\n$3\r\nABC\r\n"),
+                            1, RESP_REPLY_OK, 1);
+}
+
+void test_array_single_bulk(void **state) {
+    UNUSED(state);
+    test_resp_reader_common(NULL, STR_AND_SIZE("*1\r\n$15\r\n1695649446276-0\r\n"),
                             1, RESP_REPLY_OK, 1);
 }
 
 static void test_two_statuses_and_partial_reply(void **state) {
     UNUSED(state);
-    RespReaderCtx ctx;
-    test_resp_reader_common(&ctx, STR_AND_SIZE("+OK\r\n+OK\r\n+OK\r"),
+    test_resp_reader_common(NULL, STR_AND_SIZE("+OK\r\n+OK\r\n+OK\r"),
                             1, RESP_REPLY_PARTIAL, 2);
 }
 
@@ -71,8 +82,7 @@ static void test_single_bulk(void **state) {
 
 static void test_three_bulks(void **state) {
     UNUSED(state);
-    RespReaderCtx ctx;
-    test_resp_reader_common(&ctx, STR_AND_SIZE("$5\r\nmylib\r\n$4\r\nm\rib\r\n$8\r\nm123ylib\r\n"), 1, RESP_REPLY_OK, 3);
+    test_resp_reader_common(NULL, STR_AND_SIZE("$5\r\nmylib\r\n$4\r\nm\rib\r\n$8\r\nm123ylib\r\n"), 1, RESP_REPLY_OK, 3);
 }
 
 static void test_reply_error_fragmented(void **state) {
@@ -108,11 +118,13 @@ static void test_reply_long_err_trimmed_by_report(void **state) {
 static void test_mixture_and_fragmented(void **state) {
     UNUSED(state);
     RespRes res;
-    char bulk[] = "+OK\r\n$5\r\nmylib\r\n+OK\r\n+OK\r\n";
+    int expReplies = 5;
+    char bulk[] = "*3\r\n$2\r\n12\r\n$1\r\nA\r\n$3\r\nABC\r\n"
+                  "+OK\r\n$5\r\nmylib\r\n+OK\r\n+OK\r\n";
     RespReaderCtx ctx;
 
     /* all responses in one bulk */
-    test_resp_reader_common(&ctx, STR_AND_SIZE(bulk), 1, RESP_REPLY_OK, 4);
+    test_resp_reader_common(&ctx, STR_AND_SIZE(bulk), 1, RESP_REPLY_OK, expReplies);
 
     /* split stream to two bulks */
     for (size_t firstFragLen = 1 ; firstFragLen < sizeof(bulk) - 1 ; ++firstFragLen) {
@@ -121,7 +133,7 @@ static void test_mixture_and_fragmented(void **state) {
         assert_int_not_equal(res, RESP_REPLY_ERR);
         res = readRespReplies(&ctx, bulk + firstFragLen, (sizeof(bulk) - 1) - firstFragLen);
         assert_int_equal(res, RESP_REPLY_OK);
-        assert_int_equal(ctx.countReplies, 4);
+        assert_int_equal(ctx.countReplies, expReplies);
     }
 }
 
@@ -130,6 +142,8 @@ int group_test_resp_reader(void) {
     const struct CMUnitTest tests[] = {
             cmocka_unit_test(test_single_status),
             cmocka_unit_test(test_single_int),
+            cmocka_unit_test(test_array_single_bulk),
+            cmocka_unit_test(test_array_3_bulks),
             cmocka_unit_test(test_two_statuses_and_partial_reply),
             cmocka_unit_test(test_reply_fragmented),
             cmocka_unit_test(test_reply_error),

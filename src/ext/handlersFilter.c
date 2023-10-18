@@ -125,6 +125,36 @@ static RdbRes filterHash(RdbParser *p, void *userData, RdbBulk field, RdbBulk va
     return ((RdbxFilter *) userData)->cbReturnValue;
 }
 
+static RdbRes filterStreamMetadata(RdbParser *p, void *userData, RdbStreamMeta *meta) {
+    UNUSED(p, meta);
+    return ((RdbxFilter *) userData)->cbReturnValue;
+}
+
+static RdbRes filterStreamItem(RdbParser *p, void *userData, RdbStreamID *id, RdbBulk field, RdbBulk value, int64_t itemsLeft) {
+    UNUSED(p, id, field, value, itemsLeft);
+    return ((RdbxFilter *) userData)->cbReturnValue;
+}
+
+static RdbRes filterStreamNewCGroup(RdbParser *p, void *userData, RdbBulk grpName, RdbStreamGroupMeta *meta) {
+    UNUSED(p, grpName, meta);
+    return ((RdbxFilter *) userData)->cbReturnValue;
+}
+
+static RdbRes filterStreamCGroupPendingEntry(RdbParser *p, void *userData, RdbStreamPendingEntry *pendingEntry) {
+    UNUSED(p, pendingEntry);
+    return ((RdbxFilter *) userData)->cbReturnValue;
+}
+
+static RdbRes filterStreamNewConsumer(RdbParser *p, void *userData, RdbBulk consName, RdbStreamConsumerMeta *meta) {
+    UNUSED(p, consName, meta);
+    return ((RdbxFilter *) userData)->cbReturnValue;
+}
+
+static RdbRes filterStreamConsumerPendingEntry(RdbParser *p, void *userData, RdbStreamID *streamId) {
+    UNUSED(p, streamId);
+    return ((RdbxFilter *) userData)->cbReturnValue;
+}
+
 /*** Handling struct ***/
 
 static RdbRes filterListLP(RdbParser *p, void *userData, RdbBulk listpack) {
@@ -167,6 +197,11 @@ static RdbRes filterSetMember(RdbParser *p, void *userData, RdbBulk member) {
     return ((RdbxFilter *) userData)->cbReturnValue;
 }
 
+static RdbRes filterZsetMember(RdbParser *p, void *userData, RdbBulk member, double score) {
+    UNUSED(p, userData, member, score);
+    return ((RdbxFilter *) userData)->cbReturnValue;
+}
+
 static RdbRes filterSetPlain(RdbParser *p, void *userData, RdbBulk item) {
     UNUSED(p, item);
     return ((RdbxFilter *) userData)->cbReturnValue;
@@ -182,6 +217,21 @@ static RdbRes filterSetLP(RdbParser *p, void *userData, RdbBulk listpack) {
     return ((RdbxFilter *) userData)->cbReturnValue;
 }
 
+static RdbRes filterZsetPlain(RdbParser *p, void *userData, RdbBulk item, double score) {
+    UNUSED(p, item, score);
+    return ((RdbxFilter *) userData)->cbReturnValue;
+}
+
+static RdbRes filterZsetZL(RdbParser *p, void *userData, RdbBulk ziplist) {
+    UNUSED(p, ziplist);
+    return ((RdbxFilter *) userData)->cbReturnValue;
+}
+
+static RdbRes filterZsetLP(RdbParser *p, void *userData, RdbBulk listpack) {
+    UNUSED(p, listpack);
+    return ((RdbxFilter *) userData)->cbReturnValue;
+}
+
 static RdbRes filterFunction(RdbParser *p, void *userData, RdbBulk func) {
     UNUSED(p, func);
     return ((RdbxFilter *) userData)->cbReturnValue;
@@ -189,6 +239,11 @@ static RdbRes filterFunction(RdbParser *p, void *userData, RdbBulk func) {
 
 static RdbRes filterModule(RdbParser *p, void *userData, RdbBulk moduleName, size_t serializedSize) {
     UNUSED(p, moduleName, serializedSize);
+    return ((RdbxFilter *) userData)->cbReturnValue;
+}
+
+static RdbRes filterStreamLP(RdbParser *p, void *userData, RdbBulk nodekey, RdbBulk streamLP) {
+    UNUSED(p, nodekey, streamLP);
     return ((RdbxFilter *) userData)->cbReturnValue;
 }
 
@@ -212,63 +267,79 @@ static RdbRes filterRawEnd(RdbParser *p, void *userData) {
 /*** common init ***/
 
 static void defaultFilterDataCb(RdbHandlersDataCallbacks *dataCb) {
-    memset(dataCb, 0, sizeof(*dataCb));
-    dataCb->handleNewKey = filterNewKey;
-    dataCb->handleEndKey = filterEndKey;
-    dataCb->handleNewDb = filterNewDb;
-    dataCb->handleDbSize = filterDbSize;
-
-    dataCb->handleStringValue = filterString;
-    dataCb->handleListItem = filterList;
-    dataCb->handleHashField = filterHash;
-    dataCb->handleSetMember = filterSetMember;
-    dataCb->handleFunction = filterFunction;
-    dataCb->handleModule = filterModule;
+    static const RdbHandlersDataCallbacks defDataCb = {
+        NULL,                               /*handleStartRdb*/
+        NULL,                               /*handleEndRdb*/
+        filterNewDb,                        /*handleNewDb*/
+        filterDbSize,                       /*handleDbSize*/
+        NULL,                               /*handleSlotInfo*/
+        NULL,                               /*handleAuxField*/
+        filterNewKey,                       /*handleNewKey*/
+        filterEndKey,                       /*handleEndKey*/
+        filterString,                       /*handleStringValue*/
+        filterList,                         /*handleListItem*/
+        filterHash,                         /*handleHashField*/
+        filterSetMember,                    /*handleSetMember*/
+        filterZsetMember,                   /*handleZsetMember*/
+        filterFunction,                     /*handleFunction*/
+        filterModule,                       /*handleModule*/
+        filterStreamMetadata,               /*handleStreamMetadata*/
+        filterStreamItem,                   /*handleStreamItem*/
+        filterStreamNewCGroup,              /*handleStreamNewCGroup*/
+        filterStreamCGroupPendingEntry,     /*handleStreamCGroupPendingEntry*/
+        filterStreamNewConsumer,            /*handleStreamNewConsumer*/
+        filterStreamConsumerPendingEntry,   /*handleStreamConsumerPendingEntry*/
+    };
+    *dataCb = defDataCb;
 }
 
 static void defaultFilterStructCb(RdbHandlersStructCallbacks *structCb) {
-    memset(structCb, 0, sizeof(*structCb));
-    /* common */
-    structCb->handleNewKey = filterNewKey;
-    structCb->handleEndKey = filterEndKey;
-    structCb->handleNewDb = filterNewDb;
-    structCb->handleDbSize = filterDbSize;
-
-    /* string */
-    structCb->handleString = filterString;
-    /* list */
-    structCb->handleListLP = filterListLP;
-    structCb->handleListZL = filterListZL;
-    structCb->handleListPlain = filterListPlain;
-    /* hash */
-    structCb->handleHashPlain = filterHashPlain;
-    structCb->handleHashZL = filterHashZL;
-    structCb->handleHashLP = filterHashLP;
-    structCb->handleHashZM = filterHashZM;
-
-    /* set */
-    structCb->handleSetPlain = filterSetPlain;
-    structCb->handleHashZM = filterSetIS;
-    structCb->handleSetLP = filterSetLP;
-
-    /* func */
-    structCb->handleFunction = filterFunction;
-    /* module */
-    structCb->handleModule = filterModule;
+    static const RdbHandlersStructCallbacks defStructCb = {
+        NULL,                               /*handleStartRdb*/
+        NULL,                               /*handleEndRdb*/
+        filterNewDb,                        /*handleNewDb*/
+        filterDbSize,                       /*handleDbSize*/
+        NULL,                               /*handleSlotInfo*/
+        NULL,                               /*handleAuxField*/
+        filterNewKey,                       /*handleNewKey*/
+        filterEndKey,                       /*handleEndKey*/
+        filterString,                       /*handleString*/
+        filterListPlain,                    /*handleListPlain*/
+        filterListZL,                       /*handleListZL*/
+        filterListLP,                       /*handleListLP*/
+        filterHashPlain,                    /*handleHashPlain*/
+        filterHashZL,                       /*handleHashZL*/
+        filterHashLP,                       /*handleHashLP*/
+        filterHashZM,                       /*handleHashZM*/
+        filterSetPlain,                     /*handleSetPlain*/
+        filterSetIS,                        /*handleSetIS*/
+        filterSetLP,                        /*handleSetLP*/
+        filterZsetPlain,                    /*handleZsetPlain*/
+        filterZsetZL,                       /*handleZsetZL*/
+        filterZsetLP,                       /*handleZsetLP*/
+        filterFunction,                     /*handleFunction*/
+        filterModule,                       /*handleModule*/
+        filterStreamLP,                     /*handleStreamLP*/
+    };
+    *structCb = defStructCb;
 }
 
 static void defaultFilterRawCb(RdbHandlersRawCallbacks *rawCb) {
-    memset(rawCb, 0, sizeof(*rawCb));
-    /* common */
-    rawCb->handleNewKey = filterNewKey;
-    rawCb->handleEndKey = filterEndKey;
-    rawCb->handleNewDb = filterNewDb;
-    rawCb->handleDbSize = filterDbSize;
-
-    //callbacks.rawCb.handleBeginModuleAux  /* not part of keyspace */
-    rawCb->handleBegin = filterRawBegin;
-    rawCb->handleFrag = filterFrag;
-    rawCb->handleEnd = filterRawEnd;
+    static const RdbHandlersRawCallbacks defRawCb = {
+        NULL,                               /*handleStartRdb*/
+        NULL,                               /*handleEndRdb*/
+        filterNewDb,                        /*handleNewDb*/
+        filterDbSize,                       /*handleDbSize*/
+        NULL,                               /*handleSlotInfo*/
+        NULL,                               /*handleAuxField*/
+        filterNewKey,                       /*handleNewKey*/
+        filterEndKey,                       /*handleEndKey*/
+        NULL,                               /*handleBeginModuleAux (Not part of keyspace)*/
+        filterRawBegin,                     /*handleBegin*/
+        filterFrag,                         /*handleFrag*/
+        filterRawEnd                        /*handleEnd*/
+    };
+    *rawCb = defRawCb;
 }
 
 static RdbxFilter *createHandlersFilterCommon(RdbParser *p,

@@ -1,4 +1,7 @@
+#include <stdio.h>
 #include <string.h>
+#include <stdlib.h>
+
 #include "test_common.h"
 
  /* To enhance the clarity of our tests and keep expected outputs concise, a
@@ -71,7 +74,7 @@ static void runWithAndWithoutRestore(const char *rdbfile) {
     r2rConf.delKeyBeforeWrite = 0;
 
     /* expect not use RESTORE */
-    r2rConf.dstRedisVersion = "0.0.1";
+    r2rConf.dstRedisVersion = "0.1";
     testRdbToRespCommon(rdbfile, &r2rConf, (char*)restorePrefix, sizeof(restorePrefix), M_PREFIX, 0);
 
     /* expect use RESTORE */
@@ -239,6 +242,11 @@ static void test_r2r_zset_zl(void **state) {
     runWithAndWithoutRestore("zset_zl_v6.rdb");
 }
 
+static void test_r2r_stream(void **state) {
+    UNUSED(state);
+    runWithAndWithoutRestore("stream_v11.rdb");
+}
+
 static void test_r2r_module(void **state) {
     UNUSED(state);
     unsigned char expRespData[] = {
@@ -260,19 +268,31 @@ static void test_r2r_module(void **state) {
 static void test_r2r_module_aux(void **state) {
     UNUSED(state);
     unsigned char expRespData[] = {
-            0x2a, 0x34, 0x0d, 0x0a, 0x24, 0x37, 0x0d, 0x0a,    0x52, 0x45, 0x53, 0x54, 0x4f, 0x52, 0x45, 0x0d,  // *4..$7..  RESTORE.
-            0x0a, 0x24, 0x34, 0x0d, 0x0a, 0x6b, 0x65, 0x79,    0x31, 0x0d, 0x0a, 0x24, 0x31, 0x0d, 0x0a, 0x30,  // .$4..key  1..$1..0
-            0x0d, 0x0a, 0x24, 0x32, 0x39, 0x0d, 0x0a, 0x07,    0x81, 0xb5, 0xeb, 0x2d, 0xff, 0xfa, 0xdd, 0x6c,  // ..$29...  ...-...l
-            0x01, 0x05, 0x06, 0x76, 0x61, 0x6c, 0x75, 0x65,    0x31, 0x00, 0x0b, 0x00, 0x03, 0xb6, 0x8b, 0x8a,  // ...value  1.......
-            0x58, 0x44, 0xb9, 0xff, 0x0d, 0x0a,                                                                 // XD....
+            0x2a, 0x34, 0x0d, 0x0a, 0x24, 0x37, 0x0d, 0x0a,    0x52, 0x45, 0x53, 0x54, 0x4f, 0x52, 0x45, 0x0d,  //  *4..$7..  RESTORE.
+            0x0a, 0x24, 0x31, 0x0d, 0x0a, 0x78, 0x0d, 0x0a,    0x24, 0x31, 0x0d, 0x0a, 0x30, 0x0d, 0x0a, 0x24,  //  .$1..x..  $1..0..$
+            0x31, 0x33, 0x0d, 0x0a, 0x00, 0xc0, 0x01, 0x0b,    0x00, 0x4f, 0xa7, 0x5a, 0xc5, 0x2c, 0x9e, 0xf8,  //  13......  .O.Z.,..
+            0x75, 0x0d, 0x0a, 0x00, 0x0b, 0x00, 0xa6, 0xe6,    0xfb, 0x24, 0xce, 0x1a, 0x8c, 0x25, 0x0d, 0x0a,  //  u.......  .$...%..
     };
 
     RdbxToRespConf r2rConf;
-
     memset(&r2rConf, 0, sizeof(r2rConf));
     r2rConf.supportRestore = 1;
     r2rConf.dstRedisVersion = "7.2";   /* resolved to rdb version 11 */
     testRdbToRespCommon("module_aux.rdb", &r2rConf, (char *) expRespData, sizeof(expRespData), M_ENTIRE, 1);
+}
+
+static void test_r2r_stream_with_target_62_and_72(void **state) {
+    size_t fileLen;
+    UNUSED(state);
+    RdbxToRespConf r2rConf1 = { .delKeyBeforeWrite=0, .supportRestore=0, .dstRedisVersion="6.2",};
+    char *f1 = readFile(DUMP_FOLDER("stream_v11_target_ver_6.2.resp"), &fileLen, NULL);
+    testRdbToRespCommon("stream_v11.rdb", &r2rConf1, f1, fileLen, M_ENTIRE, 1);
+    free(f1);
+
+    RdbxToRespConf r2rConf = { .delKeyBeforeWrite=0, .supportRestore=0, .dstRedisVersion="7.2",};
+    f1 = readFile(DUMP_FOLDER("stream_v11_target_ver_7.2.resp"), &fileLen, NULL);
+    testRdbToRespCommon("stream_v11.rdb", &r2rConf, f1, fileLen, M_ENTIRE, 1);
+    free(f1);
 }
 
 /*************************** group_rdb_to_resp *******************************/
@@ -305,18 +325,18 @@ int group_rdb_to_resp(void) {
             cmocka_unit_test(test_r2r_plain_zset_2),
             cmocka_unit_test(test_r2r_zset_lp),
             cmocka_unit_test(test_r2r_zset_zl),
-
-            /* misc */
-            cmocka_unit_test(test_r2r_multiple_lists_and_strings),
-            cmocka_unit_test(test_r2r_del_before_write_restore_replace),
-
             /* mem policy */
             cmocka_unit_test(test_r2r_policy_lfu),
             cmocka_unit_test(test_r2r_policy_lru),
-
             /* module*/
             cmocka_unit_test(test_r2r_module),
-//            cmocka_unit_test(test_r2r_module_aux),
+            cmocka_unit_test(test_r2r_module_aux),
+            /* stream */
+            cmocka_unit_test(test_r2r_stream),
+            cmocka_unit_test(test_r2r_stream_with_target_62_and_72),
+            /* misc */
+            cmocka_unit_test(test_r2r_multiple_lists_and_strings),
+            cmocka_unit_test(test_r2r_del_before_write_restore_replace),
     };
     return cmocka_run_group_tests(tests, NULL, NULL);
 }

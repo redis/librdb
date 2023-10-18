@@ -2,4 +2,4 @@
 "redis-bits":"64",
 "ctime":"1689605183",
 "used-mem":"821904",
-"myhash1":"\x04\x0b\xc0\x05\xc0\x05\xc0\x06\xc0\x06\xc0\n\xc0\n\xc0\x01\xc0\x01\xc0\x02\xc0\x02\xc0\b\xc0\b\xc0\x04\xc0\x04\xc0\t\xc0\t\xc0\x03\xc0\x03\xc0\x07\xc0\x07\xc0\x0b\xc0\x0b"
+"myhash1":"\u0004\u000b\u00c0\u0005\u00c0\u0005\u00c0\u0006\u00c0\u0006\u00c0\n\u00c0\n\u00c0\u0001\u00c0\u0001\u00c0\u0002\u00c0\u0002\u00c0\b\u00c0\b\u00c0\u0004\u00c0\u0004\u00c0\t\u00c0\t\u00c0\u0003\u00c0\u0003\u00c0\u0007\u00c0\u0007\u00c0\u000b\u00c0\u000b"

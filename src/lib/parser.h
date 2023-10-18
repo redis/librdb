@@ -92,7 +92,7 @@ typedef struct BulkInfo {
 /* Allocation requests from the parser to BulkPool */
 typedef enum {
     /* Allocate for internal use of the parser */
-    RQ_ALLOC,
+    RQ_ALLOC, /* either alloc from internal stack or heap */
     RQ_ALLOC_REF, /*placement-new*/
     /* Allocate RdbBulk in order to pass it to app callbacks */
     RQ_ALLOC_APP_BULK,
@@ -117,6 +117,7 @@ typedef enum ParsingElementType {
     PE_NEXT_RDB_TYPE,
     PE_AUX_FIELD,
     PE_SELECT_DB,
+    PE_SLOT_INFO,
     PE_RESIZE_DB,
     PE_EXPIRETIME,
     PE_EXPIRETIMEMSEC,
@@ -145,6 +146,7 @@ typedef enum ParsingElementType {
     PE_MODULE,
     PE_FUNCTION,
     PE_MODULE_AUX,
+    PE_STREAM_LP,
 
     /* parsing raw data types */
     PE_RAW_NEW_KEY,
@@ -166,6 +168,7 @@ typedef enum ParsingElementType {
     PE_RAW_ZSET_LP,
     PE_RAW_MODULE,
     PE_RAW_MODULE_AUX,
+    PE_RAW_STREAM_LP,
 
     PE_END_OF_FILE,
     PE_MAX
@@ -205,6 +208,18 @@ typedef struct {
 } ElementModuleCtx;
 
 typedef struct {
+    uint64_t numListPacks;
+    RdbStreamMeta streamMeta;
+    uint64_t cgroupsLeft;
+    uint64_t pelLeft; /* pending entry list */
+    RdbStreamPendingEntry pel;
+    uint64_t consumersLeft;
+    struct {
+        uint64_t pelLeft;
+    } consumer; /* current processed consumer */
+} ElementStreamCtx;
+
+typedef struct {
     RdbKeyInfo info;
     ParsingElementType valueType;
     RdbHandlersLevel handleByLevel;
@@ -241,6 +256,13 @@ typedef struct {
     uint64_t when;
 } ElementRawModuleAux;
 
+typedef struct {
+    uint64_t lpLeft;
+    uint64_t cgroupsLeft;
+    uint64_t globPelLeft; /* global pending entries left to read */
+    uint64_t consumersLeft;
+} ElementRawStreamCtx;
+
 typedef struct ElementCtx {
     ElementKeyCtx key;
     ElementListCtx list;
@@ -248,6 +270,7 @@ typedef struct ElementCtx {
     ElementZsetCtx zset;
     ElementHashCtx hash;
     ElementModuleCtx module;
+    ElementStreamCtx stream;
 
     /* raw elements context */
     ElementRawStringCtx rawString;
@@ -256,6 +279,7 @@ typedef struct ElementCtx {
     ElementRawZsetCtx rawZset;
     ElementRawHashCtx rawHash;
     ElementRawModuleAux rawModAux;
+    ElementRawStreamCtx rawStream;
 
     int state;  /* parsing-element state */
 } ElementCtx;
@@ -420,8 +444,12 @@ static inline void registerAppBulkForNextCb(RdbParser *p, BulkInfo *binfo) {
 
 extern void bulkPoolFlush(RdbParser *p); /* avoid cyclic headers inclusion */
 
-static inline RdbStatus updateElementState(RdbParser *p, int newState) {
-    bulkPoolFlush(p);
+static inline RdbStatus updateElementState(RdbParser *p, int newState, int noFlush) {
+
+    /* if state completed without allocating anything then
+     * we can save few cpu cycles by avoid flushing the pool */
+    if (!noFlush) bulkPoolFlush(p);
+
     p->elmCtx.state = newState;
     return RDB_STATUS_OK;
 }
@@ -446,6 +474,7 @@ RdbStatus subElementReturn(RdbParser *p, BulkInfo *bulkResult);
 void subElementCallEnd(RdbParser *p, RdbBulk *bulkResult, size_t *len);
 
 /*** Loaders from RDB ***/
+RdbStatus rdbLoadMillisecTime(RdbParser *p, int64_t *val);
 RdbStatus rdbLoadFloatValue(RdbParser *p, float *val);
 RdbStatus rdbLoadBinaryDoubleValue(RdbParser *p, double *val);
 RdbStatus rdbLoadDoubleValue(RdbParser *p, double *val);
@@ -479,6 +508,7 @@ RdbStatus elementRdbHeader(RdbParser *p);
 RdbStatus elementNextRdbType(RdbParser *p);
 RdbStatus elementAuxField(RdbParser *p);
 RdbStatus elementSelectDb(RdbParser *p);
+RdbStatus elementSlotInfo(RdbParser *p);
 RdbStatus elementResizeDb(RdbParser *p);
 RdbStatus elementExpireTime(RdbParser *p);
 RdbStatus elementExpireTimeMsec(RdbParser *p);
@@ -502,6 +532,7 @@ RdbStatus elementZsetZL(RdbParser *p);
 RdbStatus elementZsetLP(RdbParser *p);
 RdbStatus elementFunction(RdbParser *p);
 RdbStatus elementModule(RdbParser *p);
+RdbStatus elementStreamLP(RdbParser *p);
 
 /*** Raw Parsing Elements ***/
 RdbStatus elementRawNewKey(RdbParser *p);
@@ -521,5 +552,6 @@ RdbStatus elementRawZset(RdbParser *p);
 RdbStatus elementRawZsetLP(RdbParser *p);
 RdbStatus elementRawZsetZL(RdbParser *p);
 RdbStatus elementRawModule(RdbParser *p);
+RdbStatus elementRawStreamLP(RdbParser *p);
 
 #endif /*LIBRDB_PARSER_H*/

@@ -28,17 +28,22 @@ typedef enum {
     /* rdb2json errors */
     RDBX_ERR_FAILED_OPEN_FILE,
     RDBX_ERR_R2J_INVALID_STATE,
+    RDBX_ERR_R2J_INVALID_LEVEL,
 
     /* HandlersFilterKey errors */
     RDBX_ERR_FILTER_FAILED_COMPILE_REGEX,
     RDBX_ERR_FAILED_CREATE_FILTER,
 
     /* rdb2resp errors */
+    RDBX_ERR_STREAM_DUPLICATE_PEL,
+    RDBX_ERR_STREAM_INTEG_CHECK,
 
     /* resp writer/loader */
     RDBX_ERR_RESP_WRITE,
+    RDBX_ERR_RESP_INVALID_TARGET_VERSION,
     RDBX_ERR_RESP_READ,
     RDBX_ERR_RESP2REDIS_CREATE_SOCKET,
+    RDBX_ERR_RESP2REDIS_CONF_NONBLOCK_SOCKET,
     RDBX_ERR_RESP2REDIS_INVALID_ADDRESS,
     RDBX_ERR_RESP2REDIS_FAILED_CONNECT,
     RDBX_ERR_RESP2REDIS_FAILED_READ,
@@ -69,6 +74,7 @@ typedef struct RdbxToJsonConf {
     RdbxToJsonEnc encoding;  /* Encoding format for the resulting JSON */
     int includeAuxField;     /* Set to include auxiliary fields in JSON output */
     int includeFunc;         /* Set to include functions in JSON output */
+    int includeStreamMeta;   /* Set to include Stream metadata in JSON output */
     int flatten;             /* Set to create a flattened JSON structure */
 } RdbxToJsonConf;
 

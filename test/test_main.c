@@ -18,8 +18,8 @@ static void test_createReader_missingFile(void **state) {
     assert_int_equal(err, RDB_ERR_FAILED_OPEN_RDB_FILE);
 
     /* verify returned error string */
-    assert_string_equal(RDB_getErrorMessage(parser), "Failed to open RDB file: ./test/dumps/non_exist_file.rdb");
-
+    assert_string_equal(RDB_getErrorMessage(parser),
+                        "Failed to open RDB file `./test/dumps/non_exist_file.rdb`: No such file or directory\n");
     RDB_deleteParser(parser);
 }
 
@@ -38,6 +38,7 @@ static void test_empty_rdb(void **state) {
             .encoding = RDBX_CONV_JSON_ENC_PLAIN,
             .includeAuxField = 1,
             .includeFunc = 0,
+            .includeStreamMeta = 0,
             .flatten = 1,
     };
 
@@ -61,15 +62,15 @@ static void test_mixed_levels_registration(void **state) {
     RdbParser *parser = RDB_createParserRdb(NULL);
     RDB_setLogLevel(parser, RDB_LOG_ERR);
     assert_non_null(RDBX_createReaderFile(parser, rdbfile));
-    RdbxToJsonConf conf1 = {RDB_LEVEL_DATA, RDBX_CONV_JSON_ENC_PLAIN, 0, 0, 1};
+    RdbxToJsonConf conf1 = {RDB_LEVEL_DATA, RDBX_CONV_JSON_ENC_PLAIN, 0, 0, 0, 1};
     assert_non_null(RDBX_createHandlersToJson(parser, jsonfileData, &conf1));
 
-    RdbxToJsonConf conf2 = {RDB_LEVEL_RAW, RDBX_CONV_JSON_ENC_PLAIN, 0, 0, 1};
+    RdbxToJsonConf conf2 = {RDB_LEVEL_RAW, RDBX_CONV_JSON_ENC_PLAIN, 0, 0, 0, 1};
     assert_non_null(RDBX_createHandlersToJson(parser, jsonfileRaw, &conf2));
 
     /* configure at what level of the parser each obj type should be handled and callback */
-    RDB_handleByLevel(parser, RDB_DATA_TYPE_STRING, RDB_LEVEL_RAW, 0);
-    RDB_handleByLevel(parser, RDB_DATA_TYPE_LIST, RDB_LEVEL_DATA, 0);
+    RDB_handleByLevel(parser, RDB_DATA_TYPE_STRING, RDB_LEVEL_RAW);
+    RDB_handleByLevel(parser, RDB_DATA_TYPE_LIST, RDB_LEVEL_DATA);
 
     while ((status = RDB_parse(parser)) == RDB_STATUS_WAIT_MORE_DATA);
     assert_int_equal( status, RDB_STATUS_OK);
@@ -139,7 +140,15 @@ int main(int argc, char *argv[]) {
 
     char *redisInstallFolder = getenv("LIBRDB_REDIS_FOLDER");
 
-    const char *USAGE ="<cmd> [-h|--help] [f|--redis-folder <folder>] [-g|--test-group <group-prefix>] [-t|--test <filter>]";
+    const char *USAGE = "Usage: <cmd> [OPTIONS]\n"
+                        "Options:\n"
+                        "  -h, --help                       Show this help message\n"
+                        "  -f, --redis-folder <folder>      Specify the Redis folder to use for the tests\n"
+                        "  -g, --test-group <group-prefix>  Selected test group to run\n"
+                        "  -t, --test <filter>              Selected test to run";
+
+
+
     /* Parse command-line arguments */
     for (int i = 1; i < argc; i++) {
         if ((strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0)) {
@@ -181,7 +190,6 @@ int main(int argc, char *argv[]) {
     RUN_TEST_GROUP(group_pause);
     RUN_TEST_GROUP(group_rdb_to_redis); /*external*/
     RUN_TEST_GROUP(group_test_rdb_cli); /*external*/
-
 
     printf("\n*************** SIMULATING WAIT_MORE_DATA *******************\n");
     setEnvVar("LIBRDB_SIM_WAIT_MORE_DATA", "1");

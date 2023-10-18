@@ -8,17 +8,15 @@ extern "C" {
 #endif
 
 #ifndef _LIBRDB_API
-#define _LIBRDB_API
+#define _LIBRDB_API __attribute__((visibility("default")))
 #endif
 
-#define MAX_RDB_VER_SUPPORT 11
+typedef char *RdbBulk;
+typedef char *RdbBulkCopy;
 
 /****************************************************************
  * Incomplete structures for compiler checks but opaque access
  ****************************************************************/
-typedef char *RdbBulk;
-typedef char *RdbBulkCopy;
-
 typedef struct RdbReader RdbReader;
 typedef struct RdbParser RdbParser;
 typedef struct RdbHandlers RdbHandlers;
@@ -51,7 +49,6 @@ typedef enum RdbRes {
     RDB_ERR_FAILED_CREATE_PARSER,
     RDB_ERR_FAILED_OPEN_LOG_FILE,
     RDB_ERR_FAILED_READ_RDB_FILE,
-    RDB_ERR_NO_MEMORY,
     RDB_ERR_FAILED_OPEN_RDB_FILE,
     RDB_ERR_WRONG_FILE_SIGNATURE,
     RDB_ERR_UNSUPPORTED_RDB_VERSION,
@@ -72,6 +69,7 @@ typedef enum RdbRes {
     RDB_ERR_ZSET_LP_INTEG_CHECK,
     RDB_ERR_HASH_LP_INTEG_CHECK,
     RDB_ERR_HASH_ZM_INTEG_CHECK,
+    RDB_ERR_STREAM_LP_INTEG_CHECK,
     RDB_ERR_SSTYPE_INTEG_CHECK,
     RDB_ERR_STRING_INVALID_STATE,
     RDB_ERR_PLAIN_HASH_INVALID_STATE,
@@ -81,6 +79,7 @@ typedef enum RdbRes {
     RDB_ERR_QUICK_LIST_INVALID_STATE,
     RDB_ERR_SSTYPE_INVALID_STATE,
     RDB_ERR_MODULE_INVALID_STATE,
+    RDB_ERR_STREAM_INVALID_STATE,
     RDB_ERR_INVALID_BULK_ALLOC_TYPE,
     RDB_ERR_INVALID_BULK_CLONE_REQUEST,
     RDB_ERR_INVALID_BULK_LENGTH_REQUEST,
@@ -147,26 +146,34 @@ typedef struct RdbKeyInfo {
     int opcode;
 } RdbKeyInfo;
 
+typedef struct RdbSlotInfo {
+    uint64_t slot_id;
+    uint64_t slot_size;
+    uint64_t expires_slot_size;
+} RdbSlotInfo;
+
 typedef struct RdbStreamID {
-    uint64_t ms;
-    uint64_t seq;
+    uint64_t ms;   /* Unix time in milliseconds. */
+    uint64_t seq;  /* sequence number */
 } RdbStreamID;
 
 typedef struct RdbStreamMeta {
-    uint64_t length;        /* Current number of elements inside this stream. */
-    uint64_t entriesAdded; /* All time count of elements added. */
-    RdbStreamID *firstID;
-    RdbStreamID *lastID;
-    RdbStreamID *maxDeletedEntryID;
+    uint64_t length;           /* Current number of elements inside this stream. */
+    uint64_t entriesAdded;     /* All time count of elements added. */
+    RdbStreamID firstID;
+    RdbStreamID lastID;
+    RdbStreamID maxDelEntryID; /* maximum deleted entry id */
 } RdbStreamMeta;
 
 typedef struct RdbStreamPendingEntry {
-    long long deliveryTime;
+    RdbStreamID id;
+    uint64_t deliveryTime;
     uint64_t deliveryCount;
 } RdbStreamPendingEntry;
 
 typedef struct RdbStreamGroupMeta {
     RdbStreamID lastId;
+    int64_t entriesRead;
 } RdbStreamGroupMeta;
 
 typedef struct RdbStreamConsumerMeta {
@@ -197,6 +204,8 @@ typedef void (*RdbLoggerCB) (RdbLogLevel l, const char *msg);
     RdbRes (*handleNewDb)(RdbParser *p, void *userData,  int dbnum);                                          \
     /* Callback per db before the keys, with the key count and the total voletaile key count */               \
     RdbRes (*handleDbSize)(RdbParser *p, void *userData, uint64_t db_size, uint64_t exp_size);                \
+    /* Callback per cluster slot with related info */                                                         \
+    RdbRes (*handleSlotInfo)(RdbParser *p, void *userData, RdbSlotInfo *info);                                \
     /* Callback in the beginning of the RDB with various keys and values. exists since redis 3.2 (RDB v7) */  \
     RdbRes (*handleAuxField)(RdbParser *p, void *userData, RdbBulk auxkey, RdbBulk auxval);                   \
     /* Callback on each new key along with additional info, such as, expire-time, LRU, etc. */                \
@@ -271,10 +280,6 @@ typedef struct RdbHandlersStructCallbacks {
     /* Callback to handle module. Currently only reports about the name & size. */
     RdbRes (*handleModule)(RdbParser *p, void *userData, RdbBulk moduleName, size_t serializedSize);
 
-    /*** TODO: RdbHandlersStructCallbacks: ***/
-
-    /*** TODO: RdbHandlersStructCallbacks: stream stuff ... ***/
-
     /* Callback to handle a stream key with listpack value */
     RdbRes (*handleStreamLP)(RdbParser *p, void *userData, RdbBulk nodekey, RdbBulk streamLP);
 
@@ -298,24 +303,16 @@ typedef struct RdbHandlersDataCallbacks {
     RdbRes (*handleHashField)(RdbParser *p, void *userData, RdbBulk field, RdbBulk value);
     /* Callback to handle a member within a set */
     RdbRes (*handleSetMember)(RdbParser *p, void *userData, RdbBulk member);
+    /* Callback to handle a member within a sorted set along with its score */
+    RdbRes (*handleZsetMember)(RdbParser *p, void *userData, RdbBulk member, double score);
     /* Callback to handle function code */
     RdbRes (*handleFunction)(RdbParser *p, void *userData, RdbBulk func);
     /* Callback to handle module. Currently only reports about the name & size */
     RdbRes (*handleModule)(RdbParser *p, void *userData, RdbBulk moduleName, size_t serializedSize);
-
-
-
-    /*** TODO: RdbHandlersDataCallbacks: handleZsetElement ***/
-
-    /* Callback to handle a member within a sorted set along with its score */
-    RdbRes (*handleZsetMember)(RdbParser *p, void *userData, RdbBulk member, double score);
-
-    /*** TODO: RdbHandlersDataCallbacks: stream stuff ... ***/
-
     /* Callback to handle metadata associated with a stream */
     RdbRes (*handleStreamMetadata)(RdbParser *p, void *userData, RdbStreamMeta *meta);
     /* Callback to handle an item within a stream along with its field and value */
-    RdbRes (*handleStreamItem)(RdbParser *p, void *userData, RdbStreamID *id, RdbBulk field, RdbBulk value);
+    RdbRes (*handleStreamItem)(RdbParser *p, void *userData, RdbStreamID *id, RdbBulk field, RdbBulk value, int64_t itemsLeft);
     /* Callback to handle the creation of a new consumer group within a stream */
     RdbRes (*handleStreamNewCGroup)(RdbParser *p, void *userData, RdbBulk grpName, RdbStreamGroupMeta *meta);
     /* Callback to handle a pending entry within a consumer group */
@@ -323,7 +320,7 @@ typedef struct RdbHandlersDataCallbacks {
     /* Callback to handle the creation of a new consumer within a stream */
     RdbRes (*handleStreamNewConsumer)(RdbParser *p, void *userData, RdbBulk consName, RdbStreamConsumerMeta *meta);
     /* Callback to handle a pending entry within a consumer */
-    RdbRes (*handleStreamConsumerPendingEntry)(RdbParser *p, void *userData, RdbStreamPendingEntry *pendingEntry);
+    RdbRes (*handleStreamConsumerPendingEntry)(RdbParser *p, void *userData, RdbStreamID *streamId);
 
 } RdbHandlersDataCallbacks;
 
@@ -399,10 +396,19 @@ _LIBRDB_API void RDB_dontPropagate(RdbParser *p);
  * Parser setters & getters
  ****************************************************************/
 
+/* set deep integrity check */
 _LIBRDB_API void RDB_setDeepIntegCheck(RdbParser *p, int deep);
+
+/* get number of bytes processed so far */
 _LIBRDB_API size_t RDB_getBytesProcessed(RdbParser *p);
+
+/* get current state of the parser */
 _LIBRDB_API RdbState RDB_getState(RdbParser *p);
+
+/* get number of handlers registered at given level */
 _LIBRDB_API int RDB_getNumHandlers(RdbParser *p, RdbHandlersLevel lvl);
+
+/* set the parser to ignore checksum errors */
 _LIBRDB_API void RDB_IgnoreChecksum(RdbParser *p);
 
 /* There could be relatively large strings stored within Redis, which are
@@ -528,6 +534,11 @@ void RDB_free(RdbParser *p, void *ptr);
  * it actually allocated behind on stack, heap, reference another memory, or
  * externally allocated by user supplied RdbBulk allocation function.
  *
+ * You can print RdbBulk with printf() as there is an implicit \0 at the
+ * end of the string. However the string is binary safe and can contain
+ * \0 characters in the middle. The length is stored out of bound and can be
+ * queried by function RDB_bulkLen() only from the handlers callbacks.
+ *
  * In order to process the string behind the current call-stack,  function
  * `RDB_bulkClone()` is the way to clone a string, within callback context only!
  * If bulk allocated on stack (default of bulkAllocType) or reference another
@@ -583,8 +594,11 @@ typedef enum RdbDataType {
     RDB_DATA_TYPE_MAX
 } RdbDataType;
 
-/* Can be called at any point along parsing (Useful after parsing source rdb version) */
-_LIBRDB_API void RDB_handleByLevel(RdbParser *p, RdbDataType t, RdbHandlersLevel lvl, unsigned int flags);
+/* Return 0 on success, 1 otherwise. Can be called at any point along parsing
+ * (Useful after parsing source rdb version) */
+_LIBRDB_API int RDB_handleByLevel(RdbParser *p,
+                                  RdbDataType t,
+                                  RdbHandlersLevel lvl);
 
 /*****************************************************************
  * LIBRDB Versioning
@@ -593,6 +607,8 @@ _LIBRDB_API void RDB_handleByLevel(RdbParser *p, RdbDataType t, RdbHandlersLevel
  *****************************************************************/
 
 _LIBRDB_API const char* RDB_getLibVersion(int* major, int* minor, int* patch);
+
+_LIBRDB_API int RDB_getMaxSuppportRdbVersion(void);
 
 #ifdef __cplusplus
 }

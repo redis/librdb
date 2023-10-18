@@ -2,6 +2,7 @@
 #define _POSIX_C_SOURCE 200809L
 
 #include <stdio.h>
+#include <assert.h>
 #include <ctype.h>
 #include <string.h>
 #include <stdlib.h>
@@ -22,6 +23,16 @@ redisContext *redisServersStack[MAX_NUM_REDIS_INST] = {0};
 int        redisPort[MAX_NUM_REDIS_INST]= {0};
 pid_t      redisPID[MAX_NUM_REDIS_INST] = {0};
 const char *redisInstallFolder  = NULL;
+char redisVer[10];
+int redisVersionInit, redisVerMajor, redisVerMinor;
+
+const char *getTargetRedisVersion(int *major, int *minor) {
+    /* must be called only after setupRedisServer() */
+    assert(redisVersionInit == 1);
+    if (major) *major = redisVerMajor;
+    if (minor) *minor = redisVerMinor;
+    return redisVer;
+}
 
 void runSystemCmd(const char *cmdFormat, ...) {
     char cmd[1024];
@@ -38,10 +49,10 @@ void runSystemCmd(const char *cmdFormat, ...) {
     }
 }
 
-char *readFile(const char *filename,  size_t *length) {
+char *readFile(const char *filename,  size_t *length, char *ignoredCh) {
     FILE* fp;
     char* str;
-    size_t size;
+    size_t size, i = 0;
 
     assert_non_null(fp = fopen(filename, "r"));
 
@@ -50,14 +61,19 @@ char *readFile(const char *filename,  size_t *length) {
     fseek (fp, 0, SEEK_SET);
     assert_non_null(str = (char*) malloc(size + 1));
 
-    size_t readBytes = fread(str, 1, size, fp);
-    assert_int_equal(readBytes, size);
+    char ch;
+    while (fread(&ch, 1, 1, fp) == 1) {
+        int incr = 1;
+        str[i] = ch;
+        for (int j = 0 ; (ignoredCh) && (ignoredCh[j] != '\0') && (incr) ; ++j)
+            incr = (ignoredCh[j] == ch) ? 0 : 1;
+        i += incr;
+    }
 
-    str[size] = '\0';
+    str[i] = '\0';
     fclose(fp);
 
-    if (length) *length = size;
-
+    if (length) *length = i;
     return str;
 }
 
@@ -103,7 +119,7 @@ char *substring(char *str, size_t len, char *substr) {
 void assert_file_payload(const char *filename, char *expData, int expLen, MatchType matchType, int expMatch) {
     const char *matchTypeName, *errMsg;
     size_t filelen;
-    char *filedata = readFile(filename, &filelen);
+    char *filedata = readFile(filename, &filelen, NULL);
     int result=1;
 
     switch (matchType) {
@@ -137,7 +153,7 @@ void assert_file_payload(const char *filename, char *expData, int expLen, MatchT
         printf("%s\n---- file [%s] ----\n", errMsg, filename);
         printHexDump(filedata, filelen, buf, (int) sizeof(buf));
         printf("%s", buf);
-        printf("\n---- Expected %s ----\n", matchTypeName);
+        printf("\n---- Expected %s %s ----\n", matchTypeName, (expMatch) ? "" : "not to match");
         printHexDump(expData, expLen, buf, (int) sizeof(buf));
         printf("%s", buf);
         printf("\n------------\n");
@@ -251,6 +267,43 @@ void setRedisInstallFolder(const char *path) {
     redisInstallFolder = path;
 }
 
+/* Extract Redis version.  Aborts on any failure. */
+void get_redis_version(redisContext *c, int *majorptr, int *minorptr) {
+#define REDIS_VERSION_FIELD "redis_version:"
+    redisReply *reply;
+    char *eptr, *s, *e;
+    int major, minor;
+
+    reply = redisCommand(c, "INFO");
+    if (reply == NULL || c->err || reply->type != REDIS_REPLY_STRING)
+        goto abort;
+    if ((s = strstr(reply->str, REDIS_VERSION_FIELD)) == NULL)
+        goto abort;
+
+    s += strlen(REDIS_VERSION_FIELD);
+
+    /* We need a field terminator and at least 'x.y.z' (5) bytes of data */
+    if ((e = strstr(s, "\r\n")) == NULL || (e - s) < 5)
+        goto abort;
+
+    /* Extract version info */
+    major = strtol(s, &eptr, 10);
+    if (*eptr != '.') goto abort;
+    minor = strtol(eptr+1, NULL, 10);
+
+    /* Push info the caller wants */
+    if (majorptr) *majorptr = major;
+    if (minorptr) *minorptr = minor;
+
+    freeReplyObject(reply);
+    return;
+
+    abort:
+    freeReplyObject(reply);
+    fprintf(stderr, "Error:  Cannot determine Redis version, aborting\n");
+    exit(1);
+}
+
 void setupRedisServer(const char *extraArgs) {
 
     /* If redis not installed return gracefully */
@@ -297,6 +350,7 @@ void setupRedisServer(const char *extraArgs) {
         exit(1);
     } else { /* parent */
         int retryCount = 3;
+        static char *prefixVer = "";
 
         redisContext *redisConnContext = redisConnect("localhost", port);
         while ((!redisConnContext) || (redisConnContext->err)) {
@@ -319,7 +373,20 @@ void setupRedisServer(const char *extraArgs) {
         redisPort[currRedisInst] = port;
         redisServersStack[currRedisInst] = redisConnContext;
         redisPID[currRedisInst]  = pid;
-        printf(">> Redis Server(%d) started on port %d with PID %d\n", currRedisInst, port, pid);
+
+        if (!redisVersionInit) {
+            get_redis_version(redisConnContext, &redisVerMajor, &redisVerMinor);
+            snprintf(redisVer, sizeof(redisVer), "%d.%d", redisVerMajor, redisVerMinor);
+            if ((redisVerMajor == 255) && (redisVerMinor == 255)) {/* unstable version? */
+                snprintf(redisVer, sizeof(redisVer),
+                         MAX_SUPPORTED_REDIS_VERSION);
+                prefixVer = "Unresolved Version. Assumed ";
+            }
+            redisVersionInit = 1;
+
+        }
+        printf(">> Redis Server(%d) started on port %d with PID %d (%sVersion=%s)\n",
+               currRedisInst, port, pid, prefixVer, redisVer);
 
         /* Close any subprocess in case of exit due to error flow */
         atexit(cleanupRedisServer);
@@ -450,10 +517,10 @@ void assert_json_equal(const char* filename1, const char* filename2, int ignoreL
     int res = -1;
 
     FILE* file1 = fopen(filename1, "r");
-    assert_non_null(file1);
+    ASSERT_TRUE(file1, "Failed to open file: %s", filename1);
 
     FILE* file2 = fopen(filename2, "r");
-    assert_non_null(file2);
+    ASSERT_TRUE(file2, "Failed to open file: %s", filename2);
 
     while (fgets(line1, MAX_LINE_LENGTH, file1)) {
         sanitize_json_line(line1);
@@ -497,12 +564,12 @@ end_cmp:
 
     printf("Json files not equal.\n");
     printf("---- %s ----\n", filename1);
-    char *f1 = readFile(filename1, NULL);
+    char *f1 = readFile(filename1, NULL, NULL);
     printf ("%s", f1);
     free(f1);
 
     printf("\n---- %s ----\n", filename2);
-    char *f2 = readFile(filename2, NULL);
+    char *f2 = readFile(filename2, NULL, NULL);
     printf ("%s", f2);
     free(f2);
     printf("\n------------\n");

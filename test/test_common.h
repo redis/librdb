@@ -9,6 +9,8 @@
 #include "../api/librdb-api.h"  /* RDB library header */
 #include "../api/librdb-ext-api.h" /* RDB library extension header */
 
+#define MAX_SUPPORTED_REDIS_VERSION "7.2"
+
 #define UNUSED(...) unused( (void *) NULL, __VA_ARGS__);
 static inline void unused(void *dummy, ...) { (void)(dummy);}
 
@@ -16,6 +18,15 @@ static inline void unused(void *dummy, ...) { (void)(dummy);}
 #define TMP_FOLDER(file) "./test/tmp/"file
 
 #define STR_AND_SIZE(str) str, (sizeof(str)-1)
+
+#define ASSERT_TRUE(exp, format, ...) \
+    do { \
+        if (!(exp)) { \
+            fprintf(stderr, "Assertion failed: %s\n", #exp); \
+            fprintf(stderr, "Error: " format "\n", __VA_ARGS__); \
+            assert_true(0); \
+        } \
+    } while (0)
 
 typedef enum MatchType {
     M_PREFIX,
@@ -34,6 +45,7 @@ void assert_json_equal(const char *f1, const char *f2, int ignoreListOrder);
 void setRedisInstallFolder(const char *path);
 int getRedisPort(void);
 void setupRedisServer(const char *extraArgs);
+const char *getTargetRedisVersion(int *major, int *minor); /* call only after setupRedisServer() */
 void teardownRedisServer(void);
 int isSetRedisServer(void);
 char *sendRedisCmd(char *cmd, int expRetType, char *expRsp);
@@ -57,7 +69,7 @@ void *xclone(void *str, size_t len);
 void xfree(void *ptr);
 void *xrealloc(void *ptr, size_t size);
 
-char *readFile(const char *filename, size_t *len);
+char *readFile(const char *filename, size_t *len, char *ignoredCh);
 void cleanTmpFolder(void);
 void setEnvVar (const char *name, const char *val);
 char *substring(char *str, size_t len, char *substr);

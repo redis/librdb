@@ -3,4 +3,4 @@
 "ctime":"1693250800",
 "used-mem":"866344",
 "aof-base":"0",
-"Function_1":"#!lua name=mylib \n redis.register_function('myfunc', function(keys, args) return args[1] end)",
+"Function_1":"#!lua name=mylib \n redis.register_function('myfunc', function(keys, args) return args[1] end)"

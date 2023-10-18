@@ -54,7 +54,8 @@ RdbxReaderFile *RDBX_createReaderFile(RdbParser *p, const char *filename) {
     }
 
     if (!(f = fopen(filename, "rb"))) {
-        RDB_reportError(p, RDB_ERR_FAILED_OPEN_RDB_FILE, "Failed to open RDB file: %s", filename);
+        RDB_reportError(p, RDB_ERR_FAILED_OPEN_RDB_FILE,
+                        "Failed to open RDB file `%s`: %s\n", filename, strerror(errno));
         return NULL;
     }
 

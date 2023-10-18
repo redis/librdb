@@ -3,9 +3,9 @@
 "ctime":"1677580558",
 "used-mem":"937464",
 "aof-base":"0",
-"string2":"\x00\tHi there!",
-"mylist1":"\x12\x01\x02\x0b\x0b\x00\x00\x00\x01\x00\x82v1\x03\xff",
-"mylist3":"\x12\x01\x02\x13\x13\x00\x00\x00\x03\x00\x82v3\x03\x82v2\x03\x82v1\x03\xff",
-"lzf_compressed":"\x00\xc3\t@v\x01cc\xe0i\x00\x01cc",
-"string1":"\x00\x04blaa",
-"mylist2":"\x12\x01\x02\x0f\x0f\x00\x00\x00\x02\x00\x82v2\x03\x82v1\x03\xff"
+"string2":"\u0000\tHi there!",
+"mylist1":"\u0012\u0001\u0002\u000b\u000b\u0000\u0000\u0000\u0001\u0000\u0082v1\u0003\u00ff",
+"mylist3":"\u0012\u0001\u0002\u0013\u0013\u0000\u0000\u0000\u0003\u0000\u0082v3\u0003\u0082v2\u0003\u0082v1\u0003\u00ff",
+"lzf_compressed":"\u0000\u00c3\t@v\u0001cc\u00e0i\u0000\u0001cc",
+"string1":"\u0000\u0004blaa",
+"mylist2":"\u0012\u0001\u0002\u000f\u000f\u0000\u0000\u0000\u0002\u0000\u0082v2\u0003\u0082v1\u0003\u00ff"

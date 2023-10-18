@@ -1,6 +1,6 @@
-# librdb - DRAFT
+# librdb
 
-This is a C library for parsing RDB files.
+C library for parsing RDB files.
 
 The Parser is implemented in the spirit of SAX parser. It fires off a series of events as
 it reads the RDB file from beginning to end, and callbacks to handlers registered on
@@ -9,59 +9,58 @@ selected types of data.
 
 The primary objective of this project is to offer an efficient and robust C library for
 parsing Redis RDB files. It also provides an extension library for parsing to JSON and RESP
-protocols, enabling consumption by various writers. Additionally, a command-line interface
-(CLI) is available for utilizing these functionalities.
-
-## Current status
-The project is currently in its early phase and is considered to be a draft. At present,
-the parser is only capable of handling STRING, LIST, HASH and SET data types. We are 
-actively seeking feedback on the design, API, and implementation to refine the project 
-before proceeding with further development. Community contributions are welcome, yet 
-please note that the codebase is still undergoing significant changes and may evolve in 
-the future.
+protocols.
 
 ## Getting Started
-If you just wish to get a basic understanding of the library's functionality, without
-running tests (To see parser internal state printouts, execute the command
-`export LIBRDB_DEBUG_DATA=1` beforehand):
+If you just wish to get a basic understanding of the library's functionality:
 
-    % make all example
+    % make example
+
+To see cool internal state printouts of the parser, set env-var `LIBRDB_DEBUG_DATA` beforehand:
+
+    % export LIBRDB_DEBUG_DATA=1
+    % make example
 
 To build and run tests, you need to have cmocka unit testing framework installed:
 
     % make test
 
-Install and run CLI extension of this library. Parse RDB file to json:
+To install into /usr/local/:
 
     % make install
-    % rdb-cli multiple_lists_strings.rdb json
 
+To run CLI extension of this library and let it parse RDB file to json:
+
+    % rdb-cli mixed_data_types.rdb json
     [{
-    "string2":"Hi there!",
-    "mylist1":["v1"],
-    "mylist3":["v3","v2","v1"],
-    "lzf_compressed":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
-    "string1":"blaa",
-    "mylist2":["v2","v1"]
+      "my_key":"Hello, Redis!",
+      "my_set":["member1","member2"],
+      "my_zset":{"Bob":"5","Alice":"10","Charlie":"15"},
+      "my_hash":{"field1":"value1","field2":"field2"},
+      "my_list":["item1","item2", "item3"],
+      "my_stream":{
+        "entries":[
+          { "id":"1695649068107-0", "values":{"message":"Message1"} },
+          { "id":"1695649068110-0", "values":{"message":"Message2"} },
+          { "id":"1695893015933-0", "values":{"field1":"value1", "field2":"value2", "field3":"value3"} }
+      ]}
     }]
 
 
-Run CLI extension to generate RESP commands (this time read file from standard input):
+To generate RESP commands:
 
-    % gzip -dc multiple_lists_strings.rdb.gz | rdb-cli - resp
-    *3
-    $3
-    SET
-    $7
-    string2
+    % rdb-cli multiple_lists_strings.rdb resp
+    *2
+    $6
+    SELECT
+    $1
     ...
 
-Run against live Redis server and upload RDB file (example assumes Redis is installed locally):
+To run against live Redis server and upload RDB file, assuming Redis is installed as well:
 
     % redis-server --port 6379 & 
     % rdb-cli multiple_lists_strings.rdb redis -h 127.0.0.1 -p 6379
     % redis-cli keys "*"
-
     1) "string2"
     2) "mylist3"
     3) "mylist2"
@@ -81,27 +80,6 @@ issues, it is worthwhile to develop a new parser with a modern architecture, tha
 can also challenge the current integrated RDB parser of Redis and even replace it in the
 future.
 
-### Replacing the integrated RDB parser of Redis?
-It is necessary to address first the reasons and missing features in the available parser,
-making replacing it a feasible option:
-
-1. The current parser is not designed to extend and customize it.
-2. Lacks of  a unit testing framework.
-3. Does not support asynchronous parsing - That is, today reading of RDB sources is
-   possible only in blocking IO mode, without the option to let Redis thread to carry on to
-   other tasks and notify it asynchronously once a read operation is done.
-4. Doesn’t support pause and resume capabilities - A parsing of RDB is being made from
-   start till completion as a single operation, without the option to indicate the parser
-   to pause and save its state, in order to do other tasks in between.
-5. Once we decide to write RDB parser library, it is better to maintain a single parser
-   rather than two.
-
-Although it is challenging to develop a reusable and extensible parser that can match in
-performance, according to our initial evaluation as long as the new parser will avoid
-redundant copies and allocation of data, it is expected that it will show similar performance,
-or minor degradation at most, and yet we will gain all the advantages mentioned above. Having
-said that, our primary focus is to develop an “independent” RDB parser library.
-
 ## Main building blocks
 The RDB library parser composed of 3 main building blocks:
 
@@ -110,15 +88,12 @@ The RDB library parser composed of 3 main building blocks:
        +--------+     +--------+     +----------+
 
 ### Reader
-The **Reader** gives interface to the parser to access the RDB source. As first phase we will support:
-   * Reading from a file (Status: Done)
-   * Reading from a socket (Status: Todo)
-   * User defined reader (Status: Done)
+The **Reader** gives interface to the parser to access the RDB source. It can be either
+reading from a file, a socket or user defined reader. Possible extensions might be reading 
+from S3, gz file, or a live redis instance.
 
-Possible extensions might be reading from S3, gz file, or a live redis instance.
-
-This block is optional. As an alternative, the parser can be fed with chunks of data that
-hold RDB payload.
+This block is optional. As an alternative, the parser can be fed with prefetched chunks of 
+data.
 
 ### Parser
 The **Parser** is the core engine. It will parse RDB file and trigger registered handlers.
@@ -228,7 +203,7 @@ destruction, or when newer block replacing old one.
 
     Usage: rdb-cli /path/to/dump.rdb [OPTIONS] {json|resp|redis} [FORMAT_OPTIONS]
     OPTIONS:
-            -l, --log-file <PATH>         Path to the log file (Default: './rdb-cli.log')
+            -l, --log-file {<PATH>|-}     Path to the log file or stdout (Default: './rdb-cli.log')
     
     Multiple filters combination of keys/types/dbs can be specified:
             -k, --key <REGEX>             Include only keys that match REGEX
@@ -253,6 +228,7 @@ destruction, or when newer block replacing old one.
     
     FORMAT_OPTIONS ('redis'|'resp'):
             -r, --support-restore         Use the RESTORE command when possible
+            -d, --del-before-write        Delete each key before writing. Relevant for non-empty db
             -t, --target-redis-ver <VER>  Specify the target Redis version. Helps determine which commands can
                                           be applied. Particularly crucial if support-restore being used
                                           as RESTORE is closely tied to specific RDB versions. If versions not
@@ -370,10 +346,9 @@ of callbacks, it is the duty of the application to configure for each RDB object
 what level it is needed to get handled by calling `RDB_handleByLevel()`. Otherwise, the
 parser will resolve it by parsing and calling handlers that are registered at lowest level.
 
-As for the common callbacks to all levels (which includes `handleStartRdb`, `handleNewDb`,
-`handleEndRdb`, `handleDbSize` and `handleAuxField`) if registered at different
-levels then all of them will be called, one by one, starting from handlers that are
-registered at the lowest level.
+As for the common callbacks to all levels, such as `handleStartRdb` or `handleNewDb`,
+if registered at different levels then all of them will be called, one by one, starting 
+from handlers that are registered at the lowest level.
 
 ## Implementation notes
 The Redis RDB file format consists of a series of opcodes followed by the actual data that

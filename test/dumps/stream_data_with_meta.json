@@ -1,0 +1,29 @@
+  "mystream":{
+  "entries":[
+    { "id":"1695649068107-0", "items":{"message":"Message1"} },
+    { "id":"1695649068110-0", "items":{"message":"Message2"} },
+    { "id":"1695649069139-0", "items":{"message":"Message3"} },
+    { "id":"1695649446276-0", "items":{"message":"Message4"} },
+    { "id":"1695649456516-0", "items":{"message":"Message5"} },
+    { "id":"1695893015933-0", "items":{"field1":"value1", "field2":"value2", "field3":"value3"} }],
+  "length": 6,
+  "entriesAdded": 6,
+  "firstID": "1695649068107-0",
+  "lastID": "1695893015933-0",
+  "maxDelEntryID": "0-0",
+  "groups": [
+    {"name": "groupA", "lastid": "1695649446276-0", "entriesRead": 4,
+      "pending": [
+        { "sent": 1695649446276, "id":"1695649446276-0", "count": 1 }],
+      "consumers": [
+        { "name": "consumerA1", "activeTime": 1696679585023, "seenTime": 1696679585023},
+        { "name": "consumerA2", "activeTime": 1696679585024, "seenTime": 1696679585024,
+          "pending": [
+            {"id":"1695649446276-0"}]}]},
+    {"name": "groupB", "lastid": "1695649069139-0", "entriesRead": 3,
+      "pending": [
+        { "sent": 1695649069139, "id":"1695649069139-0", "count": 1 }],
+      "consumers": [
+        { "name": "consumerB1", "activeTime": 1696679585026, "seenTime": 1696679585026,
+          "pending": [
+            {"id":"1695649069139-0"}]}]}]}

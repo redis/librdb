@@ -22,7 +22,7 @@ void rdb_to_tcp(const char *rdbfile, int pipelineDepth, int isRestore, char *res
 
     RdbxToRespConf rdb2respConf = {
         .supportRestore = isRestore,
-        .dstRedisVersion = "45.67.89",
+        .dstRedisVersion = getTargetRedisVersion(NULL, NULL),
         .supportRestoreModuleAux = isSupportRestoreModuleAux()
     };
 
@@ -50,6 +50,7 @@ static void rdb_to_json(const char *rdbfile, const char *outfile) {
             .includeAuxField = 0,
             .includeFunc = 0,
             .flatten = 1,
+            .includeStreamMeta = 0,
     };
 
     RdbParser *parser = RDB_createParserRdb(NULL);
@@ -91,10 +92,12 @@ static void test_rdb_to_redis_common(const char *rdbfile, int ignoreListOrder, c
         rdb_to_tcp(rdbfile, 1, isRestore, TMP_FOLDER("cmd.resp"));
         sendRedisCmd("SAVE", REDIS_REPLY_STATUS, NULL);
 
-        if (expRespCmd) {
-            /* Verify corresponding RESP commands includes `expRespCmd` or `RESTORE` */
-            char *exp = (isRestore) ?  "RESTORE" : expRespCmd;
-             assert_file_payload(TMP_FOLDER("cmd.resp"), exp, strlen(exp), M_SUBSTR, 1);
+        if (expRespCmd && !isRestore) {
+            /* Verify corresponding RESP commands includes `expRespCmd` */
+             assert_file_payload(TMP_FOLDER("cmd.resp"),
+                                 expRespCmd,
+                                 strlen(expRespCmd),
+                                 M_SUBSTR, 1);
         }
 
         /* 3. From DUMP-RDB generate Json (out2.json) */
@@ -229,6 +232,11 @@ static void test_rdb_to_redis_policy_lru(void **state) {
 
 static void test_rdb_to_redis_function(void **state) {
     UNUSED(state);
+    int major;
+    getTargetRedisVersion(&major, NULL);
+    /* function available since 7.0 */
+    if (major < 7)
+        skip();
     test_rdb_to_redis_common(DUMP_FOLDER("function.rdb"), 1, NULL, NULL);
 }
 
@@ -265,6 +273,10 @@ void test_rdb_to_redis_module(void **state) {
     sendRedisCmd("testrdb.get.key 123456", REDIS_REPLY_STRING, "7890");
 }
 
+void test_rdb_to_redis_stream(void **state) {
+    UNUSED(state);
+    test_rdb_to_redis_common(DUMP_FOLDER("stream_v11.rdb"), 1, NULL, NULL);
+}
 
 /* iff 'delKeyBeforeWrite' is not set, then the parser will return an error on
  * loading 100_lists.rdb ("mylist1 mylist2 ... mylist100") on key 'mylist62'
@@ -277,7 +289,7 @@ static void test_rdb_to_redis_del_before_write(void **state) {
         RdbxToRespConf rdb2respConf = {
                 .delKeyBeforeWrite = delKeyBeforeWrite,
                 .supportRestore = 1,
-                .dstRedisVersion = "45.67.89"
+                .dstRedisVersion = getTargetRedisVersion(NULL, NULL),
         };
 
         /* create key `mylist62` that goanna appear as well in the RDB file */
@@ -346,6 +358,12 @@ int group_rdb_to_redis(void) {
             cmocka_unit_test_setup(test_rdb_to_redis_zset_lp, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_zset_zl, setupTest),
 
+            /* module */
+            cmocka_unit_test_setup(test_rdb_to_redis_module, setupTest),
+
+            /* stream */
+            cmocka_unit_test_setup(test_rdb_to_redis_stream, setupTest),
+
             /* expired keys */
             cmocka_unit_test_setup(test_rdb_to_redis_set_expired, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_set_not_expired, setupTest),
@@ -360,7 +378,6 @@ int group_rdb_to_redis(void) {
             cmocka_unit_test_setup(test_rdb_to_redis_del_before_write, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_multiple_dbs, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_function, setupTest),
-            cmocka_unit_test_setup(test_rdb_to_redis_module, setupTest),
     };
 
     int res = cmocka_run_group_tests(tests, NULL, NULL);

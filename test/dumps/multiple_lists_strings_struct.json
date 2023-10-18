@@ -4,8 +4,8 @@
 "used-mem":"937464",
 "aof-base":"0",
 "string2":"Hi there!",
-"mylist1":["\x0b\x00\x00\x00\x01\x00\x82v1\x03\xff"],
-"mylist3":["\x13\x00\x00\x00\x03\x00\x82v3\x03\x82v2\x03\x82v1\x03\xff"],
+"mylist1":["\u000b\u0000\u0000\u0000\u0001\u0000\u0082v1\u0003\u00ff"],
+"mylist3":["\u0013\u0000\u0000\u0000\u0003\u0000\u0082v3\u0003\u0082v2\u0003\u0082v1\u0003\u00ff"],
 "lzf_compressed":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc",
 "string1":"blaa",
-"mylist2":["\x0f\x00\x00\x00\x02\x00\x82v2\x03\x82v1\x03\xff"]
+"mylist2":["\u000f\u0000\u0000\u0000\u0002\u0000\u0082v2\u0003\u0082v1\u0003\u00ff"]
