@@ -1166,15 +1166,15 @@ static RdbStatus aggMakeRoom(RdbParser *p, size_t numBytesRq) {
     BulkInfo *currBuff = ctx->bulkArray + ctx->curBulkIndex;
     size_t freeRoomLeft = currBuff->len - currBuff->written;
 
-    /* fill-up current buffer before attempting to allocate new one */
-    if (likely(freeRoomLeft >= numBytesRq))
-        return RDB_STATUS_OK;
-
     if (unlikely(p->maxRawSize < ctx->totalSize + numBytesRq)) {
         RDB_reportError(p, RDB_ERR_MAX_RAW_LEN_EXCEEDED_FOR_KEY, "Maximum raw length exceeded for key (len=%lu)",
                         ctx->totalSize + numBytesRq);
         return RDB_STATUS_ERROR;
     }
+
+    /* fill-up current buffer before attempting to allocate new one */
+    if (likely(freeRoomLeft >= numBytesRq))
+        return RDB_STATUS_OK;
 
     /* determine next buffer size to allocate. Factor x2 up-to 1mb, x1.5 upto
      * 256mb, or x1.2 above it. With 96 entries for bulkArray, it is sufficient
