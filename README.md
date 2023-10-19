@@ -203,18 +203,18 @@ destruction, or when newer block replacing old one.
 
     Usage: rdb-cli /path/to/dump.rdb [OPTIONS] {json|resp|redis} [FORMAT_OPTIONS]
     OPTIONS:
-            -l, --log-file {<PATH>|-}     Path to the log file or stdout (Default: './rdb-cli.log')
+            -l, --log-file <PATH>         Path to the log file or stdout (Default: './rdb-cli.log')
     
-    Multiple filters combination of keys/types/dbs can be specified:
+            Multiple filters combination of keys/types/dbs can be specified:
             -k, --key <REGEX>             Include only keys that match REGEX
-            -K  --no-key <REGEX>          Exclude keys that match REGEX
+            -K  --no-key <REGEX>          Exclude all keys that match REGEX
             -t, --type <TYPE>             Include only selected TYPE {str|list|set|zset|hash|module|func}
             -T, --no-type <TYPE>          Exclude TYPE {str|list|set|zset|hash|module|func}
             -d, --dbnum <DBNUM>           Include only selected db number
             -D, --no-dbnum <DBNUM>        Exclude DB number
     
     FORMAT_OPTIONS ('json'):
-            -i, --include <EXTRAS>        To include: {aux-val|func}
+            -i, --include <EXTRAS>        To include: {aux-val|func|stream-meta}
             -f, --flatten                 Print flatten json, without DBs Parenthesis
             -o, --output <FILE>           Specify the output file. If not specified, output to stdout
     
@@ -237,6 +237,7 @@ destruction, or when newer block replacing old one.
             -s, --start-cmd-num <NUM>     Start writing redis from command number
             -e, --enum-commands           Command enumeration and tracing by preceding each generated RESP command
                                           with debug command of type: `SET _RDB_CLI_CMD_ID_ <CMD-ID>`
+
 
 <a name="Advanced"></a>
 ## Advanced
