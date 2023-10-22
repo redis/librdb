@@ -50,4 +50,20 @@ static inline void iov_plain(struct iovec *iov, const char *s, size_t l) {
     iov->iov_len = l;
 }
 
+/* The api of RESP writer is rather simple as it expects a plain iovec. This
+ * API is not sufficient when it comes to play the RESP against live server such
+ * as the case of respToRedisLoader. In case of an error from the server it is
+ * desired to report an informative message to the user of the problematic command
+ * and key.
+ *
+ * In order to keep the RESP writer API simple, the command and key will passed
+ * implicitly, hidden before iovec and the following struct reflects this layout.
+ * Respectively, respToRedisLoader will have the logic to cast iovec back to iovecExt.
+ */
+typedef struct iovecExt {
+    const char *cmd;
+    const char *key;
+    struct iovec iov[20];
+} iovecExt;
+
 #endif /*define RDBX_COMMON_H*/

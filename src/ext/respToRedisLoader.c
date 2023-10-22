@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+#include <stddef.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -17,7 +18,7 @@
 #define PIPELINE_DEPTH_MAX        1000  /* limit the max value allowed to configure for pipeline depth */
 
 #define NUM_RECORDED_CMDS         400   /* Number of commands to backlog, in a cyclic array */
-#define RECORDED_DATA_MAX_LEN     40    /* Maximum payload size from any command to record into cyclic array */
+#define RECORDED_KEY_MAX_LEN     40    /* Maximum payload size from any command to record into cyclic array */
 
 #define REPLY_BUFF_SIZE           1024  /* reply buffer size */
 
@@ -29,7 +30,10 @@ struct RdbxRespToRedisLoader {
     struct {
         int num;
         int pipelineDepth;
-        char cmdPrefix[NUM_RECORDED_CMDS][RECORDED_DATA_MAX_LEN];
+        /* pointers to (static) strings that hold the template of the command sent (no char* allocation required) */
+        const char *cmd[NUM_RECORDED_CMDS];
+        /* strncpy() of the key sent */
+        char key[NUM_RECORDED_CMDS][RECORDED_KEY_MAX_LEN];
     } pendingCmds;
 
     RespReaderCtx respReader;
@@ -40,29 +44,13 @@ struct RdbxRespToRedisLoader {
 static void onReadRepliesError(RdbxRespToRedisLoader *ctx) {
     RespReaderCtx *respReader = &ctx->respReader;
     int currIdx = ctx->respReader.countReplies % NUM_RECORDED_CMDS;
-    char *currCmdRecord = ctx->pendingCmds.cmdPrefix[currIdx];
 
-    /* Print also previous command if available. */
-    if (ctx->respReader.countReplies > 1) {
-        int prevIdx = (currIdx == 0) ? NUM_RECORDED_CMDS - 1 : currIdx - 1;
-        char *prevCmdRecord = ctx->pendingCmds.cmdPrefix[prevIdx];
-        RDB_reportError(ctx->p, (RdbRes) RDBX_ERR_RESP_WRITE,
-            "\nReceived Server error: \"%s\"\nGot failed on command [#%d] (First %d bytes):\n%s\n"
-            "\nPreceding command [#%d] was: \n%s\n",
-            respReader->errorMsg,
-            ctx->respReader.countReplies,
-            RECORDED_DATA_MAX_LEN,
-            currCmdRecord,
-            ctx->respReader.countReplies-1,
-            prevCmdRecord);
-    } else {
-        RDB_reportError(ctx->p, (RdbRes) RDBX_ERR_RESP_WRITE,
-            "\nReceived Server error:\n\"%s\"\n\nGot failed on command [#%d] (First %d bytes):\n%s\n",
-            respReader->errorMsg,
-            ctx->respReader.countReplies,
-            RECORDED_DATA_MAX_LEN,
-            currCmdRecord);
-    }
+    RDB_reportError(ctx->p, (RdbRes) RDBX_ERR_RESP_WRITE,
+                    "\nerror from dst '-%s' on key '%s' on command '%s' (RESP Command #%lu)\n",
+                    respReader->errorMsg,
+                    ctx->pendingCmds.key[currIdx],
+                    ctx->pendingCmds.cmd[currIdx],
+                    ctx->respReader.countReplies);
 }
 
 /* Read 'numToRead' replies from the socket. * Return 0 for success, 1 otherwise. */
@@ -97,23 +85,13 @@ static int readReplies(RdbxRespToRedisLoader *ctx, int numToRead) {
 }
 
 /* For debugging, record the command into the cyclic array before sending it */
-static inline void recordNewCmd(RdbxRespToRedisLoader *ctx, const struct iovec *cmd_iov, int iovcnt) {
+static inline void recordCommandSent(RdbxRespToRedisLoader *ctx, const char* cmd, const char* key) {
     int recordCmdEntry = (ctx->respReader.countReplies + ctx->pendingCmds.num) % NUM_RECORDED_CMDS;
-    char *recordCmdPrefixAt = ctx->pendingCmds.cmdPrefix[recordCmdEntry];
 
-    int copiedBytes = 0, bytesToCopy = RECORDED_DATA_MAX_LEN - 1;
-
-    const struct iovec* currentIov = cmd_iov;
-    for (int i = 0; i < iovcnt && bytesToCopy; ++i) {
-        int slice = (currentIov->iov_len >= ((size_t)bytesToCopy)) ? bytesToCopy : (int) currentIov->iov_len;
-
-        for (int j = 0 ; j < slice ; )
-            recordCmdPrefixAt[copiedBytes++] = ((char *)currentIov->iov_base)[j++];
-
-        bytesToCopy -= slice;
-        ++currentIov;
-    }
-    recordCmdPrefixAt[copiedBytes] = '\0';
+    /* no need to copy the cmd. handlersToResp took care to pass a string that is persistent and constant */
+    ctx->pendingCmds.cmd[recordCmdEntry] = cmd;
+    strncpy(ctx->pendingCmds.key[recordCmdEntry], key, RECORDED_KEY_MAX_LEN-1);
+    ctx->pendingCmds.key[recordCmdEntry][RECORDED_KEY_MAX_LEN-1] = '\0';
 }
 
 /* Write the vector of data to the socket with writev() sys-call.
@@ -129,8 +107,11 @@ static int redisLoaderWritev(void *context, struct iovec *iov, int iovCnt, int s
             return 1;
     }
 
-    if (startCmd)
-        recordNewCmd(ctx, iov, iovCnt);
+    if (startCmd) {
+        /* handlersToResp passed to respToRedisLoader (hidden) metadata for debugging before iov */
+        iovecExt *iovExt = (iovecExt *)((char *)iov - offsetof(iovecExt, iov));
+        recordCommandSent(ctx, iovExt->cmd, iovExt->key);
+    }
 
     while (1)
     {
@@ -245,28 +226,33 @@ static RdbRes redisAuth(RdbxRespToRedisLoader *ctx, RdbxRedisAuth *auth) {
         return redisAuthCustomized(ctx, auth);
 
     /* AUTH [username] password */
-    struct iovec iov[10];
+    iovecExt iovExt;
+
+    /* iovExt metadata */
+    iovExt.cmd = "AUTH";
+    iovExt.key = "";
+
     if (auth->user) {
-        IOV_CONST(&iov[0], "*3\r\n$4\r\nauth\r\n$");
+        IOV_CONST(&iovExt.iov[0], "*3\r\n$4\r\nauth\r\n$");
         /* write user */
-        IOV_VALUE(&iov[1], strlen(auth->user), userLenStr);
-        IOV_STRING(&iov[2], auth->user, strlen(auth->user));
-        IOV_CONST(&iov[3], "\r\n$");
+        IOV_VALUE(&iovExt.iov[1], strlen(auth->user), userLenStr);
+        IOV_STRING(&iovExt.iov[2], auth->user, strlen(auth->user));
+        IOV_CONST(&iovExt.iov[3], "\r\n$");
         /* write pwd */
-        IOV_VALUE(&iov[4], strlen(auth->pwd), pwdLenStr);
-        IOV_STRING(&iov[5], auth->pwd, strlen(auth->pwd));
-        IOV_CONST(&iov[6], "\r\n");
+        IOV_VALUE(&iovExt.iov[4], strlen(auth->pwd), pwdLenStr);
+        IOV_STRING(&iovExt.iov[5], auth->pwd, strlen(auth->pwd));
+        IOV_CONST(&iovExt.iov[6], "\r\n");
         iovs = 7;
     } else {
-        IOV_CONST(&iov[0], "*2\r\n$4\r\nauth\r\n$");
+        IOV_CONST(&iovExt.iov[0], "*2\r\n$4\r\nauth\r\n$");
         /* write pwd */
-        IOV_VALUE(&iov[1], strlen(auth->pwd), pwdLenStr);
-        IOV_STRING(&iov[2], auth->pwd, strlen(auth->pwd));
-        IOV_CONST(&iov[3], "\r\n");
+        IOV_VALUE(&iovExt.iov[1], strlen(auth->pwd), pwdLenStr);
+        IOV_STRING(&iovExt.iov[2], auth->pwd, strlen(auth->pwd));
+        IOV_CONST(&iovExt.iov[3], "\r\n");
         iovs = 4;
     }
 
-    redisLoaderWritev(ctx, iov, iovs, 1, 1);
+    redisLoaderWritev(ctx, iovExt.iov, iovs, 1, 1);
     return RDB_OK;
 }
 

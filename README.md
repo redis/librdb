@@ -1,6 +1,6 @@
 # librdb
 
-C library for parsing RDB files.
+This is C library for parsing RDB files.
 
 The Parser is implemented in the spirit of SAX parser. It fires off a series of events as
 it reads the RDB file from beginning to end, and callbacks to handlers registered on
@@ -123,9 +123,9 @@ Level0. The same goes between Level2 and Level1 correspondingly.
 ### Handlers
 The **Handlers** represent a set of builtin or user-defined functions that will be called on the
 parsed data. Future plan to support built-in Handlers:
-* Convert RDB to JSON file handlers. (Status: WIP)
-* Convert RDB to RESP protocol handlers. (Status: WIP)
-* Memory Analyze (Status: Todo)
+* Convert RDB to JSON file handlers.
+* Convert RDB to RESP protocol handlers.
+* Memory Analyze (TODO)
 
 It is possible to attach to parser more than one set of handlers at the same level.
 That is, for a given data at a given level, the parser will call each of the handlers that
