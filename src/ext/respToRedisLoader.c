@@ -85,18 +85,20 @@ static int readReplies(RdbxRespToRedisLoader *ctx, int numToRead) {
 }
 
 /* For debugging, record the command into the cyclic array before sending it */
-static inline void recordCommandSent(RdbxRespToRedisLoader *ctx, const char* cmd, const char* key) {
+static inline void recordCommandSent(RdbxRespToRedisLoader *ctx,RdbxRespWriterStartCmd *cmd) {
     int recordCmdEntry = (ctx->respReader.countReplies + ctx->pendingCmds.num) % NUM_RECORDED_CMDS;
 
     /* no need to copy the cmd. handlersToResp took care to pass a string that is persistent and constant */
-    ctx->pendingCmds.cmd[recordCmdEntry] = cmd;
-    strncpy(ctx->pendingCmds.key[recordCmdEntry], key, RECORDED_KEY_MAX_LEN-1);
+    ctx->pendingCmds.cmd[recordCmdEntry] = cmd->cmd;
+    strncpy(ctx->pendingCmds.key[recordCmdEntry], cmd->key, RECORDED_KEY_MAX_LEN-1);
     ctx->pendingCmds.key[recordCmdEntry][RECORDED_KEY_MAX_LEN-1] = '\0';
 }
 
 /* Write the vector of data to the socket with writev() sys-call.
  * Return 0 for success, 1 otherwise. */
-static int redisLoaderWritev(void *context, struct iovec *iov, int iovCnt, int startCmd, int endCmd) {
+static int redisLoaderWritev(void *context, struct iovec *iov, int iovCnt,
+                             RdbxRespWriterStartCmd *startCmd, int endCmd)
+{
     ssize_t writeResult;
     int retries = 0;
 
@@ -107,11 +109,7 @@ static int redisLoaderWritev(void *context, struct iovec *iov, int iovCnt, int s
             return 1;
     }
 
-    if (startCmd) {
-        /* handlersToResp passed to respToRedisLoader (hidden) metadata for debugging before iov */
-        iovecExt *iovExt = (iovecExt *)((char *)iov - offsetof(iovecExt, iov));
-        recordCommandSent(ctx, iovExt->cmd, iovExt->key);
-    }
+    if (startCmd) recordCommandSent(ctx, startCmd);
 
     while (1)
     {
@@ -182,6 +180,10 @@ static RdbRes redisAuthCustomized(RdbxRespToRedisLoader *ctx, RdbxRedisAuth *aut
 
     char prefix[32];
 
+    RdbxRespWriterStartCmd startCmd;
+    startCmd.cmd = "<AUTH_CUSTOMIZED_CMD>";
+    startCmd.key = "";
+
     /* allocate iovec (2 for header and trailer. 3 for each argument) */
     struct iovec *iov = (struct iovec *)malloc((auth->cmd.argc * 3 + 2) * sizeof(struct iovec));
     /* allocate temporary buffer to assist converting length to string of all args */
@@ -206,7 +208,7 @@ static RdbRes redisAuthCustomized(RdbxRespToRedisLoader *ctx, RdbxRedisAuth *aut
         IOV_STRING(&iov[iovs++], auth->cmd.argv[i], tLen);
     }
     IOV_CONST(&iov[iovs++], "\r\n");
-    redisLoaderWritev(ctx, iov, iovs, 1, 1);
+    redisLoaderWritev(ctx, iov, iovs, &startCmd, 1);
 
 AuthEnd:
     if (iov) free(iov);
@@ -226,33 +228,33 @@ static RdbRes redisAuth(RdbxRespToRedisLoader *ctx, RdbxRedisAuth *auth) {
         return redisAuthCustomized(ctx, auth);
 
     /* AUTH [username] password */
-    iovecExt iovExt;
 
-    /* iovExt metadata */
-    iovExt.cmd = "AUTH";
-    iovExt.key = "";
+    RdbxRespWriterStartCmd startCmd;
+    startCmd.cmd = "AUTH";
+    startCmd.key = "";
 
+    struct iovec iov[10];
     if (auth->user) {
-        IOV_CONST(&iovExt.iov[0], "*3\r\n$4\r\nauth\r\n$");
+        IOV_CONST(&iov[0], "*3\r\n$4\r\nauth\r\n$");
         /* write user */
-        IOV_VALUE(&iovExt.iov[1], strlen(auth->user), userLenStr);
-        IOV_STRING(&iovExt.iov[2], auth->user, strlen(auth->user));
-        IOV_CONST(&iovExt.iov[3], "\r\n$");
+        IOV_VALUE(&iov[1], strlen(auth->user), userLenStr);
+        IOV_STRING(&iov[2], auth->user, strlen(auth->user));
+        IOV_CONST(&iov[3], "\r\n$");
         /* write pwd */
-        IOV_VALUE(&iovExt.iov[4], strlen(auth->pwd), pwdLenStr);
-        IOV_STRING(&iovExt.iov[5], auth->pwd, strlen(auth->pwd));
-        IOV_CONST(&iovExt.iov[6], "\r\n");
+        IOV_VALUE(&iov[4], strlen(auth->pwd), pwdLenStr);
+        IOV_STRING(&iov[5], auth->pwd, strlen(auth->pwd));
+        IOV_CONST(&iov[6], "\r\n");
         iovs = 7;
     } else {
-        IOV_CONST(&iovExt.iov[0], "*2\r\n$4\r\nauth\r\n$");
+        IOV_CONST(&iov[0], "*2\r\n$4\r\nauth\r\n$");
         /* write pwd */
-        IOV_VALUE(&iovExt.iov[1], strlen(auth->pwd), pwdLenStr);
-        IOV_STRING(&iovExt.iov[2], auth->pwd, strlen(auth->pwd));
-        IOV_CONST(&iovExt.iov[3], "\r\n");
+        IOV_VALUE(&iov[1], strlen(auth->pwd), pwdLenStr);
+        IOV_STRING(&iov[2], auth->pwd, strlen(auth->pwd));
+        IOV_CONST(&iov[3], "\r\n");
         iovs = 4;
     }
 
-    redisLoaderWritev(ctx, iovExt.iov, iovs, 1, 1);
+    redisLoaderWritev(ctx, iov, iovs, &startCmd, 1);
     return RDB_OK;
 }
 

@@ -147,12 +147,19 @@ _LIBRDB_API RdbxToResp *RDBX_createHandlersToResp(RdbParser *, RdbxToRespConf *)
  *           <user-defined-writer>
  ****************************************************************/
 
+/* On start command pass command info. NULL otherwise.  */
+typedef struct RdbxRespWriterStartCmd {
+    const char *cmd; /* Redis Command name (Ex: "SET", "RESTORE") */
+    const char *key; /* If key available as part of command. Else empty string */
+} RdbxRespWriterStartCmd;
+
 typedef struct RdbxRespWriter {
     void *ctx;
     void (*delete)(void *ctx);
 
     /* return 0 on success. Otherwise 1 */
-    int (*writev) (void *ctx, struct iovec *ioVec, int iovCnt, int startCmd, int endCmd);
+    int (*writev) (void *ctx, struct iovec *ioVec, int iovCnt,
+                   RdbxRespWriterStartCmd *startCmd, int endCmd);
     int (*flush) (void *ctx);
 } RdbxRespWriter;
 
