@@ -736,8 +736,8 @@ static void chainHandlersAcrossLevels(RdbParser *p) {
 
 static void resolveMultipleLevelsRegistration(RdbParser *p) {
     /* find the lowest level that handlers are registered */
-    int lvl = (p->numHandlers[0]) ? RDB_LEVEL_RAW :
-              (p->numHandlers[1]) ? RDB_LEVEL_STRUCT :
+    int lvl = (p->numHandlers[RDB_LEVEL_RAW]) ? RDB_LEVEL_RAW :
+              (p->numHandlers[RDB_LEVEL_STRUCT]) ? RDB_LEVEL_STRUCT :
               RDB_LEVEL_DATA ;
 
     for (int i = 0 ; i < RDB_OPCODE_MAX ; ++i) {
@@ -754,10 +754,20 @@ static RdbStatus finalizeConfig(RdbParser *p, int isParseFromBuff) {
 
     crc64_init_thread_safe();
 
+    /* debug handlers to reflect current processed key */
     if ((p->debugData = getEnvVar(ENV_VAR_DEBUG_DATA, 0)) != 0) {
         RDB_setLogLevel(p, RDB_LOG_DBG);
-        RdbHandlersDataCallbacks cb = {.handleNewKey = handleNewKeyPrintDbg, .handleEndKey = handleEndKeyPrintDbg};
-        RDB_createHandlersData(p, &cb, NULL, NULL);
+        /* find the lowest level that handlers are registered and register DBG handlers accordingly */
+        if (p->numHandlers[RDB_LEVEL_RAW]) {
+            RdbHandlersRawCallbacks cb = {.handleNewKey = handleNewKeyPrintDbg, .handleEndKey = handleEndKeyPrintDbg};
+            RDB_createHandlersRaw(p, &cb, NULL, NULL);
+        } else if (p->numHandlers[RDB_LEVEL_STRUCT]) {
+            RdbHandlersStructCallbacks cb = {.handleNewKey = handleNewKeyPrintDbg, .handleEndKey = handleEndKeyPrintDbg};
+            RDB_createHandlersStruct(p, &cb, NULL, NULL);
+        } else {
+            RdbHandlersDataCallbacks cb = {.handleNewKey = handleNewKeyPrintDbg, .handleEndKey = handleEndKeyPrintDbg};
+            RDB_createHandlersData(p, &cb, NULL, NULL);
+        }
     }
 
     p->isParseFromBuff = isParseFromBuff;
