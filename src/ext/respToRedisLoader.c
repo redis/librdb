@@ -46,7 +46,7 @@ static void onReadRepliesError(RdbxRespToRedisLoader *ctx) {
     int currIdx = ctx->respReader.countReplies % NUM_RECORDED_CMDS;
 
     RDB_reportError(ctx->p, (RdbRes) RDBX_ERR_RESP_WRITE,
-                    "\nerror from dst '-%s' on key '%s' on command '%s' (RESP Command #%lu)\n",
+                    "\nerror from dst '-%s' on key '%s' on command '%s' (RESP Command #%zu)\n",
                     respReader->errorMsg,
                     ctx->pendingCmds.key[currIdx],
                     ctx->pendingCmds.cmd[currIdx],
