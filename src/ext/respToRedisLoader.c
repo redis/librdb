@@ -39,6 +39,7 @@ struct RdbxRespToRedisLoader {
     RespReaderCtx respReader;
     RdbParser *p;
     int fd;
+    int fdOwner;
 };
 
 static void onReadRepliesError(RdbxRespToRedisLoader *ctx) {
@@ -167,7 +168,9 @@ static void redisLoaderDelete(void *context) {
     /* not required to flush on termination */
 
     shutdown(ctx->fd, SHUT_WR); /* graceful shutdown */
-    close(ctx->fd);
+
+    if (ctx->fdOwner) close(ctx->fd);
+
     RDB_free(ctx->p, ctx);
 }
 
@@ -280,6 +283,7 @@ _LIBRDB_API RdbxRespToRedisLoader *RDBX_createRespToRedisFd(RdbParser *p,
     memset(ctx, 0, sizeof(RdbxRespToRedisLoader));
     ctx->p = p;
     ctx->fd = fd;
+    ctx->fdOwner = 0;
     ctx->pendingCmds.num = 0;
     ctx->pendingCmds.pipelineDepth = PIPELINE_DEPTH_DEF;
     readRespInit(&ctx->respReader);
@@ -311,16 +315,24 @@ _LIBRDB_API RdbxRespToRedisLoader *RDBX_createRespToRedisTcp(RdbParser *p,
     if (inet_pton(AF_INET, hostname, &(server_addr.sin_addr)) <= 0) {
         RDB_reportError(p, (RdbRes) RDBX_ERR_RESP2REDIS_INVALID_ADDRESS,
                         "Invalid tcp address (hostname=%s, port=%d)", hostname, port);
-        close(sockfd);
-        return NULL;
+        goto createErr;
     }
 
     if (connect(sockfd, (struct sockaddr *) &server_addr, sizeof(server_addr)) == -1) {
         RDB_reportError(p, (RdbRes) RDBX_ERR_RESP2REDIS_INVALID_ADDRESS,
                         "Invalid tcp address (hostname=%s, port=%d)", hostname, port);
-        close(sockfd);
-        return NULL;
+        goto createErr;
     }
 
-    return RDBX_createRespToRedisFd(p, rdbToResp, auth, sockfd);
+    RdbxRespToRedisLoader *res = RDBX_createRespToRedisFd(p, rdbToResp, auth, sockfd);
+
+    if (!res) goto createErr;
+
+    /* Set fdOwner to 1 since this entity created the socket and it is the one to release. */
+    res->fdOwner = 1;
+    return res;
+
+createErr:
+    close(sockfd);
+    return NULL;
 }
