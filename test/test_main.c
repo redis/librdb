@@ -81,6 +81,31 @@ static void test_mixed_levels_registration(void **state) {
     assert_json_equal(jsonfileData, DUMP_FOLDER("multiple_lists_strings_subset_list.json"), 1);
 }
 
+static void test_checksum(void **state) {
+    RdbParser *parser;
+    RdbStatus  status;
+    UNUSED(state);
+    const char *rdbfile = DUMP_FOLDER("invalid_chksum_v8.rdb");
+
+    /* fail on checksum error */
+    parser = RDB_createParserRdb(NULL);
+    RDB_setLogLevel(parser, RDB_LOG_ERR);
+    assert_non_null(RDBX_createReaderFile(parser, rdbfile));
+    while ((status = RDB_parse(parser)) == RDB_STATUS_WAIT_MORE_DATA);
+    assert_int_equal( status, RDB_STATUS_ERROR);
+    assert_int_equal(RDB_getErrorCode(parser), RDB_ERR_CHECKSUM_FAILURE);
+    RDB_deleteParser(parser);
+
+    /* ignore checksum error */
+    parser = RDB_createParserRdb(NULL);
+    RDB_setLogLevel(parser, RDB_LOG_ERR);
+    assert_non_null(RDBX_createReaderFile(parser, rdbfile));
+    RDB_IgnoreChecksum(parser);
+    while ((status = RDB_parse(parser)) == RDB_STATUS_WAIT_MORE_DATA);
+    assert_int_equal( status, RDB_STATUS_OK);
+    RDB_deleteParser(parser);
+}
+
 static void test_examples(void **state) {
     UNUSED(state);
     runSystemCmd("make example > /dev/null ");
@@ -121,13 +146,14 @@ int group_examples(void) {
     return cmocka_run_group_tests(tests, NULL, NULL);
 }
 
-/*************************** group_main *******************************/
-int group_main(void) {
+/*************************** group_misc *******************************/
+int group_misc(void) {
     /* Insert here your test functions */
     const struct CMUnitTest tests[] = {
         cmocka_unit_test(test_createReader_missingFile),
         cmocka_unit_test(test_empty_rdb),
         cmocka_unit_test(test_mixed_levels_registration),
+        cmocka_unit_test(test_checksum),
     };
     return cmocka_run_group_tests(tests, NULL, NULL);
 }
@@ -183,7 +209,7 @@ int main(int argc, char *argv[]) {
     RUN_TEST_GROUP(group_examples);
     RUN_TEST_GROUP(group_test_resp_reader);
     RUN_TEST_GROUP(group_rdb_to_resp);
-    RUN_TEST_GROUP(group_main);
+    RUN_TEST_GROUP(group_misc);
     RUN_TEST_GROUP(group_rdb_to_json);
     RUN_TEST_GROUP(group_mem_management);
     RUN_TEST_GROUP(group_bulk_ops);
@@ -193,7 +219,7 @@ int main(int argc, char *argv[]) {
 
     printf("\n*************** SIMULATING WAIT_MORE_DATA *******************\n");
     setEnvVar("LIBRDB_SIM_WAIT_MORE_DATA", "1");
-    RUN_TEST_GROUP(group_main);
+    RUN_TEST_GROUP(group_misc);
     RUN_TEST_GROUP(group_rdb_to_resp);
     RUN_TEST_GROUP(group_rdb_to_json);
     RUN_TEST_GROUP(group_mem_management);

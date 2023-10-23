@@ -73,6 +73,8 @@ static inline void unused(void *dummy, ...) { (void)(dummy);}
     finalize_cmd; \
   } while (0)
 
+typedef uint64_t (*CrcFunc)(uint64_t, const unsigned char *, uint64_t);
+
 typedef enum BulkType {
     BULK_TYPE_STACK,    /* from stack bulk */
     BULK_TYPE_HEAP,     /* from heap bulk */
@@ -355,6 +357,7 @@ struct RdbParser {
     RdbMemAlloc mem;
     int deepIntegCheck;
     int ignoreChecksum;
+    CrcFunc crcFunc;
     RdbLoggerCB loggerCb;
     RdbLogLevel logLevel;
     size_t maxRawSize;
