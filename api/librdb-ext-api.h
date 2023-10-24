@@ -139,7 +139,7 @@ _LIBRDB_API RdbxToResp *RDBX_createHandlersToResp(RdbParser *, RdbxToRespConf *)
 /****************************************************************
  * RESP writer
  *
- * Create instance for writing RDB to RESP stream.
+ * Interface to create writer instance for RDB to RESP stream.
  *
  * Imp by:   RDBX_createRespToRedisTcp
  *           RDBX_createRespToRedisFd
@@ -158,8 +158,12 @@ typedef struct RdbxRespWriter {
     void (*delete)(void *ctx);
 
     /* return 0 on success. Otherwise 1 */
-    int (*writev) (void *ctx, struct iovec *ioVec, int iovCnt,
-                   RdbxRespWriterStartCmd *startCmd, int endCmd);
+    int (*writev) (void *ctx,
+                   struct iovec *ioVec,              /* Standard C scatter/gather IO array */
+                   int iovCnt,                       /* Number of iovec elements */
+                   RdbxRespWriterStartCmd *startCmd, /* Not NULL if this is start of RESP command */
+                   int endCmd);                      /* 1, if this is end of RESP command, 0 otherwise */
+
     int (*flush) (void *ctx);
 } RdbxRespWriter;
 

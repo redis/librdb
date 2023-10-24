@@ -39,7 +39,7 @@ struct RdbxRespToRedisLoader {
     RespReaderCtx respReader;
     RdbParser *p;
     int fd;
-    int fdOwner;
+    int fdOwner; /* Set to 1 if this entity created the socket, and it is the one to release. */
 };
 
 static void onReadRepliesError(RdbxRespToRedisLoader *ctx) {
@@ -328,7 +328,6 @@ _LIBRDB_API RdbxRespToRedisLoader *RDBX_createRespToRedisTcp(RdbParser *p,
 
     if (!res) goto createErr;
 
-    /* Set fdOwner to 1 since this entity created the socket and it is the one to release. */
     res->fdOwner = 1;
     return res;
 
