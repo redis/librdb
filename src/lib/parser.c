@@ -747,6 +747,21 @@ static void resolveMultipleLevelsRegistration(RdbParser *p) {
     }
 }
 
+static void attachDebugHandlers(RdbParser *p) {
+    RDB_setLogLevel(p, RDB_LOG_DBG);
+    /* find the lowest level that handlers are registered and register DBG handlers accordingly */
+    if (p->numHandlers[RDB_LEVEL_RAW]) {
+        RdbHandlersRawCallbacks cb = {.handleNewKey = handleNewKeyPrintDbg, .handleEndKey = handleEndKeyPrintDbg};
+        RDB_createHandlersRaw(p, &cb, NULL, NULL);
+    } else if (p->numHandlers[RDB_LEVEL_STRUCT]) {
+        RdbHandlersStructCallbacks cb = {.handleNewKey = handleNewKeyPrintDbg, .handleEndKey = handleEndKeyPrintDbg};
+        RDB_createHandlersStruct(p, &cb, NULL, NULL);
+    } else {
+        RdbHandlersDataCallbacks cb = {.handleNewKey = handleNewKeyPrintDbg, .handleEndKey = handleEndKeyPrintDbg};
+        RDB_createHandlersData(p, &cb, NULL, NULL);
+    }
+}
+
 static RdbStatus finalizeConfig(RdbParser *p, int isParseFromBuff) {
     assert(p->state == RDB_STATE_CONFIGURING);
 
@@ -754,21 +769,9 @@ static RdbStatus finalizeConfig(RdbParser *p, int isParseFromBuff) {
 
     crc64_init_thread_safe();
 
-    /* debug handlers to reflect current processed key */
-    if ((p->debugData = getEnvVar(ENV_VAR_DEBUG_DATA, 0)) != 0) {
-        RDB_setLogLevel(p, RDB_LOG_DBG);
-        /* find the lowest level that handlers are registered and register DBG handlers accordingly */
-        if (p->numHandlers[RDB_LEVEL_RAW]) {
-            RdbHandlersRawCallbacks cb = {.handleNewKey = handleNewKeyPrintDbg, .handleEndKey = handleEndKeyPrintDbg};
-            RDB_createHandlersRaw(p, &cb, NULL, NULL);
-        } else if (p->numHandlers[RDB_LEVEL_STRUCT]) {
-            RdbHandlersStructCallbacks cb = {.handleNewKey = handleNewKeyPrintDbg, .handleEndKey = handleEndKeyPrintDbg};
-            RDB_createHandlersStruct(p, &cb, NULL, NULL);
-        } else {
-            RdbHandlersDataCallbacks cb = {.handleNewKey = handleNewKeyPrintDbg, .handleEndKey = handleEndKeyPrintDbg};
-            RDB_createHandlersData(p, &cb, NULL, NULL);
-        }
-    }
+    /* debug handlers to further printout processed data */
+    if ((p->debugData = getEnvVar(ENV_VAR_DEBUG_DATA, 0)) != 0)
+        attachDebugHandlers(p);
 
     p->isParseFromBuff = isParseFromBuff;
 
