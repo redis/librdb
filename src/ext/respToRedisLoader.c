@@ -273,7 +273,6 @@ _LIBRDB_API RdbxRespToRedisLoader *RDBX_createRespToRedisFd(RdbParser *p,
                                                             int fd) {
     RdbxRespToRedisLoader *ctx;
     if ((ctx = RDB_alloc(p, sizeof(RdbxRespToRedisLoader))) == NULL) {
-        close(fd);
         RDB_reportError(p, (RdbRes) RDBX_ERR_RESP_FAILED_ALLOC,
                         "Failed to allocate struct RdbxRespToRedisLoader");
         return NULL;
