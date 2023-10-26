@@ -10,7 +10,9 @@ struct RdbxRespToFileWriter {
 };
 
 /* return 0 for success. 1 Otherwise. */
-static int respFileWritev(void *context, struct iovec *iov, int count, int startCmd, int endCmd) {
+static int respFileWritev(void *context, struct iovec *iov, int count,
+        RdbxRespWriterStartCmd *startCmd, int endCmd)
+{
     UNUSED(startCmd);
     struct RdbxRespToFileWriter *ctx = context;
     ctx->cmdCount += endCmd;

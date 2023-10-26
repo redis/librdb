@@ -1,6 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
+#include <stddef.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
@@ -17,7 +18,7 @@
 #define PIPELINE_DEPTH_MAX        1000  /* limit the max value allowed to configure for pipeline depth */
 
 #define NUM_RECORDED_CMDS         400   /* Number of commands to backlog, in a cyclic array */
-#define RECORDED_DATA_MAX_LEN     40    /* Maximum payload size from any command to record into cyclic array */
+#define RECORDED_KEY_MAX_LEN     40    /* Maximum payload size from any command to record into cyclic array */
 
 #define REPLY_BUFF_SIZE           1024  /* reply buffer size */
 
@@ -29,40 +30,28 @@ struct RdbxRespToRedisLoader {
     struct {
         int num;
         int pipelineDepth;
-        char cmdPrefix[NUM_RECORDED_CMDS][RECORDED_DATA_MAX_LEN];
+        /* pointers to (static) strings that hold the template of the command sent (no char* allocation required) */
+        const char *cmd[NUM_RECORDED_CMDS];
+        /* strncpy() of the key sent */
+        char key[NUM_RECORDED_CMDS][RECORDED_KEY_MAX_LEN];
     } pendingCmds;
 
     RespReaderCtx respReader;
     RdbParser *p;
     int fd;
+    int fdOwner; /* Set to 1 if this entity created the socket, and it is the one to release. */
 };
 
 static void onReadRepliesError(RdbxRespToRedisLoader *ctx) {
     RespReaderCtx *respReader = &ctx->respReader;
     int currIdx = ctx->respReader.countReplies % NUM_RECORDED_CMDS;
-    char *currCmdRecord = ctx->pendingCmds.cmdPrefix[currIdx];
 
-    /* Print also previous command if available. */
-    if (ctx->respReader.countReplies > 1) {
-        int prevIdx = (currIdx == 0) ? NUM_RECORDED_CMDS - 1 : currIdx - 1;
-        char *prevCmdRecord = ctx->pendingCmds.cmdPrefix[prevIdx];
-        RDB_reportError(ctx->p, (RdbRes) RDBX_ERR_RESP_WRITE,
-            "\nReceived Server error: \"%s\"\nGot failed on command [#%d] (First %d bytes):\n%s\n"
-            "\nPreceding command [#%d] was: \n%s\n",
-            respReader->errorMsg,
-            ctx->respReader.countReplies,
-            RECORDED_DATA_MAX_LEN,
-            currCmdRecord,
-            ctx->respReader.countReplies-1,
-            prevCmdRecord);
-    } else {
-        RDB_reportError(ctx->p, (RdbRes) RDBX_ERR_RESP_WRITE,
-            "\nReceived Server error:\n\"%s\"\n\nGot failed on command [#%d] (First %d bytes):\n%s\n",
-            respReader->errorMsg,
-            ctx->respReader.countReplies,
-            RECORDED_DATA_MAX_LEN,
-            currCmdRecord);
-    }
+    RDB_reportError(ctx->p, (RdbRes) RDBX_ERR_RESP_WRITE,
+                    "\nerror from dst '-%s' on key '%s' on command '%s' (RESP Command #%zu)\n",
+                    respReader->errorMsg,
+                    ctx->pendingCmds.key[currIdx],
+                    ctx->pendingCmds.cmd[currIdx],
+                    ctx->respReader.countReplies);
 }
 
 /* Read 'numToRead' replies from the socket. * Return 0 for success, 1 otherwise. */
@@ -97,28 +86,20 @@ static int readReplies(RdbxRespToRedisLoader *ctx, int numToRead) {
 }
 
 /* For debugging, record the command into the cyclic array before sending it */
-static inline void recordNewCmd(RdbxRespToRedisLoader *ctx, const struct iovec *cmd_iov, int iovcnt) {
+static inline void recordCommandSent(RdbxRespToRedisLoader *ctx,RdbxRespWriterStartCmd *cmd) {
     int recordCmdEntry = (ctx->respReader.countReplies + ctx->pendingCmds.num) % NUM_RECORDED_CMDS;
-    char *recordCmdPrefixAt = ctx->pendingCmds.cmdPrefix[recordCmdEntry];
 
-    int copiedBytes = 0, bytesToCopy = RECORDED_DATA_MAX_LEN - 1;
-
-    const struct iovec* currentIov = cmd_iov;
-    for (int i = 0; i < iovcnt && bytesToCopy; ++i) {
-        int slice = (currentIov->iov_len >= ((size_t)bytesToCopy)) ? bytesToCopy : (int) currentIov->iov_len;
-
-        for (int j = 0 ; j < slice ; )
-            recordCmdPrefixAt[copiedBytes++] = ((char *)currentIov->iov_base)[j++];
-
-        bytesToCopy -= slice;
-        ++currentIov;
-    }
-    recordCmdPrefixAt[copiedBytes] = '\0';
+    /* no need to copy the cmd. handlersToResp took care to pass a string that is persistent and constant */
+    ctx->pendingCmds.cmd[recordCmdEntry] = cmd->cmd;
+    strncpy(ctx->pendingCmds.key[recordCmdEntry], cmd->key, RECORDED_KEY_MAX_LEN-1);
+    ctx->pendingCmds.key[recordCmdEntry][RECORDED_KEY_MAX_LEN-1] = '\0';
 }
 
 /* Write the vector of data to the socket with writev() sys-call.
  * Return 0 for success, 1 otherwise. */
-static int redisLoaderWritev(void *context, struct iovec *iov, int iovCnt, int startCmd, int endCmd) {
+static int redisLoaderWritev(void *context, struct iovec *iov, int iovCnt,
+                             RdbxRespWriterStartCmd *startCmd, int endCmd)
+{
     ssize_t writeResult;
     int retries = 0;
 
@@ -129,8 +110,7 @@ static int redisLoaderWritev(void *context, struct iovec *iov, int iovCnt, int s
             return 1;
     }
 
-    if (startCmd)
-        recordNewCmd(ctx, iov, iovCnt);
+    if (startCmd) recordCommandSent(ctx, startCmd);
 
     while (1)
     {
@@ -188,7 +168,9 @@ static void redisLoaderDelete(void *context) {
     /* not required to flush on termination */
 
     shutdown(ctx->fd, SHUT_WR); /* graceful shutdown */
-    close(ctx->fd);
+
+    if (ctx->fdOwner) close(ctx->fd);
+
     RDB_free(ctx->p, ctx);
 }
 
@@ -200,6 +182,10 @@ static RdbRes redisAuthCustomized(RdbxRespToRedisLoader *ctx, RdbxRedisAuth *aut
     * tabs. And then translate it into RESP protocol */
 
     char prefix[32];
+
+    RdbxRespWriterStartCmd startCmd;
+    startCmd.cmd = "<AUTH_CUSTOMIZED_CMD>";
+    startCmd.key = "";
 
     /* allocate iovec (2 for header and trailer. 3 for each argument) */
     struct iovec *iov = (struct iovec *)malloc((auth->cmd.argc * 3 + 2) * sizeof(struct iovec));
@@ -225,7 +211,7 @@ static RdbRes redisAuthCustomized(RdbxRespToRedisLoader *ctx, RdbxRedisAuth *aut
         IOV_STRING(&iov[iovs++], auth->cmd.argv[i], tLen);
     }
     IOV_CONST(&iov[iovs++], "\r\n");
-    redisLoaderWritev(ctx, iov, iovs, 1, 1);
+    redisLoaderWritev(ctx, iov, iovs, &startCmd, 1);
 
 AuthEnd:
     if (iov) free(iov);
@@ -245,6 +231,11 @@ static RdbRes redisAuth(RdbxRespToRedisLoader *ctx, RdbxRedisAuth *auth) {
         return redisAuthCustomized(ctx, auth);
 
     /* AUTH [username] password */
+
+    RdbxRespWriterStartCmd startCmd;
+    startCmd.cmd = "AUTH";
+    startCmd.key = "";
+
     struct iovec iov[10];
     if (auth->user) {
         IOV_CONST(&iov[0], "*3\r\n$4\r\nauth\r\n$");
@@ -266,7 +257,7 @@ static RdbRes redisAuth(RdbxRespToRedisLoader *ctx, RdbxRedisAuth *auth) {
         iovs = 4;
     }
 
-    redisLoaderWritev(ctx, iov, iovs, 1, 1);
+    redisLoaderWritev(ctx, iov, iovs, &startCmd, 1);
     return RDB_OK;
 }
 
@@ -282,7 +273,6 @@ _LIBRDB_API RdbxRespToRedisLoader *RDBX_createRespToRedisFd(RdbParser *p,
                                                             int fd) {
     RdbxRespToRedisLoader *ctx;
     if ((ctx = RDB_alloc(p, sizeof(RdbxRespToRedisLoader))) == NULL) {
-        close(fd);
         RDB_reportError(p, (RdbRes) RDBX_ERR_RESP_FAILED_ALLOC,
                         "Failed to allocate struct RdbxRespToRedisLoader");
         return NULL;
@@ -292,6 +282,7 @@ _LIBRDB_API RdbxRespToRedisLoader *RDBX_createRespToRedisFd(RdbParser *p,
     memset(ctx, 0, sizeof(RdbxRespToRedisLoader));
     ctx->p = p;
     ctx->fd = fd;
+    ctx->fdOwner = 0;
     ctx->pendingCmds.num = 0;
     ctx->pendingCmds.pipelineDepth = PIPELINE_DEPTH_DEF;
     readRespInit(&ctx->respReader);
@@ -322,17 +313,26 @@ _LIBRDB_API RdbxRespToRedisLoader *RDBX_createRespToRedisTcp(RdbParser *p,
     server_addr.sin_port = htons(port);
     if (inet_pton(AF_INET, hostname, &(server_addr.sin_addr)) <= 0) {
         RDB_reportError(p, (RdbRes) RDBX_ERR_RESP2REDIS_INVALID_ADDRESS,
-                        "Invalid tcp address (hostname=%s, port=%d)", hostname, port);
-        close(sockfd);
-        return NULL;
+                        "Failed to convert IP address. inet_pton(hostname=%s, port=%d) => errno=%d",
+                        hostname, port, errno);
+        goto createErr;
     }
 
     if (connect(sockfd, (struct sockaddr *) &server_addr, sizeof(server_addr)) == -1) {
         RDB_reportError(p, (RdbRes) RDBX_ERR_RESP2REDIS_INVALID_ADDRESS,
-                        "Invalid tcp address (hostname=%s, port=%d)", hostname, port);
-        close(sockfd);
-        return NULL;
+                        "Failed to connect(hostname=%s, port=%d) => errno=%d",
+                        hostname, port, errno);
+        goto createErr;
     }
 
-    return RDBX_createRespToRedisFd(p, rdbToResp, auth, sockfd);
+    RdbxRespToRedisLoader *res = RDBX_createRespToRedisFd(p, rdbToResp, auth, sockfd);
+
+    if (!res) goto createErr;
+
+    res->fdOwner = 1;
+    return res;
+
+createErr:
+    close(sockfd);
+    return NULL;
 }

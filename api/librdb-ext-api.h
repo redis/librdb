@@ -139,7 +139,7 @@ _LIBRDB_API RdbxToResp *RDBX_createHandlersToResp(RdbParser *, RdbxToRespConf *)
 /****************************************************************
  * RESP writer
  *
- * Create instance for writing RDB to RESP stream.
+ * Interface to create writer instance for RDB to RESP stream.
  *
  * Imp by:   RDBX_createRespToRedisTcp
  *           RDBX_createRespToRedisFd
@@ -147,12 +147,28 @@ _LIBRDB_API RdbxToResp *RDBX_createHandlersToResp(RdbParser *, RdbxToRespConf *)
  *           <user-defined-writer>
  ****************************************************************/
 
+/* On start command pass command info. NULL otherwise.  */
+typedef struct RdbxRespWriterStartCmd {
+    /* Redis Command name (Ex: "SET", "RESTORE"). Owned by the caller. It is
+     * constant static string and Valid for ref behind the duration of the call. */
+    const char *cmd;
+    /* If key available as part of command. Else empty string.
+     * Owned by the caller. */
+    const char *key;
+} RdbxRespWriterStartCmd;
+
 typedef struct RdbxRespWriter {
     void *ctx;
     void (*delete)(void *ctx);
 
     /* return 0 on success. Otherwise 1 */
-    int (*writev) (void *ctx, struct iovec *ioVec, int iovCnt, int startCmd, int endCmd);
+    int (*writev) (void *ctx,
+                   struct iovec *ioVec,              /* Standard C scatter/gather IO array */
+                   int iovCnt,                       /* Number of iovec elements */
+                   RdbxRespWriterStartCmd *startCmd, /* If start of RESP command then not NULL. Owned by
+                                                      * the caller. Valid for the duration of the call. */
+                   int endCmd);                      /* 1, if this is end of RESP command, 0 otherwise */
+
     int (*flush) (void *ctx);
 } RdbxRespWriter;
 

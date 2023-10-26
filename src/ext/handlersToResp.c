@@ -58,8 +58,7 @@ struct RdbxToResp {
         size_t writeFromCmdNum;
     } debug;
 
-    /* Init to 3. Attempted to be released three times on termination */
-    int refcount;
+    int refcount; /* intrusive refcount - Init to 2. Attempted to be released two times on termination */
 
     RdbParser *parser;
     RdbxRespWriter respWriter;
@@ -221,6 +220,10 @@ static inline RdbRes onWriteNewCmdDbg(RdbxToResp *ctx) {
     if (ctx->debug.flags & RFLAG_ENUM_CMD_ID) {
         char keyLenStr[32], cmdIdLenStr[32], cmdIdStr[32];
 
+        RdbxRespWriterStartCmd startCmd;
+        startCmd.cmd = "SET";
+        startCmd.key = KEY_CMD_ID_DBG;
+
         struct iovec iov[7];
         /* write SET */
         IOV_CONST(&iov[0], "*3\r\n$3\r\nSET\r\n$");
@@ -230,7 +233,7 @@ static inline RdbRes onWriteNewCmdDbg(RdbxToResp *ctx) {
         /* write cmd-id */
         IOV_CONST(&iov[3], "\r\n$");
         IOV_LEN_AND_VAL(&iov[4], currCmdNum, cmdIdLenStr, cmdIdStr);
-        if (unlikely(writer->writev(writer->ctx, iov, 6, 1, 1))) {
+        if (unlikely(writer->writev(writer->ctx, iov, 6, &startCmd, 1))) {
             RdbRes errCode = RDB_getErrorCode(ctx->parser);
 
             /* If failed to write RESP writer but no error reported, then write some general error */
@@ -243,7 +246,8 @@ static inline RdbRes onWriteNewCmdDbg(RdbxToResp *ctx) {
     return RDB_OK;
 }
 
-static inline RdbRes writevWrap(RdbxToResp *ctx, struct iovec *iov, int cnt, int startCmd, int endCmd) {
+static inline RdbRes writevWrap(RdbxToResp *ctx, struct iovec *iov, int cnt,
+                                RdbxRespWriterStartCmd *startCmd, int endCmd) {
     RdbRes res;
     RdbxRespWriter *writer = &ctx->respWriter;
 
@@ -287,6 +291,11 @@ static inline RdbRes sendFirstRestoreFrag(RdbxToResp *ctx, RdbBulk frag, size_t 
     if (ctx->keyCtx.delBeforeWrite == DEL_KEY_BEFORE_BY_RESTORE_REPLACE)
         extra_args++;
 
+    RdbxRespWriterStartCmd startCmd;
+    startCmd.cmd = "RESTORE";
+    startCmd.key = ctx->keyCtx.key;
+
+    /* writev RESTORE */
     char cmd[64];
 
     int len = snprintf(cmd, sizeof(cmd), "*%d\r\n$7\r\nRESTORE", 4+extra_args);
@@ -305,17 +314,23 @@ static inline RdbRes sendFirstRestoreFrag(RdbxToResp *ctx, RdbBulk frag, size_t 
 
     IOV_VALUE(&iov[iovs++], ctx->restoreCtx.restoreSize + 10, lenStr); /* write restore len + trailer */
     IOV_STRING(&iov[iovs++], frag, fragLen);                           /* write first frag */
-    return writevWrap(ctx, iov, iovs, 1, 0);
+    return writevWrap(ctx, iov, iovs, &startCmd, 0);
 }
 
 static inline RdbRes sendFirstRestoreFragModuleAux(RdbxToResp *ctx, RdbBulk frag, size_t fragLen) {
     struct iovec iov[3];
     char lenStr[32];
+
+    RdbxRespWriterStartCmd startCmd;
+    startCmd.cmd = "RESTOREMODAUX";
+    startCmd.key = "";
+
+    /* writev RESTOREMODAUX */
     iov[0].iov_base = ctx->restoreCtx.moduleAux.cmdPrefix;
     iov[0].iov_len =  ctx->restoreCtx.moduleAux.cmdlen;
     IOV_LENGTH(&iov[1], ctx->restoreCtx.restoreSize + 10, lenStr); /* write restore len + trailer */
     IOV_STRING(&iov[2], frag, fragLen);                   /* write first frag */
-    return writevWrap(ctx, iov, 3, 1, 0);
+    return writevWrap(ctx, iov, 3, &startCmd, 0);
 }
 
 /*** Handling common ***/
@@ -327,14 +342,17 @@ static RdbRes toRespNewDb(RdbParser *p, void *userData, int dbid) {
     char dbidStr[10], cntStr[10];
 
     RdbxToResp *ctx = userData;
-
     int cnt = ll2string(dbidStr, sizeof(dbidStr), dbid);
+
+    RdbxRespWriterStartCmd startCmd;
+    startCmd.cmd = "SELECT";
+    startCmd.key = "";
 
     IOV_CONST(&iov[0], "*2\r\n$6\r\nSELECT");
     IOV_LENGTH(&iov[1], cnt, cntStr);
     IOV_STRING(&iov[2], dbidStr, cnt);
     IOV_CONST(&iov[3], "\r\n");
-    return writevWrap(ctx, iov, 4, 1, 1);
+    return writevWrap(ctx, iov, 4, &startCmd, 1);
 }
 
 static RdbRes toRespStartRdb(RdbParser *p, void *userData, int rdbVersion) {
@@ -365,11 +383,16 @@ static RdbRes toRespNewKey(RdbParser *p, void *userData, RdbBulk key, RdbKeyInfo
     if ((ctx->keyCtx.delBeforeWrite == DEL_KEY_BEFORE_BY_DEL_CMD) && (info->opcode != _RDB_TYPE_STRING)) {
         struct iovec iov[4];
         char keyLenStr[32];
+
+        RdbxRespWriterStartCmd startCmd;
+        startCmd.cmd = "DEL";
+        startCmd.key = ctx->keyCtx.key;
+
         IOV_CONST(&iov[0], "*2\r\n$3\r\nDEL");
         IOV_LENGTH(&iov[1], ctx->keyCtx.keyLen, keyLenStr);
         IOV_STRING(&iov[2], ctx->keyCtx.key, ctx->keyCtx.keyLen);
         IOV_CONST(&iov[3], "\r\n");
-        return writevWrap(ctx, iov, 4, 1, 1);
+        return writevWrap(ctx, iov, 4, &startCmd, 1);
     }
     return RDB_OK;
 }
@@ -381,6 +404,10 @@ static RdbRes toRespEndKey(RdbParser *p, void *userData) {
     /* key is in db. Set its expiration time */
     if (ctx->keyCtx.info.expiretime != -1) {
         struct iovec iov[6];
+        RdbxRespWriterStartCmd startCmd;
+        startCmd.cmd = "PEXPIREAT";
+        startCmd.key = ctx->keyCtx.key;
+
         char keyLenStr[32], expireLenStr[32], expireStr[32];
         /* PEXPIREAT */
         IOV_CONST(&iov[0], "*3\r\n$9\r\nPEXPIREAT");
@@ -390,7 +417,7 @@ static RdbRes toRespEndKey(RdbParser *p, void *userData) {
         IOV_STRING(&iov[2], ctx->keyCtx.key, ctx->keyCtx.keyLen);
         IOV_LEN_AND_VAL(iov+3, ctx->keyCtx.info.expiretime, expireLenStr, expireStr);
 
-        return writevWrap(ctx, iov, 5, 1, 1);
+        return writevWrap(ctx, iov, 5, &startCmd, 1);
     }
 
     RDB_bulkCopyFree(p, ctx->keyCtx.key);
@@ -410,6 +437,11 @@ static RdbRes toRespString(RdbParser *p, void *userData, RdbBulk string) {
     /*** fillup iovec ***/
 
     struct iovec iov[7];
+
+    RdbxRespWriterStartCmd startCmd;
+    startCmd.cmd = "SET";
+    startCmd.key = ctx->keyCtx.key;
+
     /* write SET */
     IOV_CONST(&iov[0], "*3\r\n$3\r\nSET");
     /* write key */
@@ -419,18 +451,22 @@ static RdbRes toRespString(RdbParser *p, void *userData, RdbBulk string) {
     IOV_LENGTH(&iov[3], valLen, valLenStr);
     IOV_STRING(&iov[4], string, valLen);
     IOV_CONST(&iov[5], "\r\n");
-    return writevWrap(ctx, iov, 6, 1, 1);
+    return writevWrap(ctx, iov, 6, &startCmd, 1);
 }
 
 static RdbRes toRespList(RdbParser *p, void *userData, RdbBulk item) {
     RdbxToResp *ctx = userData;
+    struct iovec iov[7];
 
     /*** fillup iovec ***/
 
     char keyLenStr[32], valLenStr[32];
     int valLen = RDB_bulkLen(p, item);
 
-    struct iovec iov[7];
+    RdbxRespWriterStartCmd startCmd;
+    startCmd.cmd = "RPUSH";
+    startCmd.key = ctx->keyCtx.key;
+
     /* write RPUSH */
     IOV_CONST(&iov[0], "*3\r\n$5\r\nRPUSH");
     /* write key */
@@ -440,10 +476,11 @@ static RdbRes toRespList(RdbParser *p, void *userData, RdbBulk item) {
     IOV_LENGTH(&iov[3], valLen, valLenStr);
     IOV_STRING(&iov[4], item, valLen);
     IOV_CONST(&iov[5], "\r\n");
-    return writevWrap(ctx, iov, 6, 1, 1);
+    return writevWrap(ctx, iov, 6, &startCmd, 1);
 }
 
 static RdbRes toRespHash(RdbParser *p, void *userData, RdbBulk field, RdbBulk value) {
+    struct iovec iov[10];
     RdbxToResp *ctx = userData;
 
     /*** fillup iovec ***/
@@ -452,7 +489,10 @@ static RdbRes toRespHash(RdbParser *p, void *userData, RdbBulk field, RdbBulk va
     int fieldLen = RDB_bulkLen(p, field);
     int valueLen = RDB_bulkLen(p, value);
 
-    struct iovec iov[10];
+    RdbxRespWriterStartCmd startCmd;
+    startCmd.cmd = "HSET";
+    startCmd.key = ctx->keyCtx.key;
+
     /* write RPUSH */
     IOV_CONST(&iov[0], "*4\r\n$4\r\nHSET");
     /* write key */
@@ -465,16 +505,20 @@ static RdbRes toRespHash(RdbParser *p, void *userData, RdbBulk field, RdbBulk va
     IOV_LENGTH(&iov[5], valueLen, valueLenStr);
     IOV_STRING(&iov[6], value, valueLen);
     IOV_CONST(&iov[7], "\r\n");
-    return writevWrap(ctx, iov, 8, 1, 1);
+    return writevWrap(ctx, iov, 8, &startCmd, 1);
 }
 
 static RdbRes toRespSet(RdbParser *p, void *userData, RdbBulk member) {
+    struct iovec iov[7];
     RdbxToResp *ctx = userData;
     char keyLenStr[32], valLenStr[32];
 
     int valLen = RDB_bulkLen(p, member);
 
-    struct iovec iov[7];
+    RdbxRespWriterStartCmd startCmd;
+    startCmd.cmd = "SADD";
+    startCmd.key = ctx->keyCtx.key;
+
     /* write RPUSH */
     IOV_CONST(&iov[0], "*3\r\n$4\r\nSADD");
     /* write key */
@@ -484,16 +528,20 @@ static RdbRes toRespSet(RdbParser *p, void *userData, RdbBulk member) {
     IOV_LENGTH(&iov[3], valLen, valLenStr);
     IOV_STRING(&iov[4], member, valLen);
     IOV_CONST(&iov[5], "\r\n");
-    return writevWrap(ctx, iov, 6, 1, 1);
+    return writevWrap(ctx, iov, 6, &startCmd, 1);
 }
 
 static RdbRes toRespZset(RdbParser *p, void *userData, RdbBulk member, double score) {
+    struct iovec iov[10];
     RdbxToResp *ctx = userData;
     char keyLenStr[32], valLenStr[32], scoreLenStr[32];
 
     int valLen = RDB_bulkLen(p, member);
 
-    struct iovec iov[10];
+    RdbxRespWriterStartCmd startCmd;
+    startCmd.cmd = "ZADD";
+    startCmd.key = ctx->keyCtx.key;
+
     /* write ZADD */
     IOV_CONST(&iov[0], "*4\r\n$4\r\nZADD");
     /* write key */
@@ -511,7 +559,7 @@ static RdbRes toRespZset(RdbParser *p, void *userData, RdbBulk member, double sc
     IOV_LENGTH(&iov[5], valLen, valLenStr);
     IOV_STRING(&iov[6], member, valLen);
     IOV_CONST(&iov[7], "\r\n");
-    return writevWrap(ctx, iov, 8, 1, 1);
+    return writevWrap(ctx, iov, 8, &startCmd, 1);
 }
 
 static RdbRes toRespEndRdb(RdbParser *p, void *userData) {
@@ -535,13 +583,17 @@ static RdbRes toRespFunction(RdbParser *p, void *userData, RdbBulk func) {
 
     int funcLen = RDB_bulkLen(p, func);
 
+    RdbxRespWriterStartCmd startCmd;
+    startCmd.cmd = "FUNCTION";
+    startCmd.key = "";
+
     struct iovec iov[4];
     IOV_CONST(&iov[0], "*4\r\n$8\r\nFUNCTION\r\n$4\r\nLOAD\r\n$7\r\nREPLACE");
     /* write member */
     IOV_LENGTH(&iov[1], funcLen, funcLenStr);
     IOV_STRING(&iov[2], func, funcLen);
     IOV_CONST(&iov[3], "\r\n");
-    return writevWrap( (RdbxToResp *) userData, iov, 4, 1, 1);
+    return writevWrap( (RdbxToResp *) userData, iov, 4, &startCmd, 1);
 
 }
 
@@ -558,17 +610,25 @@ static RdbRes toRespStreamMetaData(RdbParser *p, void *userData, RdbStreamMeta *
          * for the Stream type. (We don't use the MAXLEN 0 trick from aof.c
          * because of Redis Enterprise CRDT compatibility issues - Can't XSETID "back") */
 
+        RdbxRespWriterStartCmd startCmd;
+        startCmd.cmd = "XGROUP CREATE";
+        startCmd.key = ctx->keyCtx.key;
+
         IOV_CONST(&iov[0], "*6\r\n$6\r\nXGROUP\r\n$6\r\nCREATE");
         IOV_LENGTH(&iov[1], ctx->keyCtx.keyLen, keyLenStr);
         IOV_STRING(&iov[2], ctx->keyCtx.key, ctx->keyCtx.keyLen);
         IOV_CONST(&iov[3], "$7\r\ndummyCG\r\n$1\r\n$\r\n$8\r\nMKSTREAM\r\n");
-        IF_NOT_OK_RETURN(writevWrap( (RdbxToResp *) userData, iov, 4, 1, 1));
+        IF_NOT_OK_RETURN(writevWrap( (RdbxToResp *) userData, iov, 4, &startCmd, 1));
+
+        /* another startCmd */
+        startCmd.cmd = "XGROUP DESTROY";
+        startCmd.key = ctx->keyCtx.key;
 
         IOV_CONST(&iov[0], "*4\r\n$6\r\nXGROUP\r\n$7\r\nDESTROY");
         IOV_LENGTH(&iov[1], ctx->keyCtx.keyLen, keyLenStr);
         IOV_STRING(&iov[2], ctx->keyCtx.key, ctx->keyCtx.keyLen);
         IOV_CONST(&iov[3], "$7\r\ndummyCG\r\n");
-        IF_NOT_OK_RETURN(writevWrap( (RdbxToResp *) userData, iov, 4, 1, 1));
+        IF_NOT_OK_RETURN(writevWrap( (RdbxToResp *) userData, iov, 4, &startCmd, 1));
     }
 
     /* take care to reset it for next stream-item */
@@ -576,6 +636,10 @@ static RdbRes toRespStreamMetaData(RdbParser *p, void *userData, RdbStreamMeta *
 
     int idLen = snprintf(idStr, sizeof(idStr), "%lu-%lu",meta->lastID.ms,meta->lastID.seq);
     int maxDelEntryIdLen = snprintf(maxDelEntryId, sizeof(maxDelEntryId), "%lu-%lu", meta->maxDelEntryID.ms, meta->maxDelEntryID.seq);
+
+    RdbxRespWriterStartCmd startCmd;
+    startCmd.cmd = "XSETID";
+    startCmd.key = ctx->keyCtx.key;
 
     if ((ctx->keyCtx.info.opcode >= _RDB_TYPE_STREAM_LISTPACKS_2) && (ctx->targetRedisVerVal >= VER_VAL(7, 0))) {
         IOV_CONST(&iov[0], "*7\r\n$6\r\nXSETID");
@@ -589,7 +653,7 @@ static RdbRes toRespStreamMetaData(RdbParser *p, void *userData, RdbStreamMeta *
         IOV_LENGTH(&iov[9], maxDelEntryIdLen, maxDelEntryIdLenStr);
         IOV_STRING(&iov[10], maxDelEntryId, maxDelEntryIdLen);
         IOV_CONST(&iov[11], "\r\n");
-        return writevWrap( (RdbxToResp *) userData, iov, 12, 1, 1);
+        return writevWrap( (RdbxToResp *) userData, iov, 12, &startCmd, 1);
     } else {
         IOV_CONST(&iov[0], "*3\r\n$6\r\nXSETID");
         IOV_LENGTH(&iov[1], ctx->keyCtx.keyLen, keyLenStr);
@@ -597,13 +661,14 @@ static RdbRes toRespStreamMetaData(RdbParser *p, void *userData, RdbStreamMeta *
         IOV_LENGTH(&iov[3], idLen, idLenStr);
         IOV_STRING(&iov[4], idStr, idLen);
         IOV_CONST(&iov[5], "\r\n");
-        return writevWrap( (RdbxToResp *) userData, iov, 6, 1, 1);
+        return writevWrap( (RdbxToResp *) userData, iov, 6, &startCmd, 1);
     }
 }
 
 static RdbRes toRespStreamItem(RdbParser *p, void *userData, RdbStreamID *id, RdbBulk field, RdbBulk val, int64_t itemsLeft) {
     char cmd[64], idStr[100], idLenStr[64], keyLenStr[32], fieldLenStr[32], valLenStr[32];
-    int iovs = 0, startCmd = 0 , endCmd = 0;
+    int iovs = 0, endCmd = 0;
+    RdbxRespWriterStartCmd startCmd, *startCmdRef = NULL;
     struct iovec iov[15];
     RdbxToResp *ctx = userData;
 
@@ -612,6 +677,11 @@ static RdbRes toRespStreamItem(RdbParser *p, void *userData, RdbStreamID *id, Rd
 
     /* Start of (another) stream item? */
     if ((ctx->streamCtx.xaddStartEndCounter % 2) == 0) {
+        startCmd.cmd = "XADD";
+        startCmd.key = ctx->keyCtx.key;
+        startCmdRef = &startCmd;
+
+        /* writev XADD */
         int cmdLen = snprintf(cmd, sizeof(cmd), "*%lu\r\n$4\r\nXADD", 3 + (itemsLeft + 1) * 2);
         IOV_STRING(&iov[iovs++], cmd, cmdLen);
         IOV_LENGTH(&iov[iovs++], ctx->keyCtx.keyLen, keyLenStr);
@@ -620,7 +690,6 @@ static RdbRes toRespStreamItem(RdbParser *p, void *userData, RdbStreamID *id, Rd
         IOV_LENGTH(&iov[iovs++], idLen, idLenStr);
         IOV_STRING(&iov[iovs++], idStr, idLen);
 
-        startCmd = 1;
         ++ctx->streamCtx.xaddStartEndCounter;
     }
 
@@ -636,7 +705,7 @@ static RdbRes toRespStreamItem(RdbParser *p, void *userData, RdbStreamID *id, Rd
         ++ctx->streamCtx.xaddStartEndCounter;
     }
 
-    return writevWrap( (RdbxToResp *) userData, iov, iovs, startCmd, endCmd);
+    return writevWrap( (RdbxToResp *) userData, iov, iovs, startCmdRef, endCmd);
 }
 
 /* Emit the XGROUP CREATE in order to create the group. */
@@ -660,6 +729,11 @@ static RdbRes toRespStreamNewCGroup(RdbParser *p, void *userData, RdbBulk grpNam
 
     int idLen = snprintf(idStr, sizeof(idStr), "%lu-%lu",meta->lastId.ms,meta->lastId.seq);
 
+    RdbxRespWriterStartCmd startCmd;
+    startCmd.cmd = "XGROUP";
+    startCmd.key = ctx->keyCtx.key;
+
+    /* writev XGROUP */
     if ( (meta->entriesRead>=0) && (ctx->targetRedisVerVal >= VER_VAL(7, 0))) {
         /* XGROUP CREATE */
         IOV_CONST(&iov[iovs++], "*7\r\n$6\r\nXGROUP\r\n$6\r\nCREATE");
@@ -690,7 +764,7 @@ static RdbRes toRespStreamNewCGroup(RdbParser *p, void *userData, RdbBulk grpNam
         IOV_STRING(&iov[iovs++], idStr, idLen);
         IOV_CONST(&iov[iovs++], "\r\n");
     }
-    return writevWrap(ctx, iov, iovs, 1, 1);
+    return writevWrap(ctx, iov, iovs, &startCmd, 1);
 }
 
 static RdbRes toRespStreamCGroupPendingEntry(RdbParser *p, void *userData, RdbStreamPendingEntry *pendingEntry) {
@@ -737,7 +811,11 @@ static RdbRes toRespStreamConsumerPendingEntry(RdbParser *p, void *userData, Rdb
         return (RdbRes) RDBX_ERR_STREAM_INTEG_CHECK;
     }
 
-    /* XCLAIM */
+    RdbxRespWriterStartCmd startCmd;
+    startCmd.cmd = "XCLAIM";
+    startCmd.key = ctx->keyCtx.key;
+
+    /* writev XCLAIM */
     IOV_CONST(&iov[iovs++], "*12\r\n$6\r\nXCLAIM");
     /* key */
     IOV_LENGTH(&iov[iovs++], ctx->keyCtx.keyLen, keyLenStr);
@@ -758,7 +836,7 @@ static RdbRes toRespStreamConsumerPendingEntry(RdbParser *p, void *userData, Rdb
                                 idLen, idStr, sentTimeLen, sentTime, sentCountLen, sentCount);
     /* max: 2 + 2 + 1 + 3 + 21*2+1 + 2 + 4 + 3 + 21 + 2 + 10 + 3 +21 +2 + 6 + 2 +5 + 2*16 */
     IOV_STRING(&iov[iovs++], cmdTrailer, cmdTrailerLen);
-    return writevWrap(ctx, iov, iovs, 1, 1);
+    return writevWrap(ctx, iov, iovs, &startCmd, 1);
 }
 
 /*** Handling raw (RESTORE) ***/
@@ -834,7 +912,7 @@ static RdbRes toRespRestoreFrag(RdbParser *p, void *userData, RdbBulk frag) {
     }
 
     IOV_STRING(&iov[iovs++], frag, fragLen);
-    return writevWrap(ctx, iov, iovs, 1, 0);
+    return writevWrap(ctx, iov, iovs, NULL, 0);
 }
 
 /* This call will be followed one or more calls to toRespRestoreFrag() which indicates
@@ -900,7 +978,7 @@ static RdbRes toRespRestoreFragEnd(RdbParser *p, void *userData) {
     }
 
     struct iovec iov = {cmd, len};
-    return writevWrap(ctx, &iov, 1, 0, 1);
+    return writevWrap(ctx, &iov, 1, NULL, 1);
 }
 
 /*** LIB API functions ***/

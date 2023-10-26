@@ -1,7 +1,7 @@
 /* The following C file serves as an illustration of how to use the librdb
  * library for transforming Redis RDB files into JSON format. If you wish to see
  * the various parsing components being invoked in the background, simply set
- * the environment variable ENV_VAR_DEBUG_DATA to 1.
+ * the environment variable LIBRDB_DEBUG_DATA to 1.
  *
  *     $ export LIBRDB_DEBUG_DATA=1
  *     $ make example

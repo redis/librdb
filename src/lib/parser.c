@@ -164,6 +164,7 @@ static RdbHandlers *createHandlersCommon(RdbParser *p, void *userData, RdbFreeFu
 static void loggerCbDefault(RdbLogLevel l, const char *msg);
 static inline RdbStatus updateStateAfterParse(RdbParser *p, RdbStatus status);
 static void printParserState(RdbParser *p);
+static uint64_t dummyCrcFunc(uint64_t crc, const unsigned char *s, uint64_t l);
 
 static inline void restoreEmbeddedBulk(RdbParser *p, EmbeddedBulk *embeddedBulk);
 static void *allocEmbeddedBulk(RdbParser *p,
@@ -235,6 +236,7 @@ _LIBRDB_API RdbParser *RDB_createParserRdb(RdbMemAlloc *memAlloc) {
     p->currOpcode = UINT32_MAX;
     p->deepIntegCheck = 1;
     p->ignoreChecksum = 0;
+    p->crcFunc = crc64;
 
     /*** RDB_parseBuff related data ***/
     p->isParseFromBuff = 0;
@@ -392,6 +394,7 @@ _LIBRDB_API void RDB_setLogger(RdbParser *p, RdbLoggerCB f) {
 
 _LIBRDB_API void RDB_IgnoreChecksum(RdbParser *p) {
     p->ignoreChecksum = 1;
+    p->crcFunc = dummyCrcFunc;
 }
 
 _LIBRDB_API void RDB_setMaxRawSize(RdbParser *p, size_t size) {
@@ -571,6 +574,11 @@ _LIBRDB_API int RDB_getMaxSuppportRdbVersion(void) {
 
 /*** various functions ***/
 
+static uint64_t dummyCrcFunc(uint64_t crc, const unsigned char *s, uint64_t l) {
+    UNUSED(crc, s, l);
+    return 0;
+}
+
 static const char *getStatusString(RdbStatus status) {
     switch ((int) status) {
         case RDB_STATUS_OK: return "OK";
@@ -728,14 +736,29 @@ static void chainHandlersAcrossLevels(RdbParser *p) {
 
 static void resolveMultipleLevelsRegistration(RdbParser *p) {
     /* find the lowest level that handlers are registered */
-    int lvl = (p->numHandlers[0]) ? RDB_LEVEL_RAW :
-              (p->numHandlers[1]) ? RDB_LEVEL_STRUCT :
+    int lvl = (p->numHandlers[RDB_LEVEL_RAW]) ? RDB_LEVEL_RAW :
+              (p->numHandlers[RDB_LEVEL_STRUCT]) ? RDB_LEVEL_STRUCT :
               RDB_LEVEL_DATA ;
 
     for (int i = 0 ; i < RDB_OPCODE_MAX ; ++i) {
         /* check if not configured already by app */
         if (p->handleTypeObjByLevel[i] == RDB_LEVEL_MAX)
             p->handleTypeObjByLevel[i] = lvl;
+    }
+}
+
+static void attachDebugHandlers(RdbParser *p) {
+    RDB_setLogLevel(p, RDB_LOG_DBG);
+    /* find the lowest level that handlers are registered and register DBG handlers accordingly */
+    if (p->numHandlers[RDB_LEVEL_RAW]) {
+        RdbHandlersRawCallbacks cb = {.handleNewKey = handleNewKeyPrintDbg, .handleEndKey = handleEndKeyPrintDbg};
+        RDB_createHandlersRaw(p, &cb, NULL, NULL);
+    } else if (p->numHandlers[RDB_LEVEL_STRUCT]) {
+        RdbHandlersStructCallbacks cb = {.handleNewKey = handleNewKeyPrintDbg, .handleEndKey = handleEndKeyPrintDbg};
+        RDB_createHandlersStruct(p, &cb, NULL, NULL);
+    } else {
+        RdbHandlersDataCallbacks cb = {.handleNewKey = handleNewKeyPrintDbg, .handleEndKey = handleEndKeyPrintDbg};
+        RDB_createHandlersData(p, &cb, NULL, NULL);
     }
 }
 
@@ -746,11 +769,9 @@ static RdbStatus finalizeConfig(RdbParser *p, int isParseFromBuff) {
 
     crc64_init_thread_safe();
 
-    if ((p->debugData = getEnvVar(ENV_VAR_DEBUG_DATA, 0)) != 0) {
-        RDB_setLogLevel(p, RDB_LOG_DBG);
-        RdbHandlersDataCallbacks cb = {.handleNewKey = handleNewKeyPrintDbg, .handleEndKey = handleEndKeyPrintDbg};
-        RDB_createHandlersData(p, &cb, NULL, NULL);
-    }
+    /* debug handlers to further printout processed data */
+    if ((p->debugData = getEnvVar(ENV_VAR_DEBUG_DATA, 0)) != 0)
+        attachDebugHandlers(p);
 
     p->isParseFromBuff = isParseFromBuff;
 
@@ -2621,7 +2642,7 @@ static RdbStatus readRdbFromReader(RdbParser *p, size_t len, AllocTypeRq type, c
 
             /* done read entirely. Eval crc of entire read */
             (*binfo)->written = DONE_FILL_BULK;
-            p->checksum = crc64(p->checksum, (unsigned char *) (*binfo)->ref, len);
+            p->checksum = p->crcFunc(p->checksum, (unsigned char *) (*binfo)->ref, len);
             return res;
         }
     } else {
@@ -2629,7 +2650,7 @@ static RdbStatus readRdbFromReader(RdbParser *p, size_t len, AllocTypeRq type, c
             /* Got last time WAIT_MORE_DATA. assumed async read filled it up */
 
             /* After WAIT_MORE_DATA we cannot eval crc. Update it now. */
-            p->checksum = crc64(p->checksum, (unsigned char *) (*binfo)->ref, len);
+            p->checksum = p->crcFunc(p->checksum, (unsigned char *) (*binfo)->ref, len);
             (*binfo)->written = DONE_FILL_BULK;
         }
         return RDB_STATUS_OK;
@@ -2680,7 +2701,7 @@ static RdbStatus readRdbFromBuff(RdbParser *p, size_t len, AllocTypeRq type, cha
             memcpy(((char *) (*binfo)->ref) + (*binfo)->written,
                    p->parsebuffCtx.at,
                    leftToFillItem);
-            p->checksum = crc64(p->checksum, (*binfo)->ref, len);
+            p->checksum = p->crcFunc(p->checksum, (*binfo)->ref, len);
             p->parsebuffCtx.at += leftToFillItem;
 
             (*binfo)->written = DONE_FILL_BULK;

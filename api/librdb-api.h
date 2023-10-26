@@ -408,7 +408,7 @@ _LIBRDB_API RdbState RDB_getState(RdbParser *p);
 /* get number of handlers registered at given level */
 _LIBRDB_API int RDB_getNumHandlers(RdbParser *p, RdbHandlersLevel lvl);
 
-/* set the parser to ignore checksum errors */
+/* To ignore on checksum error. Else parser return RDB_ERR_CHECKSUM_FAILURE */
 _LIBRDB_API void RDB_IgnoreChecksum(RdbParser *p);
 
 /* There could be relatively large strings stored within Redis, which are
