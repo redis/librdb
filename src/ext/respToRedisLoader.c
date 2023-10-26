@@ -313,13 +313,15 @@ _LIBRDB_API RdbxRespToRedisLoader *RDBX_createRespToRedisTcp(RdbParser *p,
     server_addr.sin_port = htons(port);
     if (inet_pton(AF_INET, hostname, &(server_addr.sin_addr)) <= 0) {
         RDB_reportError(p, (RdbRes) RDBX_ERR_RESP2REDIS_INVALID_ADDRESS,
-                        "Invalid tcp address (hostname=%s, port=%d)", hostname, port);
+                        "Failed to convert IP address. inet_pton(hostname=%s, port=%d) => errno=%d",
+                        hostname, port, errno);
         goto createErr;
     }
 
     if (connect(sockfd, (struct sockaddr *) &server_addr, sizeof(server_addr)) == -1) {
         RDB_reportError(p, (RdbRes) RDBX_ERR_RESP2REDIS_INVALID_ADDRESS,
-                        "Invalid tcp address (hostname=%s, port=%d)", hostname, port);
+                        "Failed to connect(hostname=%s, port=%d) => errno=%d",
+                        hostname, port, errno);
         goto createErr;
     }
 
