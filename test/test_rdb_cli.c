@@ -132,7 +132,7 @@ static void test_rdb_cli_filter_mix(void **state) {
 
 static void test_rdb_cli_input_fd_reader(void **state) {
     UNUSED(state);
-    runSystemCmd(" cat ./test/dumps/single_key.rdb | rdb-cli - json | grep xxx > /dev/null ");
+    runSystemCmd(" cat ./test/dumps/single_key.rdb | ./bin/rdb-cli - json | grep xxx > /dev/null ");
 }
 
 static void test_rdb_cli_redis_auth(void **state) {
