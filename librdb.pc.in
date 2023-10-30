@@ -1,0 +1,10 @@
+prefix=@PREFIX@
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: librdb
+Description: Library for parsing Redis RDB files
+Version: @VERSION@
+Libs: -L${libdir} -lrdb
+Cflags: -I${includedir}

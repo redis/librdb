@@ -2,9 +2,10 @@ default: all
 
 LIB_NAME              = rdb
 LIB_DIR               = ../../lib
+LIBRDB_SONAME         = lib$(LIB_NAME).so.${LIBRDB_VERSION}
 
 # Artifacts:
-TARGET_LIB            = $(LIB_DIR)/lib$(LIB_NAME).so
+TARGET_LIB            = $(LIB_DIR)/${LIBRDB_SONAME}
 TARGET_LIB_STATIC     = $(LIB_DIR)/lib$(LIB_NAME).a
 
 # Source files in the working directory
@@ -38,7 +39,7 @@ all: $(TARGET_LIB) $(TARGET_LIB_STATIC)
 	@echo "Done.";
 
 $(TARGET_LIB): $(OBJECTS) $(REDIS_OBJECTS)
-	$(CC) -o $@ -shared ${LDFLAGS} $^
+	$(CC) -o $@ -shared -Wl,-soname,${LIBRDB_SONAME} ${LDFLAGS} $^
 
 $(TARGET_LIB_STATIC): $(OBJECTS) $(REDIS_OBJECTS)
 	ar rcs $@ $^
