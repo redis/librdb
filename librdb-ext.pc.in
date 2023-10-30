@@ -1,0 +1,11 @@
+prefix=@PREFIX@
+exec_prefix=${prefix}
+libdir=${exec_prefix}/lib
+includedir=${prefix}/include
+
+Name: librdb-ext
+Description: Extension library for parsing Redis RDB to JSON and RESP protocols
+Version: @VERSION@
+Libs: -L${libdir} -lrdb-ext
+Requires: librdb
+Cflags: -I${includedir}

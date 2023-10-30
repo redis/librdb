@@ -6,8 +6,19 @@ INSTALL = /usr/bin/install -c
 BINDIR=$(DESTDIR)$(PREFIX)/bin
 LIBDIR=$(DESTDIR)$(PREFIX)/lib
 INCDIR=$(DESTDIR)$(PREFIX)/include/librdb/
+LIBRDB_INSTALL_SHARED:=yes
+LIBRDB_INSTALL_STATIC:=yes
 
-VERSION = $(shell grep -oP '(?<=LIBRDB_VERSION_STRING ")[0-9]+\.[0-9]+\.[0-9]+' ./src/lib/version.h)
+UNAME := $(shell uname)
+
+ifneq (,$(filter $(UNAME),OpenBSD FreeBSD NetBSD))
+	PKGCONFIGDIR = $(DESTDIR)$(PREFIX)/libdata/pkgconfig
+else
+	PKGCONFIGDIR = $(LIBDIR)/pkgconfig
+endif
+
+LIBRDB_VERSION = $(shell grep -oP '(?<=LIBRDB_VERSION_STRING ")[0-9]+\.[0-9]+\.[0-9]+' ./src/lib/version.h)
+export LIBRDB_VERSION
 
 # ------------------------- ALL --------------------------------------
 
@@ -25,6 +36,8 @@ clean:
 	$(MAKE) -C src/cli -f Makefile clean
 	$(MAKE) -C examples -f Makefile clean
 	$(MAKE) -C test -f Makefile clean
+	rm -f librdb.pc
+	rm -f librdb-ext.pc
 
 distclean: clean
 
@@ -48,41 +61,64 @@ valgrind: build_test
 	./runtests -v
 
 # ------------------------- INSTALL --------------------------------------
-install: all
+
+librdb.pc: librdb.pc.in Makefile
+	sed -e 's|@PREFIX@|$(PREFIX)|' \
+        -e 's|@VERSION@|$(LIBRDB_VERSION)|' \
+         $< >$@
+
+librdb-ext.pc: librdb-ext.pc.in Makefile
+	sed -e 's|@PREFIX@|$(PREFIX)|' \
+        -e 's|@VERSION@|$(LIBRDB_VERSION)|' \
+         $< >$@
+
+install: all librdb.pc librdb-ext.pc
 	$(INSTALL) -d $(BINDIR)
-	$(INSTALL) -m 755 bin/rdb-cli $(BINDIR)/rdb-cli-$(VERSION)
-	ln -fsr $(BINDIR)/rdb-cli-$(VERSION) $(BINDIR)/rdb-cli
+	$(INSTALL) -m 755 bin/rdb-cli $(BINDIR)/rdb-cli-$(LIBRDB_VERSION)
+	ln -fsr $(BINDIR)/rdb-cli-$(LIBRDB_VERSION) $(BINDIR)/rdb-cli
 	$(INSTALL) -d $(LIBDIR)
-	$(INSTALL) -m 755 lib/librdb.so $(LIBDIR)/librdb.so.$(VERSION)
-	ln -fsr $(LIBDIR)/librdb.so.$(VERSION) $(LIBDIR)/librdb.so
-	$(INSTALL) -m 755 lib/librdb-ext.so $(LIBDIR)/librdb-ext.so.$(VERSION)
-	ln -fsr $(LIBDIR)/librdb-ext.so.$(VERSION) $(LIBDIR)/librdb-ext.so
-	$(INSTALL) -m 755 lib/librdb.a $(LIBDIR)/librdb.a.$(VERSION)
-	ln -fsr $(LIBDIR)/librdb.a.$(VERSION) $(LIBDIR)/librdb.a
-	$(INSTALL) -m 755 lib/librdb-ext.a $(LIBDIR)/librdb-ext.a.$(VERSION)
-	ln -fsr $(LIBDIR)/librdb-ext.a.$(VERSION) $(LIBDIR)/librdb-ext.a
+
+ifeq ($(LIBRDB_INSTALL_SHARED),yes)
+	$(INSTALL) -m 755 lib/librdb.so.$(LIBRDB_VERSION) $(LIBDIR)/librdb.so.$(LIBRDB_VERSION)
+	ln -fsr $(LIBDIR)/librdb.so.$(LIBRDB_VERSION) $(LIBDIR)/librdb.so
+	$(INSTALL) -m 755 lib/librdb-ext.so.$(LIBRDB_VERSION) $(LIBDIR)/librdb-ext.so.$(LIBRDB_VERSION)
+	ln -fsr $(LIBDIR)/librdb-ext.so.$(LIBRDB_VERSION) $(LIBDIR)/librdb-ext.so
+	$(INSTALL) -d $(PKGCONFIGDIR)
+	$(INSTALL) -m 644 librdb.pc $(PKGCONFIGDIR)
+	$(INSTALL) -m 644 librdb-ext.pc $(PKGCONFIGDIR)
+endif
+
+ifeq ($(LIBRDB_INSTALL_STATIC),yes)
+	$(INSTALL) -m 755 lib/librdb.a $(LIBDIR)/librdb.a.$(LIBRDB_VERSION)
+	ln -fsr $(LIBDIR)/librdb.a.$(LIBRDB_VERSION) $(LIBDIR)/librdb.a
+	$(INSTALL) -m 755 lib/librdb-ext.a $(LIBDIR)/librdb-ext.a.$(LIBRDB_VERSION)
+	ln -fsr $(LIBDIR)/librdb-ext.a.$(LIBRDB_VERSION) $(LIBDIR)/librdb-ext.a
+endif
+
 	$(INSTALL) -d $(INCDIR)
 	$(INSTALL) -m 644 api/librdb-api.h $(INCDIR)
 	$(INSTALL) -m 644 api/librdb-ext-api.h $(INCDIR)
 
 uninstall:
 	rm -f $(BINDIR)/rdb-cli || true
-	rm -f $(BINDIR)/rdb-cli-$(VERSION)
+	rm -f $(BINDIR)/rdb-cli-$(LIBRDB_VERSION)
 	rm -f $(LIBDIR)/librdb.so
-	rm -f $(LIBDIR)/librdb.so.$(VERSION)
+	rm -f $(LIBDIR)/librdb.so.$(LIBRDB_VERSION)
 	rm -f $(LIBDIR)/librdb-ext.so
-	rm -f $(LIBDIR)/librdb-ext.so.$(VERSION)
+	rm -f $(LIBDIR)/librdb-ext.so.$(LIBRDB_VERSION)
 	rm -f $(LIBDIR)/librdb.a
-	rm -f $(LIBDIR)/librdb.a.$(VERSION)
+	rm -f $(LIBDIR)/librdb.a.$(LIBRDB_VERSION)
 	rm -f $(LIBDIR)/librdb-ext.a
-	rm -f $(LIBDIR)/librdb-ext.a.$(VERSION)
+	rm -f $(LIBDIR)/librdb-ext.a.$(LIBRDB_VERSION)
 	rm -f $(INCDIR)/librdb-api.h
 	rm -f $(INCDIR)/librdb-ext-api.h
+	rm -f $(PKGCONFIGDIR)/librdb.pc
+	rm -f $(PKGCONFIGDIR)/librdb-ext.pc
 
 # ------------------------- HELP --------------------------------------
 
 help:
-	@echo "librdb (v$(VERSION)) target rules:"
+	@echo "librdb (v$(LIBRDB_VERSION)) target rules:"
 	@echo "    all        - Build parser libraries, tests, and run tests"
 	@echo "    debug      - Build without compiler optimization and with assert() enabled"
 	@echo "    test       - Run tests with shared lib"
