@@ -284,12 +284,12 @@ static void test_r2r_module_aux(void **state) {
 static void test_r2r_stream_with_target_62_and_72(void **state) {
     size_t fileLen;
     UNUSED(state);
-    RdbxToRespConf r2rConf1 = { .delKeyBeforeWrite=0, .supportRestore=0, .dstRedisVersion="6.2",};
+    RdbxToRespConf r2rConf1 = { .delKeyBeforeWrite=0, .supportRestore=0, .dstRedisVersion="6.2", .singleDb=0};
     char *f1 = readFile(DUMP_FOLDER("stream_v11_target_ver_6.2.resp"), &fileLen, NULL);
     testRdbToRespCommon("stream_v11.rdb", &r2rConf1, f1, fileLen, M_ENTIRE, 1);
     free(f1);
 
-    RdbxToRespConf r2rConf = { .delKeyBeforeWrite=0, .supportRestore=0, .dstRedisVersion="7.2",};
+    RdbxToRespConf r2rConf = { .delKeyBeforeWrite=0, .supportRestore=0, .dstRedisVersion="7.2", .singleDb=0};
     f1 = readFile(DUMP_FOLDER("stream_v11_target_ver_7.2.resp"), &fileLen, NULL);
     testRdbToRespCommon("stream_v11.rdb", &r2rConf, f1, fileLen, M_ENTIRE, 1);
     free(f1);

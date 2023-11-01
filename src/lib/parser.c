@@ -1402,6 +1402,7 @@ RdbStatus elementNextRdbType(RdbParser *p) {
     /*** ENTER SAFE STATE ***/
 
     p->currOpcode = *((unsigned char *)biType->ref);
+
     switch (p->currOpcode) {
         case RDB_OPCODE_EXPIRETIME:         return nextParsingElement(p, PE_EXPIRETIME);
         case RDB_OPCODE_EXPIRETIME_MS:      return nextParsingElement(p, PE_EXPIRETIMEMSEC);

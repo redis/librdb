@@ -342,6 +342,11 @@ static RdbRes toRespNewDb(RdbParser *p, void *userData, int dbid) {
     char dbidStr[10], cntStr[10];
 
     RdbxToResp *ctx = userData;
+
+    /* If configured singleDb then skip writing SELECT */
+    if (ctx->conf.singleDb)
+        return RDB_OK;
+
     int cnt = ll2string(dbidStr, sizeof(dbidStr), dbid);
 
     RdbxRespWriterStartCmd startCmd;
