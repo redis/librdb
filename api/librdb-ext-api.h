@@ -137,10 +137,7 @@ typedef struct RdbxToRespConf {
      *
      * This approach can be helpful when dealing with scenarios such as data
      * partitioned into multiple DBs where you need to merge them into a single DB.
-     * Be cautious of potential key conflicts in such cases.
-     *
-     * Additionally, this can be useful when migrating data to Redis Enterprise,
-     * which does not support multiple DBs and command SELECT should be avoided. */
+     * Be cautious of potential key conflicts in such case. */
      int singleDb;
 
 } RdbxToRespConf;
