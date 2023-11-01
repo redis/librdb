@@ -117,15 +117,11 @@ into corresponding callbacks.
 If we only care about DB logical data-types, for example in order to export data to
 another framework, then we better register our callbacks at level2.
 
-Note, the set of handlers at Level1 get the data further parsed than the one "below it" at
-Level0. The same goes between Level2 and Level1 correspondingly.
-
 ### Handlers
-The **Handlers** represent a set of builtin or user-defined functions that will be called on the
-parsed data. Future plan to support built-in Handlers:
-* Convert RDB to JSON file handlers.
-* Convert RDB to RESP protocol handlers.
-* Memory Analyze (TODO)
+The **Handlers** represent a set of builtin or user-defined functions that will 
+be called on the parsed data. Currently, librdb supports 2 built-in Handlers that 
+converts to JSON and RESSP and one extension to RESP handlers that in addition 
+can play it against live server.
 
 It is possible to attach to parser more than one set of handlers at the same level.
 That is, for a given data at a given level, the parser will call each of the handlers that
@@ -134,8 +130,8 @@ is the most time-consuming task of the parser, and it can save time by making a 
 parse yet invoke multiple sets of handlers.
 
 More common reason is that a handlers can be used also as a Filter to decide whether to
-propagate data to the next set of handlers in-line (Such built-in filters can be
-found at extension library of this project). Note that for any given level, order of
+propagate data to the next set of handlers in-line. Such built-in filters can be
+found at extension library of this project. Note that for any given level, order of
 calls to handlers will be the opposite to order of their registration to that level.
 
 Furthermore, it is also possible to attach multiple handlers at different levels, which is

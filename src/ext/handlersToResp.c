@@ -955,6 +955,13 @@ static RdbRes toRespRestoreFragEnd(RdbParser *p, void *userData) {
 
     int len = 10;
 
+    /* if processing module-aux then we are done (no ABSTTL, IDLETIME or FREQ) */
+    if (ctx->restoreCtx.isModuleAux) {
+        len += snprintf(cmd+len, sizeof(cmd)-len, "\r\n");
+        struct iovec iov = {cmd, len};
+        return writevWrap(ctx, &iov, 1, NULL, 1);
+    }
+
     /* Add REPLACE if needed */
     if (ctx->keyCtx.delBeforeWrite == DEL_KEY_BEFORE_BY_RESTORE_REPLACE)
         len += snprintf(cmd+len, sizeof(cmd)-len, "\r\n$7\r\nREPLACE\r\n");
