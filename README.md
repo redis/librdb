@@ -234,6 +234,7 @@ destruction, or when newer block replacing old one.
                                           as RESTORE is closely tied to specific RDB versions. If versions not
                                           aligned the parser will generate higher-level commands instead.
             -o, --output <FILE>           Specify the output file (For 'resp' only: if not specified, output to stdout)
+            -1, --single-db               Avoid SELECT command. DBs in RDB will be stored to db 0. Watchout for conflicts
             -s, --start-cmd-num <NUM>     Start writing redis from command number
             -e, --enum-commands           Command enumeration and tracing by preceding each generated RESP command
                                           with debug command of type: `SET _RDB_CLI_CMD_ID_ <CMD-ID>`

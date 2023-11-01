@@ -132,6 +132,17 @@ typedef struct RdbxToRespConf {
      * this functionality to Redis OSS in the near future. */
      int supportRestoreModuleAux;
 
+    /* Single DB mode. i.e., avoid using the SELECT command. In turn all keys and
+     * data in the RDB will be stored in the default DB (index 0).
+     *
+     * This approach can be helpful when dealing with scenarios such as data
+     * partitioned into multiple DBs where you need to merge them into a single DB.
+     * Be cautious of potential key conflicts in such cases.
+     *
+     * Additionally, this can be useful when migrating data to Redis Enterprise,
+     * which does not support multiple DBs and command SELECT should be avoided. */
+     int singleDb;
+
 } RdbxToRespConf;
 
 _LIBRDB_API RdbxToResp *RDBX_createHandlersToResp(RdbParser *, RdbxToRespConf *);

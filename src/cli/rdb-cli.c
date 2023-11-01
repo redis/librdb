@@ -117,6 +117,7 @@ static void printUsage(int shortUsage) {
     printf("\t                              as RESTORE is closely tied to specific RDB versions. If versions not\n");
     printf("\t                              aligned the parser will generate higher-level commands instead.\n");
     printf("\t-o, --output <FILE>           Specify the output file (For 'resp' only: if not specified, output to stdout)\n");
+    printf("\t-1, --single-db               Avoid SELECT command. DBs in RDB will be stored to db 0. Watchout for conflicts\n");
     printf("\t-s, --start-cmd-num <NUM>     Start writing redis from command number\n");
     printf("\t-e, --enum-commands           Command enumeration and tracing by preceding each generated RESP command\n");
     printf("\t                              with debug command of type: `SET _RDB_CLI_CMD_ID_ <CMD-ID>`\n");
@@ -179,6 +180,7 @@ static RdbRes formatRedis(RdbParser *parser, int argc, char **argv) {
         if (getOptArgVal(argc, argv, &at, "-p", "--port", NULL, &port, 1, 65535)) continue;
         if (getOptArg(argc, argv, &at, "-r", "--support-restore", &(conf.supportRestore), NULL)) continue;
         if (getOptArg(argc, argv, &at, "-d", "--del-before-write", &(conf.delKeyBeforeWrite), NULL)) continue;
+        if (getOptArg(argc, argv, &at, "-1", "--single-db", &(conf.singleDb), NULL)) continue;
         if (getOptArg(argc, argv, &at, "-t", "--target-redis-ver", NULL, &(conf.dstRedisVersion))) continue;
         if (getOptArgVal(argc, argv, &at, "-l", "--pipeline-depth", NULL, &pipeDepthVal, 1, 1000)) continue;
         if (getOptArgVal(argc, argv, &at, "-n", "--start-cmd-num", NULL, &startCmdNum, 1, INT_MAX)) continue;
@@ -252,6 +254,7 @@ static RdbRes formatResp(RdbParser *parser, int argc, char **argv) {
         if (getOptArg(argc, argv, &at, "-o", "--output", NULL, &output)) continue;
         if (getOptArg(argc, argv, &at, "-r", "--support-restore", &(conf.supportRestore), NULL)) continue;
         if (getOptArg(argc, argv, &at, "-d", "--del-before-write", &(conf.delKeyBeforeWrite), NULL)) continue;
+        if (getOptArg(argc, argv, &at, "-1", "--single-db", &(conf.singleDb), NULL)) continue;
         if (getOptArg(argc, argv, &at, "-t", "--target-redis-ver", NULL, &(conf.dstRedisVersion))) continue;
         if (getOptArg(argc, argv, &at, "-e", "--enum-commands", &commandEnum, NULL)) continue;
         if (getOptArgVal(argc, argv, &at, "-n", "--start-cmd-num", NULL, &startCmdNum, 1, INT_MAX)) continue;

@@ -32,10 +32,12 @@ all: $(TARGET_APP)
 	cp $(TARGET_APP) ../../bin/
 	@echo "Done.";
 
-$(TARGET_APP): %: %.c
+$(TARGET_APP): %: %.c  lib_dependency
 	$(CC) $(CFLAGS) -o $@ $<  $(DEBUG) $(LIBS)
+
+lib_dependency: $(LIB_DIR)/$(LIB_NAME_EXT)
 
 clean:
 	@rm -rvf $(TARGETS) ./*.o ../../bin/$(TARGET_APP)
 
-.PHONY: all clean
+.PHONY: all clean lib_dependency
