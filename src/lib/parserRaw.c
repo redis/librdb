@@ -677,13 +677,14 @@ RdbStatus elementRawModule(RdbParser *p) {
                     IF_NOT_OK_RETURN(aggUpdateWritten(p, len));
                     updateElementState(p, ST_NEXT_OPCODE, 0);
                     break;
+                } else {
+                    assert(p->currOpcode == RDB_TYPE_MODULE_AUX);
+
+                    /* Init Aggregator of bulks here since no new-key precedes module aux */
+                    aggReset(p);
+                    updateElementState(p, ST_AUX_START, 0);
                 }
-
-                /* No new-key precedes module aux. Init Aggregator of bulks here. */
-                aggReset(p);
-
-                updateElementState(p, ST_AUX_START, 0);
-            } /* fall-thru */
+            } /* fall-thru - only for of RDB_TYPE_MODULE_AUX */
 
             case ST_AUX_START: {
                 int len = 0;
