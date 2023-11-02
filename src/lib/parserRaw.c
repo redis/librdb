@@ -678,7 +678,7 @@ RdbStatus elementRawModule(RdbParser *p) {
                     updateElementState(p, ST_NEXT_OPCODE, 0);
                     break;
                 } else {
-                    assert(p->currOpcode == RDB_TYPE_MODULE_AUX);
+                    assert(p->currOpcode == RDB_OPCODE_MODULE_AUX);
 
                     /* Init Aggregator of bulks here since no new-key precedes module aux */
                     aggReset(p);
