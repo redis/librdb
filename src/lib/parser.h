@@ -322,8 +322,8 @@ typedef struct RawContext {
      * this issue, the parser gathers all payload data for these types and only
      * provides it to callback handlers once it reaches the end of the type and
      * knows its total size. However, for types like strings, whose sizes are
-     * already known at the beginning, the parser will not aggregate the entire
-     * payload if it is large enough, but stream it to handleFrag callback. */
+     * already known at the beginning, the parser will only partially aggregate
+     * the payload, if it is large enough, and stream it to handleFrag callback. */
     enum {
         AGG_TYPE_UNINIT,
         AGG_TYPE_ENTIRE_DATA,

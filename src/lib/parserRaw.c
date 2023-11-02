@@ -32,6 +32,7 @@ static inline RdbStatus cbHandleFrag(RdbParser *p, BulkInfo *binfo);
 static inline RdbStatus cbHandleEnd(RdbParser *p);
 
 /* Aggregator of bulks for raw data until read entire key */
+static inline void aggReset(RdbParser *p); /* On new key or start of aux-module */
 static inline void aggFlushBulks(RdbParser *p);
 static inline void aggAllocFirstBulk(RdbParser *p);
 static RdbStatus aggMakeRoom(RdbParser *p, size_t numBytesRq);
@@ -115,9 +116,7 @@ RdbStatus elementRawNewKey(RdbParser *p) {
 
     /*** ENTER SAFE STATE ***/
 
-    p->rawCtx.aggType = AGG_TYPE_UNINIT;
-
-    aggAllocFirstBulk(p);
+    aggReset(p);
 
     /* write type of 1 byte. No need to call aggMakeRoom(). First bulk is empty. */
     p->rawCtx.at[0] = p->currOpcode;
@@ -678,13 +677,14 @@ RdbStatus elementRawModule(RdbParser *p) {
                     IF_NOT_OK_RETURN(aggUpdateWritten(p, len));
                     updateElementState(p, ST_NEXT_OPCODE, 0);
                     break;
-                }
+                } else {
+                    assert(p->currOpcode == RDB_OPCODE_MODULE_AUX);
 
-                /* No new-key precedes module aux. Init Aggregator of bulks here.
-                 * Note that the call is made from a safe state */
-                aggAllocFirstBulk(p);
-                updateElementState(p, ST_AUX_START, 0);
-            } /* fall-thru */
+                    /* Init Aggregator of bulks here since no new-key precedes module aux */
+                    aggReset(p);
+                    updateElementState(p, ST_AUX_START, 0);
+                }
+            } /* fall-thru - only for of RDB_TYPE_MODULE_AUX */
 
             case ST_AUX_START: {
                 int len = 0;
@@ -1053,6 +1053,8 @@ static inline RdbStatus cbHandleEnd(RdbParser *p) {
 
     /* if aggregated entire type then only now parser knows to report totalSize */
     if (ctx->aggType == AGG_TYPE_ENTIRE_DATA) {
+
+        /* if module-aux, then report special module-aux begin */
         if (p->currOpcode == RDB_OPCODE_MODULE_AUX) {
             BulkInfo *bulkName;
             IF_NOT_OK_RETURN(allocFromCache(p, 9, RQ_ALLOC_APP_BULK, NULL, &bulkName));
@@ -1189,6 +1191,11 @@ static RdbStatus aggMakeRoom(RdbParser *p, size_t numBytesRq) {
     bulkUnmanagedAlloc(p, nextBufSize, UNMNG_RQ_ALLOC_APP_BULK, NULL, currBuff);
     ctx->at = ctx->bulkArray[ctx->curBulkIndex].ref;
     return RDB_STATUS_OK;
+}
+
+static inline void aggReset(RdbParser *p) {
+    aggAllocFirstBulk(p);
+    p->rawCtx.aggType = AGG_TYPE_UNINIT;
 }
 
 static inline void aggFlushBulks(RdbParser *p) {
