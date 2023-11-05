@@ -622,7 +622,7 @@ static RdbRes toRespStreamMetaData(RdbParser *p, void *userData, RdbStreamMeta *
         IOV_CONST(&iov[0], "*6\r\n$6\r\nXGROUP\r\n$6\r\nCREATE");
         IOV_LENGTH(&iov[1], ctx->keyCtx.keyLen, keyLenStr);
         IOV_STRING(&iov[2], ctx->keyCtx.key, ctx->keyCtx.keyLen);
-        IOV_CONST(&iov[3], "$7\r\ndummyCG\r\n$1\r\n$\r\n$8\r\nMKSTREAM\r\n");
+        IOV_CONST(&iov[3], "\r\n$7\r\ndummyCG\r\n$1\r\n$\r\n$8\r\nMKSTREAM\r\n");
         IF_NOT_OK_RETURN(writevWrap( (RdbxToResp *) userData, iov, 4, &startCmd, 1));
 
         /* another startCmd */
@@ -632,7 +632,7 @@ static RdbRes toRespStreamMetaData(RdbParser *p, void *userData, RdbStreamMeta *
         IOV_CONST(&iov[0], "*4\r\n$6\r\nXGROUP\r\n$7\r\nDESTROY");
         IOV_LENGTH(&iov[1], ctx->keyCtx.keyLen, keyLenStr);
         IOV_STRING(&iov[2], ctx->keyCtx.key, ctx->keyCtx.keyLen);
-        IOV_CONST(&iov[3], "$7\r\ndummyCG\r\n");
+        IOV_CONST(&iov[3], "\r\n$7\r\ndummyCG\r\n");
         IF_NOT_OK_RETURN(writevWrap( (RdbxToResp *) userData, iov, 4, &startCmd, 1));
     }
 
