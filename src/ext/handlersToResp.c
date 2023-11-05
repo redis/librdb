@@ -405,6 +405,7 @@ static RdbRes toRespNewKey(RdbParser *p, void *userData, RdbBulk key, RdbKeyInfo
 static RdbRes toRespEndKey(RdbParser *p, void *userData) {
     UNUSED(p);
     RdbxToResp *ctx = userData;
+    RdbRes res = RDB_OK;
 
     /* key is in db. Set its expiration time */
     if (ctx->keyCtx.info.expiretime != -1) {
@@ -421,14 +422,13 @@ static RdbRes toRespEndKey(RdbParser *p, void *userData) {
         IOV_LENGTH(&iov[1], ctx->keyCtx.keyLen, keyLenStr);
         IOV_STRING(&iov[2], ctx->keyCtx.key, ctx->keyCtx.keyLen);
         IOV_LEN_AND_VAL(iov+3, ctx->keyCtx.info.expiretime, expireLenStr, expireStr);
-
-        return writevWrap(ctx, iov, 5, &startCmd, 1);
+        res = writevWrap(ctx, iov, 5, &startCmd, 1);
     }
 
     RDB_bulkCopyFree(p, ctx->keyCtx.key);
     ctx->keyCtx.key = NULL;
 
-    return RDB_OK;
+    return res;
 }
 
 /*** Handling data ***/
