@@ -5,7 +5,7 @@
 
 struct RdbxReaderFileDesc {
     RdbParser *parser;
-    int fdClloseWhenDone;
+    int fdCloseWhenDone;
     int fd;
 };
 
@@ -13,7 +13,7 @@ static void deleteReaderFileDesc(RdbParser *p, void *rdata) {
     if (!rdata) return;
 
     RdbxReaderFileDesc *readerData = (RdbxReaderFileDesc *) rdata;
-    if (readerData->fdClloseWhenDone)
+    if (readerData->fdCloseWhenDone)
         close(readerData->fd);
     RDB_free(p, readerData);
 }
@@ -34,7 +34,7 @@ RdbxReaderFileDesc *RDBX_createReaderFileDesc(RdbParser *p, int fd, int fdCloseW
     RdbxReaderFileDesc *ctx = (RdbxReaderFileDesc *) RDB_alloc(p, sizeof(RdbxReaderFileDesc));
     ctx->parser = p;
     ctx->fd = fd;
-    ctx->fdClloseWhenDone = fdCloseWhenDone;
+    ctx->fdCloseWhenDone = fdCloseWhenDone;
     RDB_createReaderRdb(p, readFileDesc, ctx, deleteReaderFileDesc);
     return ctx;
 }
