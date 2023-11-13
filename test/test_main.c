@@ -170,7 +170,8 @@ int main(int argc, char *argv[]) {
                         "  -h, --help                       Show this help message\n"
                         "  -f, --redis-folder <folder>      Specify the Redis folder to use for the tests\n"
                         "  -g, --test-group <group-prefix>  Selected test group to run\n"
-                        "  -t, --test <filter>              Selected test to run";
+                        "  -t, --test <filter>              Selected test to run\n"
+                        "  -v, --valgrind                   Run tests under valgrind";
 
 
 
@@ -185,6 +186,8 @@ int main(int argc, char *argv[]) {
             runGroupPrefix = argv[++i];
         } else if ((strcmp(argv[i], "-t") == 0 || strcmp(argv[i], "--test") == 0) && i+1 < argc) {
             testFilter = argv[++i];
+        } else if ((strcmp(argv[i], "-v") == 0 || strcmp(argv[i], "--valgrind") == 0)) {
+            setValgrind();
         } else {
             printf("Invalid argument: %s\n%s\n", argv[i], USAGE);
             exit(EXIT_FAILURE);

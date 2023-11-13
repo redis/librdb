@@ -18,8 +18,7 @@ If you just wish to get a basic understanding of the library's functionality:
 
 To see cool internal state printouts of the parser, set env-var `LIBRDB_DEBUG_DATA` beforehand:
 
-    % export LIBRDB_DEBUG_DATA=1
-    % make example
+    % LIBRDB_DEBUG_DATA=1 make example
 
 To build and run tests, you need to have cmocka unit testing framework installed:
 

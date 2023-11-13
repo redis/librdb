@@ -17,14 +17,22 @@
 #include "test_common.h"
 
 /* Live Redis server for some of the tests (Optional) */
-#define MAX_NUM_REDIS_INST 2
-int        currRedisInst = -1;
+#define MAX_NUM_REDIS_INST         2
+
+#define RDB_CLI_VALGRIND_LOG_FILE  "test/log/rdb-cli-valgrind.log"
+#define RDB_CLI_CMD                "./bin/rdb-cli"
+#define RDB_CLI_VALGRIND_CMD       "/usr/bin/valgrind --track-origins=yes --leak-check=full --leak-resolution=high --error-exitcode=1 --log-file="RDB_CLI_VALGRIND_LOG_FILE" "RDB_CLI_CMD
+
+int          useValgrind = 0;
+int          currRedisInst = -1;
 redisContext *redisServersStack[MAX_NUM_REDIS_INST] = {0};
-int        redisPort[MAX_NUM_REDIS_INST]= {0};
-pid_t      redisPID[MAX_NUM_REDIS_INST] = {0};
-const char *redisInstallFolder  = NULL;
-char redisVer[10];
-int redisVersionInit, redisVerMajor, redisVerMinor;
+int          redisPort[MAX_NUM_REDIS_INST]= {0};
+pid_t        redisPID[MAX_NUM_REDIS_INST] = {0};
+const char   *redisInstallFolder  = NULL;
+char         redisVer[10];
+int          redisVersionInit, redisVerMajor, redisVerMinor;
+
+void checkValgrindLog(const char *filename);
 
 const char *getTargetRedisVersion(int *major, int *minor) {
     /* must be called only after setupRedisServer() */
@@ -35,11 +43,22 @@ const char *getTargetRedisVersion(int *major, int *minor) {
 }
 
 void runSystemCmd(const char *cmdFormat, ...) {
-    char cmd[1024];
+    char cmd[2048];
     va_list args;
+    static int setup = 0;
+
+    /* setup env-var, specifically $RDB_CLI_CMD, that might be used by the command */
+    if (!setup) {
+        setenv("RDB_CLI_CMD", (useValgrind) ? RDB_CLI_VALGRIND_CMD : RDB_CLI_CMD, 1);
+        setup = 1;
+    }
+
     va_start(args, cmdFormat);
     vsnprintf(cmd, sizeof(cmd)-1, cmdFormat, args);
     va_end(args);
+
+    /* remove any valgrind log file leftover from previous test */
+    if (useValgrind) remove(RDB_CLI_VALGRIND_LOG_FILE);
 
     //printf ("runSystemCmd(): %s\n", cmd);
     int res = system(cmd);
@@ -47,6 +66,11 @@ void runSystemCmd(const char *cmdFormat, ...) {
         printf("\nFailed to run command: %s\n", cmd);
         assert_true(0);
     }
+
+    /* Confirm no errors when running 'rdb-cli' with 'valgrind'. Note: We check valgrind
+     * log due to potential issues with '--error-exitcode=1' and pipelines ('|'). */
+    if (useValgrind && strstr(cmd, "$RDB_CLI_CMD"))
+        checkValgrindLog(RDB_CLI_VALGRIND_LOG_FILE);
 }
 
 char *readFile(const char *filename,  size_t *length, char *ignoredCh) {
@@ -412,6 +436,34 @@ int getRedisPort(void) {
     assert_true(currRedisInst>=0);
     return redisPort[currRedisInst];
 }
+
+void setValgrind() {
+    useValgrind = 1;
+}
+
+void checkValgrindLog(const char *filename) {
+    const char *expectedSummary = "ERROR SUMMARY: 0 errors from 0 contexts (suppressed: 0 from 0)\n";
+    char buffer[512]; // Adjust the buffer size according to your needs
+
+    // Open the file for reading
+    FILE *file = fopen(filename, "r");
+
+    if (file == NULL) return;
+
+    /* Read the file line by line until the end */
+    while (fgets(buffer, sizeof(buffer), file) != NULL);
+    fclose(file);
+
+    /* summary string appear at the last line, after "==<PID>==" and a space */
+    char *spaceAt = strchr(buffer, ' ');
+    if ((spaceAt == NULL) || (strcmp(spaceAt+1, expectedSummary) != 0)) {
+        char *f = readFile(filename, NULL, NULL);
+        printf ("rdb-cli failure:\n%s", f);
+        free(f);
+        assert_true(0);
+    }
+}
+
 /* Redis OSS does not support restoring module auxiliary data. This feature
  * is currently available only in Redis Enterprise. There are plans to bring
  * this functionality to Redis OSS in the near future. */
