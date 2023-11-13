@@ -443,12 +443,10 @@ void setValgrind() {
 
 void checkValgrindLog(const char *filename) {
     const char *expectedSummary = "ERROR SUMMARY: 0 errors from 0 contexts (suppressed: 0 from 0)\n";
-    char buffer[512]; // Adjust the buffer size according to your needs
+    char buffer[512];
+    FILE *file;
 
-    // Open the file for reading
-    FILE *file = fopen(filename, "r");
-
-    if (file == NULL) return;
+    if ( (file = fopen(filename, "r")) == NULL) return;
 
     /* Read the file line by line until the end */
     while (fgets(buffer, sizeof(buffer), file) != NULL);
