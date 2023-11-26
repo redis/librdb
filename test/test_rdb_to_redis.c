@@ -10,9 +10,14 @@ void dummyLogger(RdbLogLevel l, const char *msg) { UNUSED(l, msg); }
 
 static int setupTest(void **state) {
     UNUSED(state);
+    int major;
+
     sendRedisCmd("FLUSHALL", REDIS_REPLY_STATUS, NULL);
-    sendRedisCmd("FUNCTION FLUSH", REDIS_REPLY_STATUS, NULL);
     sendRedisCmd("SAVE", REDIS_REPLY_STATUS, NULL);
+
+    /* FUNCTION FLUSH if redis version is 7.0 or higher */
+    getTargetRedisVersion(&major, NULL);
+    if (major >= 7) sendRedisCmd("FUNCTION FLUSH", REDIS_REPLY_STATUS, NULL);
     return 0;
 }
 
@@ -83,9 +88,14 @@ static void test_rdb_to_redis_common(const char *rdbfile, int ignoreListOrder, c
     /* test one time without RESTORE, Playing against old version.
      * and one time with RESTORE, Playing against new version. */
     for (int isRestore = 0 ; isRestore <= 1 ; ++isRestore) {
+        int major;
 
         sendRedisCmd("FLUSHALL", REDIS_REPLY_STATUS, NULL);
-        sendRedisCmd("FUNCTION FLUSH", REDIS_REPLY_STATUS, NULL);
+
+        /* FUNCTION FLUSH */
+        getTargetRedisVersion(&major, NULL);
+        if (major >= 7)
+            sendRedisCmd("FUNCTION FLUSH", REDIS_REPLY_STATUS, NULL);
 
         /* 1. Convert RDB to Json (out1.json) */
         rdb_to_json(rdbfile, TMP_FOLDER("out1.json"));
@@ -236,9 +246,11 @@ static void test_rdb_to_redis_function(void **state) {
     UNUSED(state);
     int major;
     getTargetRedisVersion(&major, NULL);
+
     /* function available since 7.0 */
     if (major < 7)
         skip();
+
     test_rdb_to_redis_common(DUMP_FOLDER("function.rdb"), 1, NULL, NULL);
     sendRedisCmd("FUNCTION LIST", REDIS_REPLY_ARRAY, "myfunc");
 }
