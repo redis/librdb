@@ -371,7 +371,7 @@ static void test_rdb_to_redis_func_lib_replace_if_exist(void **state) {
                                                   getRedisPort()));
 
         while ((status = RDB_parse(parser)) == RDB_STATUS_WAIT_MORE_DATA);
-        RDB_deleteParser(parser);
+
 
         /* Verify myfunc is loaded (either succeeded or not) */
         sendRedisCmd("FUNCTION LIST", REDIS_REPLY_ARRAY, "myfunc");
@@ -384,6 +384,7 @@ static void test_rdb_to_redis_func_lib_replace_if_exist(void **state) {
             assert_int_equal(err, RDBX_ERR_RESP_WRITE);
             assert_non_null(strstr(RDB_getErrorMessage(parser), "mylib"));
         }
+        RDB_deleteParser(parser);
     }
 }
 
