@@ -204,7 +204,9 @@ static RdbRes resolveSupportRestore(RdbParser *p, RdbxToResp *ctx) {
     /* Enforce RESTORE for modules. librdb cannot really parse high-level module object */
     RDB_handleByLevel(p, RDB_DATA_TYPE_MODULE, RDB_LEVEL_RAW);
 
-    /* Avoid RESTORE for functions. Redis doesn't have API to RESTORE functions */
+    /* To simplify implementation avoid FUNCTION RESTORE command. Always use
+     * FUNCTION LOAD command instead (Expected that there won't be many functions
+     * in the RDB file which requires optimization). */
     RDB_handleByLevel(p, RDB_DATA_TYPE_FUNCTION, RDB_LEVEL_DATA);
 
     return RDB_OK;
@@ -588,6 +590,8 @@ static RdbRes toRespEndRdb(RdbParser *p, void *userData) {
 
 static RdbRes toRespFunction(RdbParser *p, void *userData, RdbBulk func) {
     char funcLenStr[32];
+    struct iovec iov[4];
+    RdbxToResp *ctx = userData;
 
     int funcLen = RDB_bulkLen(p, func);
 
@@ -595,14 +599,16 @@ static RdbRes toRespFunction(RdbParser *p, void *userData, RdbBulk func) {
     startCmd.cmd = "FUNCTION";
     startCmd.key = "";
 
-    struct iovec iov[4];
-    IOV_CONST(&iov[0], "*4\r\n$8\r\nFUNCTION\r\n$4\r\nLOAD\r\n$7\r\nREPLACE");
+    if (ctx->conf.funcLibReplaceIfExist)
+        IOV_CONST(&iov[0], "*4\r\n$8\r\nFUNCTION\r\n$4\r\nLOAD\r\n$7\r\nREPLACE");
+    else
+        IOV_CONST(&iov[0], "*3\r\n$8\r\nFUNCTION\r\n$4\r\nLOAD");
+
     /* write member */
     IOV_LENGTH(&iov[1], funcLen, funcLenStr);
     IOV_STRING(&iov[2], func, funcLen);
     IOV_CONST(&iov[3], "\r\n");
     return writevWrap( (RdbxToResp *) userData, iov, 4, &startCmd, 1);
-
 }
 
 static RdbRes toRespStreamMetaData(RdbParser *p, void *userData, RdbStreamMeta *meta) {

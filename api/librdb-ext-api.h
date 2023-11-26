@@ -113,6 +113,12 @@ typedef struct RdbxToRespConf {
      * RESTORE command. */
     int delKeyBeforeWrite;
 
+    /* funcLibReplaceIfExist - If function-library with the same name is already
+     * exist in the target redis, then replace it rather than return failure.
+     * (Implemented in RESP by adding `REPLACE` flag to the `FUNCTION LOAD`
+     * command) */
+    int funcLibReplaceIfExist;
+
     /* If supportRestore, then data-types will be translated to RESTORE with
      * raw data instead of data-types commands. This is a performance optimization
      * that requires to be version aligned. */

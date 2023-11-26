@@ -6,18 +6,17 @@
 #include <sys/wait.h>
 #include "test_common.h"
 
+int majorVersion;
+
 void dummyLogger(RdbLogLevel l, const char *msg) { UNUSED(l, msg); }
 
 static int setupTest(void **state) {
     UNUSED(state);
-    int major;
-
     sendRedisCmd("FLUSHALL", REDIS_REPLY_STATUS, NULL);
     sendRedisCmd("SAVE", REDIS_REPLY_STATUS, NULL);
 
     /* FUNCTION FLUSH if redis version is 7.0 or higher */
-    getTargetRedisVersion(&major, NULL);
-    if (major >= 7) sendRedisCmd("FUNCTION FLUSH", REDIS_REPLY_STATUS, NULL);
+    if (majorVersion >= 7) sendRedisCmd("FUNCTION FLUSH", REDIS_REPLY_STATUS, NULL);
     return 0;
 }
 
@@ -88,13 +87,10 @@ static void test_rdb_to_redis_common(const char *rdbfile, int ignoreListOrder, c
     /* test one time without RESTORE, Playing against old version.
      * and one time with RESTORE, Playing against new version. */
     for (int isRestore = 0 ; isRestore <= 1 ; ++isRestore) {
-        int major;
-
         sendRedisCmd("FLUSHALL", REDIS_REPLY_STATUS, NULL);
 
         /* FUNCTION FLUSH */
-        getTargetRedisVersion(&major, NULL);
-        if (major >= 7)
+        if (majorVersion >= 7)
             sendRedisCmd("FUNCTION FLUSH", REDIS_REPLY_STATUS, NULL);
 
         /* 1. Convert RDB to Json (out1.json) */
@@ -244,11 +240,8 @@ static void test_rdb_to_redis_policy_lru(void **state) {
 
 static void test_rdb_to_redis_function(void **state) {
     UNUSED(state);
-    int major;
-    getTargetRedisVersion(&major, NULL);
-
     /* function available since 7.0 */
-    if (major < 7)
+    if (majorVersion < 7)
         skip();
 
     test_rdb_to_redis_common(DUMP_FOLDER("function.rdb"), 1, NULL, NULL);
@@ -303,6 +296,7 @@ static void test_rdb_to_redis_del_before_write(void **state) {
     for (int delKeyBeforeWrite = 0 ; delKeyBeforeWrite <= 1 ; ++delKeyBeforeWrite) {
         RdbxToRespConf rdb2respConf = {
                 .delKeyBeforeWrite = delKeyBeforeWrite,
+                .funcLibReplaceIfExist=0,
                 .supportRestore = 1,
                 .dstRedisVersion = getTargetRedisVersion(NULL, NULL),
         };
@@ -342,6 +336,57 @@ static void test_rdb_to_redis_del_before_write(void **state) {
     }
 }
 
+/* Load "function.rdb" more than once. If 'funcLibReplaceIfExist' is not set, then
+ * expected to fail */
+static void test_rdb_to_redis_func_lib_replace_if_exist(void **state) {
+    UNUSED(state);
+    int funcLibReplaceIfExistArr[] = {0, 0, 1};
+    int expectedStatus[] = {RDB_STATUS_OK, RDB_STATUS_ERROR, RDB_STATUS_OK};
+
+    /* function available since 7.0 */
+    if (majorVersion < 7)
+        skip();
+
+    for (int i = 0 ; i < 3 ; i++) {
+        RdbStatus status;
+        RdbxToRespConf rdb2respConf = {
+                .delKeyBeforeWrite = 0,
+                .funcLibReplaceIfExist = funcLibReplaceIfExistArr[i],
+                .supportRestore = 1,
+                .dstRedisVersion = getTargetRedisVersion(NULL, NULL),
+        };
+
+        /* RDB to TCP */
+        RdbxToResp *rdbToResp;
+        RdbParser *parser = RDB_createParserRdb(NULL);
+        RDB_setLogger(parser, dummyLogger);
+        assert_non_null(
+                RDBX_createReaderFile(parser, DUMP_FOLDER("function.rdb")));
+        assert_non_null(rdbToResp = RDBX_createHandlersToResp(parser,
+                                                              &rdb2respConf));
+        assert_non_null(RDBX_createRespToRedisTcp(parser,
+                                                  rdbToResp,
+                                                  NULL,
+                                                  "127.0.0.1",
+                                                  getRedisPort()));
+
+        while ((status = RDB_parse(parser)) == RDB_STATUS_WAIT_MORE_DATA);
+        RDB_deleteParser(parser);
+
+        /* Verify myfunc is loaded (either succeeded or not) */
+        sendRedisCmd("FUNCTION LIST", REDIS_REPLY_ARRAY, "myfunc");
+
+        assert_int_equal(expectedStatus[i], status);
+
+        if (status != RDB_STATUS_OK) {
+            /* verify returned error code. Verify error message. */
+            RdbRes err = RDB_getErrorCode(parser);
+            assert_int_equal(err, RDBX_ERR_RESP_WRITE);
+            assert_non_null(strstr(RDB_getErrorMessage(parser), "mylib"));
+        }
+    }
+}
+
 /*************************** group_rdb_to_redis *******************************/
 int group_rdb_to_redis(void) {
 
@@ -349,6 +394,8 @@ int group_rdb_to_redis(void) {
         printf("[  SKIPPED ] (Redis installation folder is not configured)\n");
         return 0;
     }
+
+    getTargetRedisVersion(&majorVersion, NULL);
 
     const struct CMUnitTest tests[] = {
             /* string */
@@ -393,6 +440,7 @@ int group_rdb_to_redis(void) {
             cmocka_unit_test_setup(test_rdb_to_redis_del_before_write, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_multiple_dbs, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_function, setupTest),
+            cmocka_unit_test_setup(test_rdb_to_redis_func_lib_replace_if_exist, setupTest),
     };
 
     int res = cmocka_run_group_tests(tests, NULL, NULL);
