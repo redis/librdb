@@ -11,6 +11,7 @@ void dummyLogger(RdbLogLevel l, const char *msg) { UNUSED(l, msg); }
 static int setupTest(void **state) {
     UNUSED(state);
     sendRedisCmd("FLUSHALL", REDIS_REPLY_STATUS, NULL);
+    sendRedisCmd("FUNCTION FLUSH", REDIS_REPLY_STATUS, NULL);
     sendRedisCmd("SAVE", REDIS_REPLY_STATUS, NULL);
     return 0;
 }
@@ -48,9 +49,9 @@ static void rdb_to_json(const char *rdbfile, const char *outfile) {
             .level = RDB_LEVEL_DATA,
             .encoding = RDBX_CONV_JSON_ENC_PLAIN,
             .includeAuxField = 0,
-            .includeFunc = 0,
+            .includeFunc = 1,
             .flatten = 1,
-            .includeStreamMeta = 0,
+            .includeStreamMeta = 0, /* too messy nested to compare json */
     };
 
     RdbParser *parser = RDB_createParserRdb(NULL);
@@ -84,6 +85,7 @@ static void test_rdb_to_redis_common(const char *rdbfile, int ignoreListOrder, c
     for (int isRestore = 0 ; isRestore <= 1 ; ++isRestore) {
 
         sendRedisCmd("FLUSHALL", REDIS_REPLY_STATUS, NULL);
+        sendRedisCmd("FUNCTION FLUSH", REDIS_REPLY_STATUS, NULL);
 
         /* 1. Convert RDB to Json (out1.json) */
         rdb_to_json(rdbfile, TMP_FOLDER("out1.json"));
@@ -238,6 +240,7 @@ static void test_rdb_to_redis_function(void **state) {
     if (major < 7)
         skip();
     test_rdb_to_redis_common(DUMP_FOLDER("function.rdb"), 1, NULL, NULL);
+    sendRedisCmd("FUNCTION LIST", REDIS_REPLY_ARRAY, "myfunc");
 }
 
 /* test relied on rdbtest module within redis repo, if available */

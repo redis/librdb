@@ -204,6 +204,9 @@ static RdbRes resolveSupportRestore(RdbParser *p, RdbxToResp *ctx) {
     /* Enforce RESTORE for modules. librdb cannot really parse high-level module object */
     RDB_handleByLevel(p, RDB_DATA_TYPE_MODULE, RDB_LEVEL_RAW);
 
+    /* Avoid RESTORE for functions. Redis doesn't have API to RESTORE functions */
+    RDB_handleByLevel(p, RDB_DATA_TYPE_FUNCTION, RDB_LEVEL_DATA);
+
     return RDB_OK;
 }
 
