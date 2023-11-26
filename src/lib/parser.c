@@ -735,6 +735,9 @@ static void chainHandlersAcrossLevels(RdbParser *p) {
 }
 
 static void resolveMultipleLevelsRegistration(RdbParser *p) {
+    RDB_log(p, RDB_LOG_INF, "Number sets of handlers registered at level RAW/STRUCT/DATA: %d/%d/%d",
+            p->numHandlers[RDB_LEVEL_RAW], p->numHandlers[RDB_LEVEL_STRUCT], p->numHandlers[RDB_LEVEL_DATA]);
+
     /* find the lowest level that handlers are registered */
     int lvl = (p->numHandlers[RDB_LEVEL_RAW]) ? RDB_LEVEL_RAW :
               (p->numHandlers[RDB_LEVEL_STRUCT]) ? RDB_LEVEL_STRUCT :

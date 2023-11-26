@@ -234,6 +234,8 @@ size_t serializeRedisReply(const redisReply *reply, char *buffer, size_t bsize) 
     size_t written = 0;
 
     switch (reply->type) {
+        case REDIS_REPLY_NIL:
+            return 0; /* nothing to write */
         case REDIS_REPLY_STRING:
         case REDIS_REPLY_STATUS:
         case REDIS_REPLY_ERROR:
@@ -251,6 +253,7 @@ size_t serializeRedisReply(const redisReply *reply, char *buffer, size_t bsize) 
             }
             return written;
         default:
+            printf("serializeRedisReply() : Unknown reply type: %d\n", reply->type);
             assert_true(0);
             return 0;
     }
@@ -279,8 +282,15 @@ char *sendRedisCmd(char *cmd, int expRetType, char *expRsp) {
         /* For complex responses, check `expRsp` is a substring. Otherwise, exact match */
         if (expRetType != REDIS_REPLY_ARRAY)
             assert_string_equal(reply->str, expRsp);
-        else
-            assert_non_null(substring(rspbuf, written, expRsp));
+        else {
+
+            if (NULL == substring(rspbuf, written, expRsp)) {
+                printf("Error: Response does not contain expected substring.\n");
+                printf("Actual Response: %s\n", rspbuf);
+                printf("Expected Substring: %s\n", expRsp);
+                assert_true(0);
+            }
+        }
     }
 
     freeReplyObject(reply);

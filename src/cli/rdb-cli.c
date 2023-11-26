@@ -112,6 +112,7 @@ static void printUsage(int shortUsage) {
     printf("FORMAT_OPTIONS ('redis'|'resp'):\n");
     printf("\t-r, --support-restore         Use the RESTORE command when possible\n");
     printf("\t-d, --del-before-write        Delete each key before writing. Relevant for non-empty db\n");
+    printf("\t-f, --func-replace-if-exist   Replace function-library if already exists in the same name rather than aborting\n");
     printf("\t-t, --target-redis-ver <VER>  Specify the target Redis version. Helps determine which commands can\n");
     printf("\t                              be applied. Particularly crucial if support-restore being used \n");
     printf("\t                              as RESTORE is closely tied to specific RDB versions. If versions not\n");
@@ -180,6 +181,7 @@ static RdbRes formatRedis(RdbParser *parser, int argc, char **argv) {
         if (getOptArgVal(argc, argv, &at, "-p", "--port", NULL, &port, 1, 65535)) continue;
         if (getOptArg(argc, argv, &at, "-r", "--support-restore", &(conf.supportRestore), NULL)) continue;
         if (getOptArg(argc, argv, &at, "-d", "--del-before-write", &(conf.delKeyBeforeWrite), NULL)) continue;
+        if (getOptArg(argc, argv, &at, "-f", "--func-replace-if-exist", &(conf.funcLibReplaceIfExist), NULL)) continue;
         if (getOptArg(argc, argv, &at, "-1", "--single-db", &(conf.singleDb), NULL)) continue;
         if (getOptArg(argc, argv, &at, "-t", "--target-redis-ver", NULL, &(conf.dstRedisVersion))) continue;
         if (getOptArgVal(argc, argv, &at, "-l", "--pipeline-depth", NULL, &pipeDepthVal, 1, 1000)) continue;
@@ -254,6 +256,7 @@ static RdbRes formatResp(RdbParser *parser, int argc, char **argv) {
         if (getOptArg(argc, argv, &at, "-o", "--output", NULL, &output)) continue;
         if (getOptArg(argc, argv, &at, "-r", "--support-restore", &(conf.supportRestore), NULL)) continue;
         if (getOptArg(argc, argv, &at, "-d", "--del-before-write", &(conf.delKeyBeforeWrite), NULL)) continue;
+        if (getOptArg(argc, argv, &at, "-f", "--func-replace-if-exist", &(conf.funcLibReplaceIfExist), NULL)) continue;
         if (getOptArg(argc, argv, &at, "-1", "--single-db", &(conf.singleDb), NULL)) continue;
         if (getOptArg(argc, argv, &at, "-t", "--target-redis-ver", NULL, &(conf.dstRedisVersion))) continue;
         if (getOptArg(argc, argv, &at, "-e", "--enum-commands", &commandEnum, NULL)) continue;
