@@ -54,6 +54,14 @@ typedef enum {
 
 /****************************************************************
  * Create RDB Reader
+ *
+ * Creation of RDB reader based on filename or file-descriptor
+ *
+ * Note: File-descriptor must be set to blocking mode.
+ *
+ * TODO: The parser only supports reading asynchronously (non-blocking)
+ *       through RDB_parseBuff() API. It is required to Extend parser for
+ *       readers to support non-blocking mode as well.
  ****************************************************************/
 
 _LIBRDB_API RdbxReaderFile *RDBX_createReaderFile(RdbParser *parser, const char *filename);
