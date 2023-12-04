@@ -32,7 +32,7 @@ static RdbStatus readFileDesc(void *data, void *buf, size_t len) {
         /* read some data */
         if (likely(bytesRead > 0)) {
             totalBytesRead += bytesRead;
-            break;
+            continue;
         }
 
         /* didn't read any data. Stop. */
