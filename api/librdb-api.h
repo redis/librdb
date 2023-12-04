@@ -48,6 +48,9 @@ typedef enum RdbRes {
     RDB_ERR_INVALID_CONFIGURATION,
     RDB_ERR_FAILED_CREATE_PARSER,
     RDB_ERR_FAILED_OPEN_LOG_FILE,
+    RDB_ERR_FAILED_GET_FD_FLAGS,
+    RDB_ERR_NONBLOCKING_FD,
+    RDB_ERR_NONBLOCKING_READ_FD,
     RDB_ERR_FAILED_READ_RDB_FILE,
     RDB_ERR_FAILED_OPEN_RDB_FILE,
     RDB_ERR_WRONG_FILE_SIGNATURE,
@@ -352,9 +355,13 @@ _LIBRDB_API RdbStatus RDB_parseBuff(RdbParser *p,
  * Used by:   RDBX_createReaderFile
  *           <user-defined-reader>
  *
- * TODO: Extend RdbReaderFunc to return number of bytes read actually read and
- *       adapt parser accordingly. (Currently it can either return success,
- *       fail or wait-more-data)
+ * TODO:     The parser only supports reading asynchrnously (non-blocking)
+ *           through RDB_parseBuff() API. It is required to Extend parser for
+ *           readers to support non-blocking mode as well. Currently the provided
+ *           reader-function (RdbReaderFunc) can only:
+ *           - Read the entire request and return RDB_STATUS_OK
+ *           - Or, read none and return RDB_STATUS_WAIT_MORE_DATA
+ *           - Or, return RDB_STATUS_ERROR
  ****************************************************************/
 _LIBRDB_API RdbReader *RDB_createReaderRdb(RdbParser *p,
                                            RdbReaderFunc r,
