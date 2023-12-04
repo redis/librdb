@@ -24,6 +24,7 @@ static void deleteReaderFile(RdbParser *p, void *rdata) {
     RDB_free(p, readerData);
 }
 
+/* Attempts to read entire len, otherwise returns error */
 static RdbStatus readFile(void *data, void *buf, size_t len) {
     RdbxReaderFile *readerFile = data;
     size_t readLen = fread(buf, sizeof(char), len, readerFile->file);

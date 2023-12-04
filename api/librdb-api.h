@@ -351,6 +351,10 @@ _LIBRDB_API RdbStatus RDB_parseBuff(RdbParser *p,
  *
  * Used by:   RDBX_createReaderFile
  *           <user-defined-reader>
+ *
+ * TODO: Extend RdbReaderFunc to return number of bytes read actually read and
+ *       adapt parser accordingly. (Currently it can either return success,
+ *       fail or wait-more-data)
  ****************************************************************/
 _LIBRDB_API RdbReader *RDB_createReaderRdb(RdbParser *p,
                                            RdbReaderFunc r,
