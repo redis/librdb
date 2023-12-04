@@ -845,7 +845,7 @@ RdbStatus elementRawStreamLP(RdbParser *p) {
                     return RDB_STATUS_ERROR;
                 }
             }
-            updateElementState(p, ST_LOAD_NEXT_LP_IS_MORE, 1); /* fall-thru */
+            return updateElementState(p, ST_LOAD_NEXT_LP_IS_MORE, 1); /* fall-thru */
 
         case ST_LOAD_METADATA: {
                 uint64_t dummyVal;
