@@ -471,11 +471,8 @@ static inline RdbStatus updateElementState(RdbParser *p, int newState, int noFlu
  * loop that will flush the cache internally at the end of each iteration, by
  * calling the following function and won't go back till the last iteration.
  *
- * Note, this flush between iterations is crucial since the first part of the
- * iteration block is not in a safe-state and involves reading from the RDB (The
- * parser might encounter RDB_STATUS_WAIT_MORE_DATA while attempting to read).
- * By flushing the cache on each iteration, we ensure that if the state get
- * interrupted in the middle, the parser can later resume the same interrupted
+ * By flushing the cache on each iteration, we ensure that if the state iteration
+ * gets  interrupted in the middle, the parser can later resume the same interrupted
  * iteration of element state with a relevant cache that reflects only the
  * interrupted iteration. */
 static inline RdbStatus updateElementStateIterative(RdbParser *p) {
