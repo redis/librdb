@@ -359,7 +359,7 @@ RdbStatus elementRawString(RdbParser *p) {
                 if (!(strCtx->len))   /* stop condition */
                     return nextParsingElement(p, PE_RAW_END_KEY);
 
-                updateElementState(p, ST_RAW_STRING_PASS_CHUNKS, 0);
+                updateElementStateIterative(p);
             }
         }
 
