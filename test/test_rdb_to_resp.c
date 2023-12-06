@@ -247,6 +247,11 @@ static void test_r2r_stream(void **state) {
     runWithAndWithoutRestore("stream_v11.rdb");
 }
 
+static void test_r2r_misc_with_stream(void **state) {
+    UNUSED(state);
+    runWithAndWithoutRestore("misc_with_stream.rdb");
+}
+
 static void test_r2r_module(void **state) {
     UNUSED(state);
     unsigned char expRespData[] = {
@@ -335,6 +340,7 @@ int group_rdb_to_resp(void) {
             cmocka_unit_test(test_r2r_stream),
             cmocka_unit_test(test_r2r_stream_with_target_62_and_72),
             /* misc */
+            cmocka_unit_test(test_r2r_misc_with_stream),
             cmocka_unit_test(test_r2r_multiple_lists_and_strings),
             cmocka_unit_test(test_r2r_del_before_write_restore_replace),
     };

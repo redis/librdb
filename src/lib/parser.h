@@ -445,6 +445,8 @@ static inline void registerAppBulkForNextCb(RdbParser *p, BulkInfo *binfo) {
     p->appCbCtx.bulks[p->appCbCtx.numBulks++] = binfo;
 }
 
+/*** update element state & cache flushing ***/
+
 extern void bulkPoolFlush(RdbParser *p); /* avoid cyclic headers inclusion */
 
 static inline RdbStatus updateElementState(RdbParser *p, int newState, int noFlush) {
@@ -454,6 +456,30 @@ static inline RdbStatus updateElementState(RdbParser *p, int newState, int noFlu
     if (!noFlush) bulkPoolFlush(p);
 
     p->elmCtx.state = newState;
+    return RDB_STATUS_OK;
+}
+
+/* Some of the element states are iterative in nature. For example, the parsing of
+ * a list element is done by iterating over all its items, reading the next element
+ * and calling to corresponding handler. The iteration usually starts by reading
+ * from the RDB source and then enter into safe-state, process the data and usually
+ * callback to corresponding handler. In that context, while the parser takes
+ * care to flush the cache on transition to a new state such that the cache will
+ * reflect only current state, instead of forcing each iteration to go back to the
+ * parserMainLoop() and then return all the way back to the same element-state
+ * for the next iteration, we can optimize the iterative states and make short
+ * loop that will flush the cache internally at the end of each iteration, by
+ * calling the following function and won't go back till the last iteration.
+ *
+ * Note, this flush between iterations is crucial since the first part of the
+ * iteration block is not in a safe-state and involves reading from the RDB (The
+ * parser might encounter RDB_STATUS_WAIT_MORE_DATA while attempting to read).
+ * By flushing the cache on each iteration, we ensure that if the state get
+ * interrupted in the middle, the parser can later resume the same interrupted
+ * iteration of element state with a relevant cache that reflects only the
+ * interrupted iteration. */
+static inline RdbStatus updateElementStateIterative(RdbParser *p) {
+    bulkPoolFlush(p);
     return RDB_STATUS_OK;
 }
 

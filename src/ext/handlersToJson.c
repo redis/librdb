@@ -477,7 +477,10 @@ static RdbRes toJsonStreamItem(RdbParser *p, void *userData, RdbStreamID *id, Rd
 
 static RdbRes toJsonStreamMetadata(RdbParser *p, void *userData, RdbStreamMeta *meta) {
     RdbxToJson *ctx = userData;
-    if (ctx->state != R2J_IN_STREAM_ENTRIES) {
+
+    if (ctx->state == R2J_IN_KEY) /* no entries recorded. place empty array */
+        fprintf(ctx->outfile, "{\n      \"entries\":[");
+    else if (ctx->state != R2J_IN_STREAM_ENTRIES) {
         RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
                         "toJsonStreamMetadata(): Invalid state value: %d", ctx->state);
         return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;

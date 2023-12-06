@@ -1617,7 +1617,7 @@ RdbStatus elementQuickList(RdbParser *p) {
                     }
                 }
 
-                updateElementState(p, ST_LIST_NEXT_NODE, 0);
+                updateElementStateIterative(p);
             }
             return nextParsingElement(p, PE_END_KEY);
 
@@ -1764,7 +1764,7 @@ RdbStatus elementSet(RdbParser *p) {
                 else
                     CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_DATA, rdbData.handleSetMember, binfoItem->ref);
 
-                updateElementState(p, ST_SET_NEXT_ITEM, 0);
+                updateElementStateIterative(p);
             }
             return nextParsingElement(p, PE_END_KEY);
 
@@ -1889,10 +1889,10 @@ RdbStatus elementZset(RdbParser *p) {
                 else
                     CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_DATA, rdbData.handleZsetMember, binfoItem->ref, score);
 
-                if (--ctx->zset.left)
-                    updateElementState(p, ST_ZSET_NEXT_ITEM, 0);
-                else
+                if ((--ctx->zset.left) == 0)
                     return nextParsingElement(p, PE_END_KEY);
+
+                updateElementStateIterative(p);
             }
         }
         default:
