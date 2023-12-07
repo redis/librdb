@@ -452,11 +452,11 @@ static inline void registerAppBulkForNextCb(RdbParser *p, BulkInfo *binfo) {
  * next element) we need to flush the cache as well. By flushing the cache we
  * ensure that it won't hold outdated data from previous state so if the state
  * gets interrupted in the middle of read, the parser can later resume the same
- * interrupted iteration of element state with a relevant cache that reflects
- * only the interrupted iteration (more description at bulkAlloc.h).
+ * interrupted element state with a relevant cache that reflects only the
+ * interrupted state and not before (more description at bulkAlloc.h).
  *
  * Some of the flows are optimized to make short transition to the next state
- * without return back to the main loop. In that case of on transition, it is
+ * without return back to the main loop. In that kind of on transition, it is
  * still required to update the state, and in turn flush the cache. See for example
  * state ST_LIST_HEADER which makes direct "fall-thru" to state ST_LIST_NEXT_NODE.
  *
