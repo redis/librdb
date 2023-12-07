@@ -359,7 +359,7 @@ RdbStatus elementRawString(RdbParser *p) {
                 if (!(strCtx->len))   /* stop condition */
                     return nextParsingElement(p, PE_RAW_END_KEY);
 
-                updateElementStateIterative(p);
+                updateElementState(p, ST_RAW_STRING_PASS_CHUNKS, 0);
             }
         }
 
@@ -944,7 +944,7 @@ RdbStatus elementRawStreamLP(RdbParser *p) {
                 IF_NOT_OK_RETURN(aggUpdateWritten(p, pelLen));
 
                 streamCtx->globPelLeft--;
-                updateElementStateIterative(p);
+                updateElementState(p, ST_LOAD_GLOBAL_PEL, 0);
             }
             updateElementState(p, ST_LOAD_NUM_CONSUMERS, 0); /* fall-thru */
 
