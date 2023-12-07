@@ -445,31 +445,31 @@ static inline void registerAppBulkForNextCb(RdbParser *p, BulkInfo *binfo) {
     p->appCbCtx.bulks[p->appCbCtx.numBulks++] = binfo;
 }
 
+/****************************************************************
+ * Update element state & cache flushing
+ *
+ * On each completion of element state, beside of updating the next state (or
+ * next element) we need to flush the cache as well. By flushing the cache we
+ * ensure that it won't hold outdated data from previous state so if the state
+ * gets interrupted in the middle of read, the parser can later resume the same
+ * interrupted element state with a relevant cache that reflects only the
+ * interrupted state and not before (more description at bulkAlloc.h).
+ *
+ * Some of the flows are optimized to make short transition to the next state
+ * without return back to the main loop. In that kind of on transition, it is
+ * still required to update the state, and in turn flush the cache. See for example
+ * state ST_LIST_HEADER which makes direct "fall-thru" to state ST_LIST_NEXT_NODE.
+ *
+ * Another pattern of short transition, is a state that iterates multiple times
+ * without returning to the main loop. At the end of each iteration it is required
+ * to update the state, i.e., flush the cache. See for example state
+ * ST_LIST_NEXT_NODE which takes care at the end of iteration to update the state,
+ * and flush the cache, even though at first glance it might look redundant.
+ ****************************************************************/
+static inline RdbStatus updateElementState(RdbParser *p, int newState, int noFlush);
+static inline RdbStatus nextParsingElementState(RdbParser *p, ParsingElementType next, int st);
+static inline RdbStatus nextParsingElement(RdbParser *p, ParsingElementType next);
 extern void bulkPoolFlush(RdbParser *p); /* avoid cyclic headers inclusion */
-
-static inline RdbStatus updateElementState(RdbParser *p, int newState, int noFlush) {
-
-    /* if state completed without allocating anything then
-     * we can save few cpu cycles by avoid flushing the pool */
-    if (!noFlush) bulkPoolFlush(p);
-
-    p->elmCtx.state = newState;
-    return RDB_STATUS_OK;
-}
-
-static inline RdbStatus nextParsingElementState(RdbParser *p, ParsingElementType next, int st) {
-    bulkPoolFlush(p);
-    p->elmCtx.state = st;
-    p->parsingElement = next;
-    return RDB_STATUS_OK;
-}
-
-static inline RdbStatus nextParsingElement(RdbParser *p, ParsingElementType next) {
-    bulkPoolFlush(p);
-    p->elmCtx.state = 0;
-    p->parsingElement = next;
-    return RDB_STATUS_OK;
-}
 
 /*** sub-element parsing ***/
 RdbStatus subElementCall(RdbParser *p, ParsingElementType next, int returnState);
@@ -556,5 +556,30 @@ RdbStatus elementRawZsetLP(RdbParser *p);
 RdbStatus elementRawZsetZL(RdbParser *p);
 RdbStatus elementRawModule(RdbParser *p);
 RdbStatus elementRawStreamLP(RdbParser *p);
+
+/*** inline functions ***/
+
+static inline RdbStatus updateElementState(RdbParser *p, int newState, int noFlush) {
+    /* if state completed without allocating anything then
+     * we can save few cpu cycles by avoid flushing the pool */
+    if (!noFlush) bulkPoolFlush(p);
+
+    p->elmCtx.state = newState;
+    return RDB_STATUS_OK;
+}
+
+static inline RdbStatus nextParsingElementState(RdbParser *p, ParsingElementType next, int st) {
+    bulkPoolFlush(p);
+    p->elmCtx.state = st;
+    p->parsingElement = next;
+    return RDB_STATUS_OK;
+}
+
+static inline RdbStatus nextParsingElement(RdbParser *p, ParsingElementType next) {
+    bulkPoolFlush(p);
+    p->elmCtx.state = 0;
+    p->parsingElement = next;
+    return RDB_STATUS_OK;
+}
 
 #endif /*LIBRDB_PARSER_H*/

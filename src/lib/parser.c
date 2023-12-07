@@ -1662,29 +1662,29 @@ RdbStatus elementHash(RdbParser *p) {
         case ST_HASH_NEXT: {
             BulkInfo *binfoField, *binfoValue;
 
-            if (ctx->hash.visitingField == ctx->hash.numFields)
-                return nextParsingElement(p, PE_END_KEY);
+            while(ctx->hash.visitingField < ctx->hash.numFields) {
+                IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC_APP_BULK, NULL, &binfoField));
+                IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC_APP_BULK, NULL, &binfoValue));
 
-            IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC_APP_BULK, NULL, &binfoField));
-            IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC_APP_BULK, NULL, &binfoValue));
+                /*** ENTER SAFE STATE ***/
 
-            /*** ENTER SAFE STATE ***/
+                registerAppBulkForNextCb(p, binfoField);
+                registerAppBulkForNextCb(p, binfoValue);
+                if (p->elmCtx.key.handleByLevel == RDB_LEVEL_STRUCT) {
+                    CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_STRUCT, rdbStruct.handleHashPlain,
+                                     binfoField->ref,
+                                     binfoValue->ref);
+                }
+                else {
+                    CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_DATA, rdbData.handleHashField,
+                                     binfoField->ref,
+                                     binfoValue->ref);
+                }
+                ++ctx->hash.visitingField;
 
-            registerAppBulkForNextCb(p, binfoField);
-            registerAppBulkForNextCb(p, binfoValue);
-            if (p->elmCtx.key.handleByLevel == RDB_LEVEL_STRUCT) {
-                CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_STRUCT, rdbStruct.handleHashPlain,
-                                 binfoField->ref,
-                                 binfoValue->ref);
+                updateElementState(p, ST_HASH_NEXT, 0);
             }
-            else {
-                CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_DATA, rdbData.handleHashField,
-                                 binfoField->ref,
-                                 binfoValue->ref);
-            }
-
-            ++ctx->hash.visitingField;
-            return updateElementState(p, ST_HASH_NEXT, 0);
+            return nextParsingElement(p, PE_END_KEY);
         }
 
         default:
@@ -1889,10 +1889,10 @@ RdbStatus elementZset(RdbParser *p) {
                 else
                     CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_DATA, rdbData.handleZsetMember, binfoItem->ref, score);
 
-                if (--ctx->zset.left)
-                    updateElementState(p, ST_ZSET_NEXT_ITEM, 0);
-                else
+                if ((--ctx->zset.left) == 0)
                     return nextParsingElement(p, PE_END_KEY);
+
+                updateElementState(p, ST_ZSET_NEXT_ITEM, 0);
             }
         }
         default:

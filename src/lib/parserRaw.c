@@ -944,6 +944,7 @@ RdbStatus elementRawStreamLP(RdbParser *p) {
                 IF_NOT_OK_RETURN(aggUpdateWritten(p, pelLen));
 
                 streamCtx->globPelLeft--;
+                updateElementState(p, ST_LOAD_GLOBAL_PEL, 0);
             }
             updateElementState(p, ST_LOAD_NUM_CONSUMERS, 0); /* fall-thru */
 

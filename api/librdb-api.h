@@ -221,7 +221,7 @@ typedef void (*RdbLoggerCB) (RdbLogLevel l, const char *msg);
   *
   *  This level of callback registration is adequate mainly when it is required
   *  to RESTORE from RDB source and play it against live Redis server.
- ****************************************************************/
+  ****************************************************************/
 
 typedef struct RdbHandlersRawCallbacks {
     HANDLERS_COMMON_CALLBACKS
