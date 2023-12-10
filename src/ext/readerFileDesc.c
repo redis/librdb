@@ -65,7 +65,7 @@ RdbxReaderFileDesc *RDBX_createReaderFileDesc(RdbParser *p, int fd, int fdCloseW
     if (flags==-1) {
 
         RDB_reportError(p, RDB_ERR_FAILED_GET_FD_FLAGS,
-            "RDBX_createReaderFileDesc(fd=%d): Error getting file descriptor flags", fd);
+            "RDBX_createReaderFileDesc(fd=%d): Failed to get fcntl(). Error:%s", fd, strerror(errno));
         return NULL;
     }
 
@@ -78,7 +78,7 @@ RdbxReaderFileDesc *RDBX_createReaderFileDesc(RdbParser *p, int fd, int fdCloseW
     FILE *file = fdopen(fd, "r");
 
     if (file == NULL) {
-        RDB_reportError(p, RDB_ERR_NONBLOCKING_FD,
+        RDB_reportError(p, RDBX_ERR_FAILED_FD_OPEN,
             "RDBX_createReaderFileDesc(fd=%d): failed on fdopen()", fd);
         return NULL;
     }
