@@ -3,7 +3,6 @@
 #include <stdio.h>
 #include <fcntl.h>
 #include <string.h>
-#include <assert.h>
 #include <errno.h>
 #include <unistd.h>
 #include "common.h"
@@ -19,10 +18,13 @@ struct RdbxReaderFileDesc {
 static void deleteReaderFileDesc(RdbParser *p, void *rdata) {
     if (!rdata) return;
 
-    RdbxReaderFileDesc *readerData = (RdbxReaderFileDesc *) rdata;
-    if (readerData->fdCloseWhenDone)
-        close(readerData->fd);
-    RDB_free(p, readerData);
+    RdbxReaderFileDesc *ctx = (RdbxReaderFileDesc *) rdata;
+    if (ctx->file)
+        fclose(ctx->file);
+
+    if (ctx->fdCloseWhenDone)
+        close(ctx->fd);
+    RDB_free(p, ctx);
 }
 
 /* Attempts to read entire len, otherwise returns error */
