@@ -69,8 +69,10 @@ static RdbStatus readFileDesc(void *data, void *buf, size_t len) {
     size_t totalBytesRead = 0;
 
     /* Assist input-buffer if requested 'len' is small and the buffer is empty */
-    if ((ctx->buffRd == ctx->buffSize) && (len < ASSIST_INPUT_BUFF_THRESHOLD))
-        IF_NOT_OK_RETURN(fillInputBuffer(ctx));
+    if ((ctx->buffRd == ctx->buffSize) && (len < ASSIST_INPUT_BUFF_THRESHOLD)) {
+        RdbStatus res = fillInputBuffer(ctx);
+        if (res != RDB_STATUS_OK) return res;
+    }
 
     /* Copy data from input-buffer if not empty */
     if (ctx->buffRd < ctx->buffSize) {
