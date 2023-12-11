@@ -20,7 +20,7 @@ static int respFileWritev(void *context, struct iovec *iov, int count,
     /* not optimized code */
     for (int i = 0 ; i < count ; ++i) {
         if (unlikely(fwrite(iov[i].iov_base, sizeof(char), iov[i].iov_len, ctx->filePtr) != iov[i].iov_len)) {
-            RDB_reportError(ctx->p, (RdbRes) RDBX_ERR_RESP_WRITE, "Failed to write RESP to file: %s (errno=%d)", errno);
+            RDB_reportError(ctx->p, (RdbRes) RDBX_ERR_RESP_WRITE, "Failed to write RESP to file: (errno=%d)", errno);
             return 1;
         }
     }

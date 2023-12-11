@@ -49,8 +49,7 @@ RdbxReaderFile *RDBX_createReaderFile(RdbParser *p, const char *filename) {
     FILE *f;
 
     if (filename == NULL) {
-        RDB_reportError(p, RDB_ERR_FAILED_OPEN_RDB_FILE,
-                        "Filename is not provided", filename);
+        RDB_reportError(p, RDB_ERR_FAILED_OPEN_RDB_FILE, "Filename is not provided");
         return NULL;
     }
 
