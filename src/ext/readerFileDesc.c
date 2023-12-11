@@ -33,6 +33,15 @@ static RdbStatus readFileDesc(void *data, void *buf, size_t len) {
     size_t totalBytesRead = 0;
 
     while (1) {
+        /* Following a preliminary benchmark that involved reading from a
+         * file-descriptor (fd) I have found out that assisting openfd() outperform
+         * around ~50% better than using lower level read(). This is because when
+         * using bare read(), it makes multiple system-calls to read a small amount
+         * of data whereas fread() attempts to read a big chunk of data to user
+         * space, even if requested a small amount. I also tested using bare read()
+         * with input-buffer that i managed inside readerFileDesc.c and it reached
+         * Similar results to fread().
+         */
         totalBytesRead += fread((char *)buf + totalBytesRead, 1, len - totalBytesRead, ctx->file);
 
         if (totalBytesRead == len) {
