@@ -11,6 +11,10 @@ extern "C" {
 #define _LIBRDB_API __attribute__((visibility("default")))
 #endif
 
+#ifndef __GNUC__
+#define __attribute__(a)
+#endif
+
 typedef char *RdbBulk;
 typedef char *RdbBulkCopy;
 
@@ -45,6 +49,7 @@ typedef enum RdbRes {
     RDB_ERR_GENERAL,
 
     RDB_ERR_FAIL_ALLOC,
+    RDB_ERR_FAILED_OPEN_FILE,
     RDB_ERR_INVALID_CONFIGURATION,
     RDB_ERR_FAILED_CREATE_PARSER,
     RDB_ERR_FAILED_OPEN_LOG_FILE,
@@ -471,7 +476,8 @@ _LIBRDB_API void RDB_pauseParser(RdbParser *p);
  ****************************************************************/
 _LIBRDB_API RdbRes RDB_getErrorCode(RdbParser *p);
 _LIBRDB_API const char *RDB_getErrorMessage(RdbParser *p);
-_LIBRDB_API void RDB_reportError(RdbParser *p, RdbRes e, const char *msg, ...);
+_LIBRDB_API void RDB_reportError(RdbParser *p, RdbRes e, const char *msg, ...)
+                                        __attribute__((format(printf, 3, 4)));
 
 /****************************************************************
  * Memory management

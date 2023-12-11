@@ -345,7 +345,7 @@ _LIBRDB_API size_t RDB_bulkLen(RdbParser *p, RdbBulk b) {
     }
 
     RDB_reportError(p, RDB_ERR_INVALID_BULK_LENGTH_REQUEST,
-                    "Invalid RDB_bulkLen() request. Couldn't find application-bulk with address: %p", b);
+                    "Invalid RDB_bulkLen() request. Couldn't find application-bulk with address: %p", (void*)b);
 
     return 0;
 }
@@ -363,7 +363,7 @@ _LIBRDB_API int RDB_isRefBulk(RdbParser *p, RdbBulk b) {
     }
 
     RDB_reportError(p, RDB_ERR_INVALID_IS_REF_BULK,
-                    "Invalid RDB_isRefBulk() request. Couldn't find application-bulk with address: %p", b);
+                    "Invalid RDB_isRefBulk() request. Couldn't find application-bulk with address: %p", (void*)b);
     return 0;
 }
 
@@ -375,7 +375,7 @@ _LIBRDB_API RdbBulkCopy RDB_bulkClone(RdbParser *p, RdbBulk b) {
     }
 
     RDB_reportError(p, RDB_ERR_INVALID_BULK_CLONE_REQUEST,
-                    "Invalid RDB_bulkClone() request. Couldn't find application-bulk with address: %p", b);
+                    "Invalid RDB_bulkClone() request. Couldn't find application-bulk with address: %p", (void*)b);
 
     return NULL;
 }
@@ -1980,7 +1980,7 @@ RdbStatus elementEndOfFile(RdbParser *p) {
             if (cksum == 0) {
                 RDB_log(p, RDB_LOG_WRN, "RDB file was saved with checksum disabled: no check performed.");
             } else if (cksum != evaluated) {
-                RDB_reportError(p, RDB_ERR_CHECKSUM_FAILURE, "Wrong RDB checksum checksum=%lx, evaluated=%lx",
+                RDB_reportError(p, RDB_ERR_CHECKSUM_FAILURE, "Wrong RDB checksum checksum=%llx, evaluated=%llx",
                                 (unsigned long long) cksum,
                                 (unsigned long long) p->checksum);
                 return RDB_STATUS_ERROR;
@@ -2042,7 +2042,7 @@ RdbStatus elementModule(RdbParser *p) {
                     IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &when, NULL, NULL));
                     if (unlikely(when_opcode != RDB_MODULE_OPCODE_UINT)) {
                         RDB_reportError(p, RDB_ERR_MODULE_INVALID_WHEN_OPCODE,
-                            "elementModule() : Invalid when opcode: %d.", when_opcode);
+                            "elementModule() : Invalid when opcode: %ld.", when_opcode);
                         return RDB_STATUS_ERROR;
                     }
                 }
@@ -2588,7 +2588,7 @@ RdbStatus rdbLoadString(RdbParser *p, AllocTypeRq type, char *refBuf, BulkInfo *
                 return rdbLoadLzfString(p, type, refBuf, binfo);
             default:
                 RDB_reportError(p, RDB_ERR_STRING_UNKNOWN_ENCODING_TYPE,
-                                "rdbLoadString(): Unknown RDB string encoding type: %llu",len);
+                                "rdbLoadString(): Unknown RDB string encoding type: %lu",len);
                 return RDB_STATUS_ERROR;
         }
     }

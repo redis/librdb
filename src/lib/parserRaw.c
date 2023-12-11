@@ -315,7 +315,7 @@ RdbStatus elementRawString(RdbParser *p) {
                         break;
                     default:
                         RDB_reportError(p, RDB_ERR_STRING_UNKNOWN_ENCODING_TYPE,
-                            "elementRawString(): Unknown RDB string encoding type: %llu", strCtx->len);
+                            "elementRawString(): Unknown RDB string encoding type: %lu", strCtx->len);
                         return RDB_STATUS_ERROR;
                 }
             }
@@ -419,7 +419,7 @@ RdbStatus elementRawString(RdbParser *p) {
             }
 
             RDB_reportError(p, RDB_ERR_STRING_UNKNOWN_ENCODING_TYPE,
-                           "elementRawString(): Unknown RDB string encoding type: %llu", strCtx->encoding);
+                           "elementRawString(): Unknown RDB string encoding type: %lu", strCtx->encoding);
             return RDB_STATUS_ERROR;
         }
 
@@ -694,7 +694,7 @@ RdbStatus elementRawModule(RdbParser *p) {
                 IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &ma->when, NULL, NULL));
                 if (unlikely(ma->when_opcode != RDB_MODULE_OPCODE_UINT)) {
                     RDB_reportError(p, RDB_ERR_MODULE_INVALID_WHEN_OPCODE,
-                                    "elementRawModule() : Invalid when opcode: %d.", ma->when_opcode);
+                                    "elementRawModule() : Invalid when opcode: %ld.", ma->when_opcode);
                     return RDB_STATUS_ERROR;
                 }
                 /*** ENTER SAFE STATE ***/

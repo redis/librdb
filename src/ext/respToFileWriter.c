@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include "common.h"
 #include <string.h>
-#include <unistd.h>
+#include <errno.h>
 
 struct RdbxRespToFileWriter {
     long cmdCount;
@@ -20,7 +20,7 @@ static int respFileWritev(void *context, struct iovec *iov, int count,
     /* not optimized code */
     for (int i = 0 ; i < count ; ++i) {
         if (unlikely(fwrite(iov[i].iov_base, sizeof(char), iov[i].iov_len, ctx->filePtr) != iov[i].iov_len)) {
-            RDB_reportError(ctx->p, (RdbRes) RDBX_ERR_RESP_WRITE, "Failed to write RESP to file");
+            RDB_reportError(ctx->p, (RdbRes) RDBX_ERR_RESP_WRITE, "Failed to write RESP to file: (errno=%d)", errno);
             return 1;
         }
     }
@@ -54,8 +54,8 @@ RdbxRespToFileWriter *RDBX_createRespToFileWriter(RdbParser *p, RdbxToResp *rdbT
     } else {
         filePtr = fopen(filePath, "wb");
         if (filePtr == NULL) {
-            RDB_reportError(p, (RdbRes) RDBX_ERR_FAILED_OPEN_FILE, "createRespWriter: Failed to open file: %s",
-                            filePath);
+            RDB_reportError(p, RDB_ERR_FAILED_OPEN_FILE, "createRespWriter: Failed to open file: %s. errno:%d",
+                            filePath, errno);
             return NULL;
         }
     }

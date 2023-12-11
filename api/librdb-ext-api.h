@@ -26,7 +26,6 @@ typedef enum {
     RDBX_ERR_RESP_FAILED_ALLOC,
 
     /* rdb2json errors */
-    RDBX_ERR_FAILED_OPEN_FILE,
     RDBX_ERR_R2J_INVALID_STATE,
     RDBX_ERR_R2J_INVALID_LEVEL,
 
