@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <errno.h>
 #include <stdio.h>
 #include <string.h>
 #include <ctype.h>
@@ -98,7 +99,7 @@ static RdbxToJson *initRdbToJsonCtx(RdbParser *p, const char *outfilename, RdbxT
         outfilename = _STDOUT_STR;
     } else if (!(f = fopen(outfilename, "w"))) {
         RDB_reportError(p, RDB_ERR_FAILED_OPEN_FILE,
-                        "HandlersRdbToJson: Failed to open file");
+                        "HandlersRdbToJson: Failed to open file. errno=%d: %s", errno, strerror(errno));
         return NULL;
     }
 
