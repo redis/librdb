@@ -78,8 +78,9 @@ RdbxReaderFileDesc *RDBX_createReaderFileDesc(RdbParser *p, int fd, int fdCloseW
     FILE *file = fdopen(fd, "r");
 
     if (file == NULL) {
-        RDB_reportError(p, (RdbRes) RDBX_ERR_FAILED_FD_OPEN,
-            "RDBX_createReaderFileDesc(fd=%d): failed on fdopen()", fd);
+        RDB_reportError(p, RDB_ERR_FAILED_OPEN_FILE,
+        "RDBX_createReaderFileDesc(fd=%d): failed on fdopen() with errno %d: %s\"",
+            fd, errno, strerror(errno));
         return NULL;
     }
 
