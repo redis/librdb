@@ -11,9 +11,6 @@ extern "C" {
 #define _LIBRDB_API __attribute__((visibility("default")))
 #endif
 
-#ifndef __GNUC__
-#define __attribute__(a)
-#endif
 
 typedef char *RdbBulk;
 typedef char *RdbBulkCopy;
@@ -439,7 +436,12 @@ _LIBRDB_API void RDB_setMaxRawSize(RdbParser *p, size_t maxSize);
 /* logger */
 _LIBRDB_API void RDB_setLogLevel(RdbParser *p, RdbLogLevel l);
 _LIBRDB_API void RDB_setLogger(RdbParser *p, RdbLoggerCB f);
+#ifdef __GNUC__
+_LIBRDB_API void RDB_log(RdbParser *p, RdbLogLevel lvl, const char *format, ...)
+                                          __attribute__((format(printf, 3, 4)));
+#else
 _LIBRDB_API void RDB_log(RdbParser *p, RdbLogLevel lvl, const char *format, ...);
+#endif
 
 /* Following function returns a hint for the total number of items in the current
  * parsed key context - to assist with memory allocation or other optimizations.
@@ -476,8 +478,12 @@ _LIBRDB_API void RDB_pauseParser(RdbParser *p);
  ****************************************************************/
 _LIBRDB_API RdbRes RDB_getErrorCode(RdbParser *p);
 _LIBRDB_API const char *RDB_getErrorMessage(RdbParser *p);
+#ifdef __GNUC__
 _LIBRDB_API void RDB_reportError(RdbParser *p, RdbRes e, const char *msg, ...)
                                         __attribute__((format(printf, 3, 4)));
+#else
+_LIBRDB_API void RDB_reportError(RdbParser *p, RdbRes e, const char *msg, ...);
+#endif
 
 /****************************************************************
  * Memory management

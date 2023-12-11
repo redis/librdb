@@ -33,6 +33,7 @@ static RdbStatus readFileDesc(void *data, void *buf, size_t len) {
     size_t totalBytesRead = 0;
 
     while (1) {
+
         totalBytesRead += fread((char *)buf + totalBytesRead, 1, len - totalBytesRead, ctx->file);
 
         if (totalBytesRead == len) {
@@ -75,6 +76,7 @@ RdbxReaderFileDesc *RDBX_createReaderFileDesc(RdbParser *p, int fd, int fdCloseW
         return NULL;
     }
 
+    /* Use fdopen and fread instead of read in order to enjoy read-ahead buffering and less syscalls. */
     FILE *file = fdopen(fd, "r");
 
     if (file == NULL) {
