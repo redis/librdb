@@ -469,7 +469,7 @@ _LIBRDB_API void RDB_reportError(RdbParser *p, RdbRes e, const char *msg, ...) {
     vsnprintf(p->errorMsg + nchars, MAX_ERROR_MSG - nchars, msg, args);
     va_end(args);
 
-    RDB_log(p, RDB_LOG_ERR, p->errorMsg);
+    RDB_log(p, RDB_LOG_ERR, "%s", p->errorMsg);
 }
 
 _LIBRDB_API const char *RDB_getErrorMessage(RdbParser *p) {
@@ -659,7 +659,7 @@ static RdbStatus parserMainLoop(RdbParser *p) {
             if (status != RDB_STATUS_OK)
                 at += snprintf(buff+at, sizeof(buff)-1-at, " >>> [Status=%s]", getStatusString(status));
 
-            RDB_log(p, RDB_LOG_DBG, buff);
+            RDB_log(p, RDB_LOG_DBG, "%s", buff);
 
             if (status != RDB_STATUS_OK) break;
 
