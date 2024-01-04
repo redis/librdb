@@ -289,8 +289,7 @@ typedef struct ElementCtx {
 /* The parser can handle one level of nested parsing-elements (PE), whereby a PE
  * may be called by another PE and control is returned to the caller once the
  * parsing of sub-element is complete. Currently, this functionality is only
- * utilized by the raw list PE, which calls upon the raw string PE to parse
- * individual string elements. */
+ * utilized to call raw string PE to parse individual string elements. */
 typedef struct ParsingSubElement {
 
     /* let callee knows which element and state to callback once done */

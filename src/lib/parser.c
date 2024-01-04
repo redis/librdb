@@ -276,8 +276,10 @@ _LIBRDB_API void RDB_deleteParser(RdbParser *p) {
 }
 
 _LIBRDB_API RdbStatus RDB_parse(RdbParser *p) {
-    if (p->state == RDB_STATE_CONFIGURING)
+    if (p->state == RDB_STATE_CONFIGURING) {
         IF_NOT_OK_RETURN(finalizeConfig(p, 0));
+        p->state = RDB_STATE_RUNNING;
+    }
 
     /* nothing special to do after pause */
     if (p->state == RDB_STATE_PAUSED)
@@ -288,8 +290,10 @@ _LIBRDB_API RdbStatus RDB_parse(RdbParser *p) {
 
 _LIBRDB_API RdbStatus RDB_parseBuff(RdbParser *p, unsigned char *buff, size_t size, int isEOF) {
 
-    if (p->state == RDB_STATE_CONFIGURING)
+    if (p->state == RDB_STATE_CONFIGURING) {
         IF_NOT_OK_RETURN(finalizeConfig(p, 1));
+        p->state = RDB_STATE_RUNNING;
+    }
 
     if (p->state != RDB_STATE_PAUSED)
     {
@@ -796,7 +800,6 @@ static RdbStatus finalizeConfig(RdbParser *p, int isParseFromBuff) {
 
     resolveMultipleLevelsRegistration(p);
 
-    p->state = RDB_STATE_RUNNING;
     RDB_log(p, RDB_LOG_INF, "Start processing RDB source");
     return RDB_STATUS_OK;
 }
