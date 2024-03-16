@@ -207,6 +207,7 @@ _LIBRDB_API RdbParser *RDB_createParserRdb(RdbMemAlloc *memAlloc) {
     p->reader = NULL;
     p->cache = NULL;
     p->errorMsg[0] = '\0';
+    p->errorMsgAt = 0;
     p->appCbCtx.numBulks = 0;
     p->loggerCb = loggerCbDefault;
     p->logLevel = RDB_LOG_DBG;
@@ -447,27 +448,40 @@ _LIBRDB_API RdbRes RDB_getErrorCode(RdbParser *p) {
 }
 
 _LIBRDB_API void RDB_reportError(RdbParser *p, RdbRes e, const char *msg, ...) {
-    int nchars = 0;
-    p->errorCode = e;
+    /* Record errorCode only of the first error */
+    if (p->errorCode == RDB_OK)
+        p->errorCode = e;
 
     if (msg == NULL) {
-        p->errorMsg[0] = '\0';
         return;
     }
 
     /* RDB_OK & RDB_OK_DONT_PROPAGATE - not a real errors to report */
     assert (e != RDB_OK && e != RDB_OK_DONT_PROPAGATE);
 
+    /* If error message is too long, then trim it in order to record this last message */
+    if (p->errorMsgAt > LAST_ERR_MSG_OFFSET) {
+        p->errorMsgAt = LAST_ERR_MSG_OFFSET;
+        p->errorMsgAt += snprintf(p->errorMsg + p->errorMsgAt,
+                                  MAX_ERROR_MSG - p->errorMsgAt,
+                                  "\n... last recorded error message: ...\n");
+    }
+    p->errorMsgAt += snprintf(p->errorMsg + p->errorMsgAt, MAX_ERROR_MSG - p->errorMsgAt, "[errcode=%d] ", e);
+
     if (p->state == RDB_STATE_RUNNING) {
-        nchars = snprintf(p->errorMsg, MAX_ERROR_MSG, "[%s::State=%d] ",
+        p->errorMsgAt += snprintf(p->errorMsg + p->errorMsgAt,
+                          MAX_ERROR_MSG - p->errorMsgAt, "[%s::State=%d] ",
                           peInfo[p->parsingElement].funcname,
                           p->elmCtx.state);
     }
 
     va_list args;
     va_start(args, msg);
-    vsnprintf(p->errorMsg + nchars, MAX_ERROR_MSG - nchars, msg, args);
+    p->errorMsgAt += vsnprintf(p->errorMsg + p->errorMsgAt, MAX_ERROR_MSG - p->errorMsgAt, msg, args);
     va_end(args);
+
+    if (p->errorMsgAt >= MAX_ERROR_MSG) return;
+    p->errorMsgAt += snprintf(p->errorMsg + p->errorMsgAt, MAX_ERROR_MSG - p->errorMsgAt, "\n");
 
     RDB_log(p, RDB_LOG_ERR, "%s", p->errorMsg);
 }

@@ -105,7 +105,10 @@ void cleanTmpFolder(void) {
     const char *folder_path = "./test/tmp";
 
     DIR *dir = opendir(folder_path);
-    assert_true(dir != NULL);
+    if (dir == NULL) {
+        printf("Failed to open directory: %s\n", folder_path);
+        assert_true(0);
+    }
 
     struct dirent *entry;
     while ((entry = readdir(dir)) != NULL) {
