@@ -76,4 +76,6 @@ void setEnvVar (const char *name, const char *val);
 char *substring(char *str, size_t len, char *substr);
 void assert_file_payload(const char *filename, char *expData, int expLen, MatchType matchType, int expMatch);
 
+void dummyLogger(RdbLogLevel l, const char *msg);
+
 int printHexDump(const char *addr, size_t len, char *obuf, int obuflen);
