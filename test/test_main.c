@@ -111,10 +111,11 @@ static void test_examples(void **state) {
 
 RdbRes handle_start_rdb_report_long_errors(RdbParser *p, void *userData, int rdbVersion) {
     UNUSED(userData, rdbVersion);
-    for (int i = 1 ; i < 1000; i++)
+    for (int i = 2 ; i < 1000; i++)
         RDB_reportError(p, (RdbRes) i, "Error Report number:%d", i);
     return 1001; /* This value will be eventually returned as the error code */
 }
+
 static void test_report_long_error(void **state) {
     RdbStatus  status;
     UNUSED(state);
@@ -131,20 +132,21 @@ static void test_report_long_error(void **state) {
     assert_int_equal(status, RDB_STATUS_ERROR);
     const char *returned = RDB_getErrorMessage(parser);
     const char *expected =
-        "[errcode=1] [elementRdbHeader::State=0] Error Report number:1\n[errcode=2] [elementRdbHeader::State=0] Error Report number:2\n"
-        "[errcode=3] [elementRdbHeader::State=0] Error Report number:3\n[errcode=4] [elementRdbHeader::State=0] Error Report number:4\n"
-        "[errcode=5] [elementRdbHeader::State=0] Error Report number:5\n[errcode=6] [elementRdbHeader::State=0] Error Report number:6\n"
-        "[errcode=7] [elementRdbHeader::State=0] Error Report number:7\n[errcode=8] [elementRdbHeader::State=0] Error Report number:8\n"
-        "[errcode=9] [elementRdbHeader::State=0] Error Report number:9\n[errcode=10] [elementRdbHeader::State=0] Error Report number:10\n"
-        "[errcode=11] [elementRdbHeader::State=0] Error Report number:11\n[errcode=12] [elementRdbHeader::State=0] Error Report number:12\n"
-        "[errcode=13] [elementRdbHeader::State=0] Error Report number:13\n[errcode=14] [elementRdbHeader::State=0] Error Report number:14\n"
-        "[errcode=15] [elementRdbHeader::State=0] Error Report number:15\n[errcode=16] [elementRdbHeader::State=0] Error Report number:16\n"
-        "[errcode=17] [elementRdbHeader::State=0] Error Report number:17\n[errcode=18] [elementRdbHeader::State=0] Error Report number:18\n"
-        "[errcode=19] [elementRdbHeader::State=0] Error Report number:19\n[errcode=20] [elementRdbHeader::State=0] Error Report number:20\n"
-        "[errcode=21] [elementRdbHeader::State=0] Error Report number:21\n[errcode=22] [elementRdbHeader::State=0] Error Report number:22\n"
-        "[errcode=23] [elementRdbHeader::State=0] Error Report number:23\n[errcode=24] [elementRdbHeader::State=0] Error Report number:24\n"
-        "[errcode=25] [elementRdbHeader::State=0] Error Report number:25\n[errcode=26] [elem\n... last recorded error message: ...\n"
-        "[errcode=999] [elementRdbHeader::State=0] Error Report number:999\n";
+            "[errcode=2] [elementRdbHeader::State=0] Error Report number:2\n"
+            "[errcode=3] [elementRdbHeader::State=0] Error Report number:3\n[errcode=4] [elementRdbHeader::State=0] Error Report number:4\n"
+            "[errcode=5] [elementRdbHeader::State=0] Error Report number:5\n[errcode=6] [elementRdbHeader::State=0] Error Report number:6\n"
+            "[errcode=7] [elementRdbHeader::State=0] Error Report number:7\n[errcode=8] [elementRdbHeader::State=0] Error Report number:8\n"
+            "[errcode=9] [elementRdbHeader::State=0] Error Report number:9\n[errcode=10] [elementRdbHeader::State=0] Error Report number:10\n"
+            "[errcode=11] [elementRdbHeader::State=0] Error Report number:11\n[errcode=12] [elementRdbHeader::State=0] Error Report number:12\n"
+            "[errcode=13] [elementRdbHeader::State=0] Error Report number:13\n[errcode=14] [elementRdbHeader::State=0] Error Report number:14\n"
+            "[errcode=15] [elementRdbHeader::State=0] Error Report number:15\n[errcode=16] [elementRdbHeader::State=0] Error Report number:16\n"
+            "[errcode=17] [elementRdbHeader::State=0] Error Report number:17\n[errcode=18] [elementRdbHeader::State=0] Error Report number:18\n"
+            "[errcode=19] [elementRdbHeader::State=0] Error Report number:19\n[errcode=20] [elementRdbHeader::State=0] Error Report number:20\n"
+            "[errcode=21] [elementRdbHeader::State=0] Error Report number:21\n[errcode=22] [elementRdbHeader::State=0] Error Report number:22\n"
+            "[errcode=23] [elementRdbHeader::State=0] Error Report number:23\n[errcode=24] [elementRdbHeader::State=0] Error Report number:24\n"
+            "[errcode=25] [elementRdbHeader::State=0] Error Report number:25\n[errcode=26] [elementRdbHeader::State=0] Error Report number:26\n"
+            "[errcode=27] [el\n... last recorded error message: ...\n[errcode=999] [elementRdbHeader::State=0] Error Report number:999\n";
+
     assert_string_equal(returned, expected);
     assert_int_equal(RDB_getErrorCode(parser), 1001);
     RDB_deleteParser(parser);
