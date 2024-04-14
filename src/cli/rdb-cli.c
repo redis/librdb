@@ -97,7 +97,8 @@ static void printUsage(int shortUsage) {
     printf("\t-D, --no-dbnum <DBNUM>        Exclude DB number\n\n");
 
     printf("FORMAT_OPTIONS ('json'):\n");
-    printf("\t-i, --include <EXTRAS>        To include: {aux-val|func|stream-meta}\n");
+    printf("\t-i, --include <EXTRAS>        To include: {aux-val|func|stream-meta|db-info}\n");
+    printf("\t-m, --meta-prefix <PREFIX>    To distinct EXTRAS from actual data, Prefix it (Default:\"__\")\n");
     printf("\t-f, --flatten                 Print flatten json, without DBs Parenthesis\n");
     printf("\t-o, --output <FILE>           Specify the output file. If not specified, output to stdout\n\n");
 
@@ -126,20 +127,23 @@ static void printUsage(int shortUsage) {
 }
 
 static RdbRes formatJson(RdbParser *parser, int argc, char **argv) {
+    extern const char *jsonMetaPrefix;
     const char *includeArg;
     const char *output = NULL;/*default:stdout*/
-    int includeStreamMeta=0, includeFunc=0, includeAuxField=0, flatten=0; /*without*/
+    int includeDbInfo=0, includeStreamMeta=0, includeFunc=0, includeAuxField=0, flatten=0; /*without*/
 
     /* parse specific command options */
     for (int at = 1; at < argc; ++at) {
         char *opt = argv[at];
         if (getOptArg(argc, argv, &at, "-o", "--output", NULL, &output)) continue;
         if (getOptArg(argc, argv, &at, "-f", "--flatten", &flatten, NULL)) continue;
+        if (getOptArg(argc, argv, &at, "-m", "--meta-prefix", NULL, &jsonMetaPrefix)) continue;
 
         if (getOptArg(argc, argv, &at, "-i", "--include", NULL, &includeArg)) {
             if (strcmp(includeArg, "aux-val") == 0) { includeAuxField = 1; continue; }
             if (strcmp(includeArg, "func") == 0) { includeFunc = 1; continue; }
             if (strcmp(includeArg, "stream-meta") == 0) { includeStreamMeta = 1; continue; }
+            if (strcmp(includeArg, "db-info") == 0) { includeDbInfo = 1; continue; }
             loggerWrap(RDB_LOG_ERR, "Invalid argument for '--include': %s\n", includeArg);
             return RDB_ERR_GENERAL;
         }
@@ -156,6 +160,7 @@ static RdbRes formatJson(RdbParser *parser, int argc, char **argv) {
             .includeAuxField = includeAuxField,
             .includeFunc = includeFunc,
             .includeStreamMeta = includeStreamMeta,
+            .includeDbInfo = includeDbInfo,
     };
 
     if (RDBX_createHandlersToJson(parser, output, &conf) == NULL)

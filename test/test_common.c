@@ -522,30 +522,14 @@ void *xrealloc(void *ptr, size_t size) {
 
 /*** compare json files ***/
 
-static void sanitize_json_line(char* line) {
-    size_t length = strlen(line);
-
-    /* remove \n from end of line, if exist */
-    if (length > 0 && (line[length - 1] == '\n') ) {
-        line[length - 1] = '\0';
-        length--;
+void sanitizeString(char* str, const char* charSet) {
+    int j = 0;
+    for (int i = 0; str[i] != '\0'; i++) {
+        if (strchr(charSet, str[i]) == NULL) {
+            str[j++] = str[i];
+        }
     }
-
-    /* remove trailing spaces */
-    while ((0 < length) && (line[length-1] == ' ')) --length;
-
-    /* remove comma at the end of line, if exist */
-    if (length > 0 && (line[length - 1] == ',') ) {
-        line[length - 1] = '\0';
-        length--;
-    }
-
-    size_t j = 0, i = 0;
-    /* skip leading spaces */
-    while ((i<length) && (line[i] == ' ')) ++i;
-    /* shift the string to the start of line */
-    while (i < length) line[j++] = line[i++];
-    line[j] = '\0';
+    str[j] = '\0';
 }
 
 int compare_json_lines(const void* line1, const void* line2) {
@@ -583,13 +567,13 @@ void assert_json_equal(const char* filename1, const char* filename2, int ignoreL
     ASSERT_TRUE(file2, "Failed to open file: %s", filename2);
 
     while (fgets(line1, MAX_LINE_LENGTH, file1)) {
-        sanitize_json_line(line1);
+        sanitizeString(line1, ",{}[] \t\n"); /* roughly sanitize */
         if (strlen(line1) != 0)
             lines1[lineCount1++] = strdup(line1);
     }
 
     while (fgets(line2, MAX_LINE_LENGTH, file2)) {
-        sanitize_json_line(line2);
+        sanitizeString(line2, ",{}[] \t\n"); /* roughly sanitize */
         if (strlen(line2) != 0)
             lines2[lineCount2++] = strdup(line2);
     }

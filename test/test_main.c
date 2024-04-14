@@ -62,10 +62,10 @@ static void test_mixed_levels_registration(void **state) {
     RdbParser *parser = RDB_createParserRdb(NULL);
     RDB_setLogLevel(parser, RDB_LOG_ERR);
     assert_non_null(RDBX_createReaderFile(parser, rdbfile));
-    RdbxToJsonConf conf1 = {RDB_LEVEL_DATA, RDBX_CONV_JSON_ENC_PLAIN, 0, 0, 0, 1};
+    RdbxToJsonConf conf1 = {RDB_LEVEL_DATA, RDBX_CONV_JSON_ENC_PLAIN, 0, 0, 0, 0, 1};
     assert_non_null(RDBX_createHandlersToJson(parser, jsonfileData, &conf1));
 
-    RdbxToJsonConf conf2 = {RDB_LEVEL_RAW, RDBX_CONV_JSON_ENC_PLAIN, 0, 0, 0, 1};
+    RdbxToJsonConf conf2 = {RDB_LEVEL_RAW, RDBX_CONV_JSON_ENC_PLAIN, 0, 0, 0, 0, 1};
     assert_non_null(RDBX_createHandlersToJson(parser, jsonfileRaw, &conf2));
 
     /* configure at what level of the parser each obj type should be handled and callback */
