@@ -324,7 +324,7 @@ static RdbRes toJsonNewRdb(RdbParser *p, void *userData, int rdbVersion) {
 static RdbRes toJsonEndRdb(RdbParser *p, void *userData) {
     RdbxToJson *ctx = userData;
 
-    if ((ctx->state == R2J_IDLE)) {
+    if (ctx->state == R2J_IDLE) {
         RDB_log(p, RDB_LOG_WRN, "RDB is empty.");
     } else if (ctx->state == R2J_AUX_FIELDS || ctx->state == R2J_FUNCTIONS) {
         fprintf(ctx->outfile, "\n},\n");
