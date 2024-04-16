@@ -365,6 +365,11 @@ int readCommonOptions(RdbParser *p, int argc, char* argv[], Options *options, in
     return at;
 }
 
+void closeLogFileOnExit() {
+    if (logfile != NULL)
+        fclose(logfile);
+}
+
 int main(int argc, char **argv)
 {
     Options options;
@@ -396,6 +401,8 @@ int main(int argc, char **argv)
         return RDB_ERR_GENERAL;
     }
 
+    atexit(closeLogFileOnExit);
+
     /* create the parser and attach it a file reader */
     RdbParser *parser = RDB_createParserRdb(NULL);
     RDB_setLogLevel(parser, RDB_LOG_INF);
@@ -424,8 +431,6 @@ int main(int argc, char **argv)
         return RDB_getErrorCode(parser);
 
     RDB_deleteParser(parser);
-
-    fclose(logfile);
 
     return 0;
 }

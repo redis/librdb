@@ -6,7 +6,12 @@
 #include "defines.h"
 #include "../../api/librdb-api.h"
 
-#define MAX_ERROR_MSG 1024
+
+/* Max error message length. Chain one or more recorded error messages. */
+#define MAX_ERROR_MSG 2048
+/* When reaching configured offset, keep overwrite the last error message */
+#define LAST_ERR_MSG_OFFSET 1600
+
 #define MAX_APP_BULKS 2
 #define NOP /*no-op*/
 #define IF_NOT_OK_RETURN(cmd) do {RdbStatus s; s = cmd; if (unlikely(s!=RDB_STATUS_OK)) return s;} while (0)
@@ -289,8 +294,7 @@ typedef struct ElementCtx {
 /* The parser can handle one level of nested parsing-elements (PE), whereby a PE
  * may be called by another PE and control is returned to the caller once the
  * parsing of sub-element is complete. Currently, this functionality is only
- * utilized by the raw list PE, which calls upon the raw string PE to parse
- * individual string elements. */
+ * utilized to call raw string PE to parse individual string elements. */
 typedef struct ParsingSubElement {
 
     /* let callee knows which element and state to callback once done */
@@ -373,7 +377,9 @@ struct RdbParser {
 
     /*** error reporting ***/
     RdbRes errorCode;
+
     char errorMsg[MAX_ERROR_MSG];
+    int errorMsgAt;
 
     /*** read RDB from reader VS read RDB from buffer ***/
 

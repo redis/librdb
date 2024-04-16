@@ -3,11 +3,12 @@ name: CI
 on:
   push:
   pull_request:
+  schedule:
+    - cron: '0 0 * * 0'  # Run every Sunday at midnight UTC
 
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@v3
