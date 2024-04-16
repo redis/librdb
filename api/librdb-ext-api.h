@@ -79,9 +79,13 @@ typedef enum RdbxToJsonEnc {
 typedef struct RdbxToJsonConf {
     RdbHandlersLevel level;  /* Parsing depth (raw, structures or data-types) */
     RdbxToJsonEnc encoding;  /* Encoding format for the resulting JSON */
+
+    /* Additional metadata to include in json output */
+    int includeDbInfo;       /* Set to include DB and SLOT info in JSON output */
     int includeAuxField;     /* Set to include auxiliary fields in JSON output */
     int includeFunc;         /* Set to include functions in JSON output */
     int includeStreamMeta;   /* Set to include Stream metadata in JSON output */
+
     int flatten;             /* Set to create a flattened JSON structure */
 } RdbxToJsonConf;
 

@@ -51,6 +51,32 @@ static void test_empty_rdb(void **state) {
     RDB_deleteParser(parser);
 }
 
+static void test_not_support_future_rdb_version(void **state) {
+    UNUSED(state);
+
+    const char *rdbfile = DUMP_FOLDER("future_v19.rdb");
+    const char *jsonfile = TMP_FOLDER("future_v19.json");
+
+    RdbStatus  status;
+    RdbParser *parser = RDB_createParserRdb(NULL);
+    RDB_setLogLevel(parser, RDB_LOG_ERR);
+    assert_non_null(RDBX_createReaderFile(parser, rdbfile));
+    RdbxToJsonConf r2jConf = { .level = RDB_LEVEL_DATA };
+
+    assert_non_null(RDBX_createHandlersToJson(parser,
+                                              jsonfile,
+                                              &r2jConf));
+
+    while ((status = RDB_parse(parser)) == RDB_STATUS_WAIT_MORE_DATA);
+    assert_int_equal( status, RDB_STATUS_ERROR);
+
+    /* verify returned error code */
+    RdbRes err = RDB_getErrorCode(parser);
+    assert_int_equal(err, RDB_ERR_UNSUPPORTED_RDB_VERSION);
+
+    RDB_deleteParser(parser);
+}
+
 static void test_mixed_levels_registration(void **state) {
     UNUSED(state);
     const char *rdbfile = DUMP_FOLDER("multiple_lists_strings.rdb");
@@ -61,10 +87,10 @@ static void test_mixed_levels_registration(void **state) {
     RdbParser *parser = RDB_createParserRdb(NULL);
     RDB_setLogLevel(parser, RDB_LOG_ERR);
     assert_non_null(RDBX_createReaderFile(parser, rdbfile));
-    RdbxToJsonConf conf1 = {RDB_LEVEL_DATA, RDBX_CONV_JSON_ENC_PLAIN, 0, 0, 0, 1};
+    RdbxToJsonConf conf1 = {RDB_LEVEL_DATA, RDBX_CONV_JSON_ENC_PLAIN, 0, 0, 0, 0, 1};
     assert_non_null(RDBX_createHandlersToJson(parser, jsonfileData, &conf1));
 
-    RdbxToJsonConf conf2 = {RDB_LEVEL_RAW, RDBX_CONV_JSON_ENC_PLAIN, 0, 0, 0, 1};
+    RdbxToJsonConf conf2 = {RDB_LEVEL_RAW, RDBX_CONV_JSON_ENC_PLAIN, 0, 0, 0, 0, 1};
     assert_non_null(RDBX_createHandlersToJson(parser, jsonfileRaw, &conf2));
 
     /* configure at what level of the parser each obj type should be handled and callback */
@@ -196,6 +222,7 @@ int group_misc(void) {
         cmocka_unit_test(test_mixed_levels_registration),
         cmocka_unit_test(test_checksum),
         cmocka_unit_test(test_report_long_error),
+        cmocka_unit_test(test_not_support_future_rdb_version),
     };
     return cmocka_run_group_tests(tests, NULL, NULL);
 }

@@ -25,7 +25,7 @@ typedef struct RedisToRdbVersion {
 } RedisToRdbVersion;
 
 const RedisToRdbVersion redisToRdbVersion[] = {
-        {"99.99", VER_VAL(99,99), 12}, // TODO: Update released version
+        {"7.4", VER_VAL(7,4), 12},
         {"7.2", VER_VAL(7,2), 11},
         {"7.0", VER_VAL(7,0), 10},
         {"5.0", VER_VAL(5,0), 9}, //6 and 6.2 had v9 too

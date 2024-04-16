@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <inttypes.h>
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>
@@ -13,6 +14,9 @@ struct RdbxToJson;
 typedef enum
 {
     R2J_IDLE = 0,
+    R2J_AUX_FIELDS,
+    R2J_FUNCTIONS,
+
     R2J_IN_DB,
     R2J_IN_KEY,
 
@@ -52,6 +56,8 @@ struct RdbxToJson {
     unsigned int count_functions;
     unsigned int count_db;
 };
+
+const char *jsonMetaPrefix = "__";  /* Distinct meta from data with prefix string. */
 
 static void outputPlainEscaping(RdbxToJson *ctx, char *p, size_t len) {
     while(len--) {
@@ -121,6 +127,7 @@ static RdbxToJson *initRdbToJsonCtx(RdbParser *p, const char *outfilename, RdbxT
     ctx->conf.includeAuxField = 0;
     ctx->conf.includeFunc = 0;
     ctx->conf.includeStreamMeta = 0;
+    ctx->conf.includeDbInfo = 0;
 
     /* override configuration if provided */
     if (conf) ctx->conf = *conf;
@@ -136,15 +143,60 @@ static RdbxToJson *initRdbToJsonCtx(RdbParser *p, const char *outfilename, RdbxT
 
 /*** Handling common ***/
 
+static RdbRes toJsonDbSize(RdbParser *p, void *userData, uint64_t db_size, uint64_t exp_size) {
+    RdbxToJson *ctx = userData;
+
+    if (ctx->state != R2J_IN_DB) {
+        RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
+                        "toJsonDbSize(): Invalid state value: %d", ctx->state);
+        return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
+    }
+
+    /* output json part */
+    fprintf(ctx->outfile, "    \"%sdbSize\": {\n", jsonMetaPrefix);
+    fprintf(ctx->outfile, "      \"size\": %" PRIu64 ",\n", db_size);
+    fprintf(ctx->outfile, "      \"expires\": %" PRIu64 "\n", exp_size);
+    fprintf(ctx->outfile, "    }%s\n", (db_size) ? "," : "");
+
+    return RDB_OK;
+}
+
+static RdbRes toJsonSlotInfo(RdbParser *p, void *userData, RdbSlotInfo *info) {
+    RdbxToJson *ctx = userData;
+
+    if (ctx->state != R2J_IN_DB) {
+        RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
+                        "toJsonSlotInfo(): Invalid state value: %d", ctx->state);
+        return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
+    }
+
+    /* output json part */
+    fprintf(ctx->outfile, "    \"%sSlotInfo\": {\n", jsonMetaPrefix);
+    fprintf(ctx->outfile, "      \"slotId\": %lu,\n", info->slot_id);
+    fprintf(ctx->outfile, "      \"slotSize\": %lu,\n", info->slot_size);
+    fprintf(ctx->outfile, "      \"slotSExpiresSize\": %lu\n", info->expires_slot_size);
+    fprintf(ctx->outfile, "    },\n");
+    return RDB_OK;
+}
+
 static RdbRes toJsonAuxField(RdbParser *p, void *userData, RdbBulk auxkey, RdbBulk auxval) {
     RdbxToJson *ctx = userData;
-    UNUSED(p);
+
+    if (ctx->state == R2J_IDLE) {
+        ctx->state = R2J_AUX_FIELDS;
+        fprintf(ctx->outfile, "{\n    "); /* group aux-fields with { ... } */
+    } else if (ctx->state == R2J_AUX_FIELDS) {
+        fprintf(ctx->outfile, ",\n    ");
+    } else {
+        RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
+                        "toJsonAuxField(): Invalid state value: %d", ctx->state);
+        return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
+    }
 
     /* output json part */
     outputQuotedEscaping(ctx, auxkey, RDB_bulkLen(p, auxkey));
     fprintf(ctx->outfile, ":");
     outputQuotedEscaping(ctx, auxval, RDB_bulkLen(p, auxval));
-    fprintf(ctx->outfile, ",\n");
 
     return RDB_OK;
 }
@@ -227,13 +279,17 @@ static RdbRes toJsonNewDb(RdbParser *p, void *userData, int db) {
     RdbxToJson *ctx = userData;
 
     if (ctx->state == R2J_IDLE) {
+        /* old RDBs might not have aux-fields */
+        if (!ctx->conf.flatten) fprintf(ctx->outfile, "{\n");
+    } else if (ctx->state == R2J_AUX_FIELDS || ctx->state == R2J_FUNCTIONS) {
+        fprintf(ctx->outfile, "\n},\n");
         if (!ctx->conf.flatten) fprintf(ctx->outfile, "{\n");
     } else if (ctx->state == R2J_IN_DB) {
         /* output json part */
-        if (!ctx->conf.flatten) {
-            fprintf(ctx->outfile, "\n},{\n");
-        } else {
+        if (ctx->conf.flatten) {
             fprintf(ctx->outfile, ",\n");
+        } else {
+            fprintf(ctx->outfile, "\n},{\n");
         }
     } else {
         RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
@@ -268,6 +324,8 @@ static RdbRes toJsonEndRdb(RdbParser *p, void *userData) {
 
     if (ctx->state == R2J_IDLE) {
         RDB_log(p, RDB_LOG_WRN, "RDB is empty.");
+    } else if (ctx->state == R2J_AUX_FIELDS || ctx->state == R2J_FUNCTIONS) {
+        fprintf(ctx->outfile, "\n},\n");
     } else if (ctx->state == R2J_IN_DB) {
         if (!ctx->conf.flatten) fprintf(ctx->outfile, "\n}");
     } else {
@@ -433,10 +491,24 @@ static RdbRes toJsonHash(RdbParser *p, void *userData, RdbBulk field, RdbBulk va
 
 static RdbRes toJsonFunction(RdbParser *p, void *userData, RdbBulk func) {
     RdbxToJson *ctx = userData;
+
+    if (ctx->state == R2J_IDLE) {
+        ctx->state = R2J_FUNCTIONS;
+    } else if (ctx->state == R2J_AUX_FIELDS) {
+        fprintf(ctx->outfile, "\n},{\n");
+        ctx->state = R2J_FUNCTIONS;
+    } else if (ctx->state == R2J_FUNCTIONS) {
+        fprintf(ctx->outfile, ",\n");
+    } else {
+        RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
+                        "toJsonFunction(): Invalid state value: %d", ctx->state);
+        return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
+    }
+
     /* output json part */
-    fprintf(ctx->outfile, "    \"Function_%d\":", ++ctx->count_functions);
+    fprintf(ctx->outfile, "    \"%sFunction_%d\":", jsonMetaPrefix, ++ctx->count_functions);
     outputQuotedEscaping( (RdbxToJson *) userData, func, RDB_bulkLen(p, func));
-    fprintf(ctx->outfile, ",\n");
+    ctx->count_functions++;
     return RDB_OK;
 }
 
@@ -639,9 +711,9 @@ RdbxToJson *RDBX_createHandlersToJson(RdbParser *p, const char *filename, RdbxTo
                 toJsonNewRdb,
                 toJsonEndRdb,
                 toJsonNewDb,
-                NULL, /* handleResizeDb */
-                NULL,
-                NULL,
+                NULL, /*handleDbSize*/
+                NULL, /*handleSlotInfo*/
+                NULL, /*handleAuxField*/
                 toJsonNewKey,
                 toJsonEndKey,
                 toJsonString,
@@ -673,6 +745,11 @@ RdbxToJson *RDBX_createHandlersToJson(RdbParser *p, const char *filename, RdbxTo
             dataCb.handleStreamConsumerPendingEntry = toJsonStreamConsumerPendingEntry;
         }
 
+        if (ctx->conf.includeDbInfo) {
+            dataCb.handleDbSize = toJsonDbSize;
+            dataCb.handleSlotInfo = toJsonSlotInfo;
+        }
+
         RDB_createHandlersData(p, &dataCb, ctx, deleteRdbToJsonCtx);
 
     } else  if (ctx->conf.level == RDB_LEVEL_STRUCT) {
@@ -680,9 +757,9 @@ RdbxToJson *RDBX_createHandlersToJson(RdbParser *p, const char *filename, RdbxTo
                 toJsonNewRdb,
                 toJsonEndRdb,
                 toJsonNewDb,
-                NULL, /* handleResizeDb */
-                NULL,
-                NULL,
+                NULL, /*handleDbSize*/
+                NULL, /*handleSlotInfo*/
+                NULL, /*handleAuxField*/
                 toJsonNewKey,
                 toJsonEndKey,
                 toJsonString,
@@ -724,9 +801,9 @@ RdbxToJson *RDBX_createHandlersToJson(RdbParser *p, const char *filename, RdbxTo
                 toJsonNewRdb,
                 toJsonEndRdb,
                 toJsonNewDb,
-                NULL, /* handleResizeDb */
-                NULL,
-                NULL,
+                NULL, /*handleDbSize*/
+                NULL, /*handleSlotInfo*/
+                NULL, /*handleAuxField*/
                 toJsonNewKey,
                 toJsonEndKey,
                 NULL, /*handleBeginModuleAux*/

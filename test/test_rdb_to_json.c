@@ -436,7 +436,7 @@ static void test_r2j_function (void **state) {
     UNUSED(state);
     RdbxToJsonConf r2jConf = DEF_CONF(RDB_LEVEL_DATA);
     r2jConf.includeFunc = 1;
-    testRdbToJsonCommon(DUMP_FOLDER("function.rdb"), DUMP_FOLDER("function.json"), &r2jConf);
+    testRdbToJsonCommon(DUMP_FOLDER("function2.rdb"), DUMP_FOLDER("function2.json"), &r2jConf);
 }
 
 static void test_r2j_module_raw(void **state) {
@@ -475,6 +475,13 @@ static void test_r2j_stream_data(void **state) {
     testRdbToJsonCommon(DUMP_FOLDER("stream_v11.rdb"), DUMP_FOLDER("stream_data.json"), &r2jConf);
     r2jConf.includeStreamMeta = 1;
     testRdbToJsonCommon(DUMP_FOLDER("stream_v11.rdb"), DUMP_FOLDER("stream_data_with_meta.json"), &r2jConf);
+}
+
+static void test_r2j_cluster_slot_info(void **state) {
+    UNUSED(state);
+    RdbxToJsonConf r2jConf = DEF_CONF(RDB_LEVEL_DATA);
+    r2jConf.includeDbInfo = 1;
+    testRdbToJsonCommon(DUMP_FOLDER("cluster_slot_info.rdb"), DUMP_FOLDER("cluster_slot_info.json"), &r2jConf);
 }
 
 /*************************** group_rdb_to_json *******************************/
@@ -560,6 +567,7 @@ int group_rdb_to_json(void) {
         cmocka_unit_test(test_r2j_multiple_lists_and_strings_raw),
         cmocka_unit_test(test_r2j_multiple_dbs),
         cmocka_unit_test(test_r2j_string_int_encoded),
+        cmocka_unit_test(test_r2j_cluster_slot_info),
     };
     return cmocka_run_group_tests(tests, NULL, NULL);
 }

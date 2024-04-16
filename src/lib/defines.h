@@ -90,13 +90,6 @@
 #define RDB_ENC_LZF 3         /* string compressed with FASTLZ */
 /*#define RDB_ENC_GD 4           string is a gdcompressed entry */
 
-/* rdbLoad...() functions flags. */
-#define RDB_LOAD_NONE   0
-#define RDB_LOAD_ENC    (1<<0)
-#define RDB_LOAD_PLAIN  (1<<1)
-#define RDB_LOAD_SDS    (1<<2)
-
-
 /* quicklist node container formats */
 #define QUICKLIST_NODE_CONTAINER_PLAIN 1
 #define QUICKLIST_NODE_CONTAINER_PACKED 2
