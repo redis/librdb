@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <inttypes.h>
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>
@@ -144,7 +145,6 @@ static RdbxToJson *initRdbToJsonCtx(RdbParser *p, const char *outfilename, RdbxT
 
 static RdbRes toJsonDbSize(RdbParser *p, void *userData, uint64_t db_size, uint64_t exp_size) {
     RdbxToJson *ctx = userData;
-    UNUSED(p);
 
     if (ctx->state != R2J_IN_DB) {
         RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
@@ -154,8 +154,8 @@ static RdbRes toJsonDbSize(RdbParser *p, void *userData, uint64_t db_size, uint6
 
     /* output json part */
     fprintf(ctx->outfile, "    \"%sdbSize\": {\n", jsonMetaPrefix);
-    fprintf(ctx->outfile, "      \"size\": %lu,\n", db_size);
-    fprintf(ctx->outfile, "      \"expires\": %lu\n", exp_size);
+    fprintf(ctx->outfile, "      \"size\": %" PRIu64 ",\n", db_size);
+    fprintf(ctx->outfile, "      \"expires\": %" PRIu64 "\n", exp_size);
     fprintf(ctx->outfile, "    }%s\n", (db_size) ? "," : "");
 
     return RDB_OK;
@@ -163,7 +163,6 @@ static RdbRes toJsonDbSize(RdbParser *p, void *userData, uint64_t db_size, uint6
 
 static RdbRes toJsonSlotInfo(RdbParser *p, void *userData, RdbSlotInfo *info) {
     RdbxToJson *ctx = userData;
-    UNUSED(p, info);
 
     if (ctx->state != R2J_IN_DB) {
         RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
@@ -182,7 +181,6 @@ static RdbRes toJsonSlotInfo(RdbParser *p, void *userData, RdbSlotInfo *info) {
 
 static RdbRes toJsonAuxField(RdbParser *p, void *userData, RdbBulk auxkey, RdbBulk auxval) {
     RdbxToJson *ctx = userData;
-    UNUSED(p);
 
     if (ctx->state == R2J_IDLE) {
         ctx->state = R2J_AUX_FIELDS;
