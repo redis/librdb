@@ -197,9 +197,10 @@ RespRes readRespReplyBulk(RespReaderCtx *ctx, RespReplyBuff *buffInfo) {
                     return RESP_REPLY_ERR;
                 }
 
+                /* If empty bulk */
                 if (ctx->bulkLen == 0) {
-                    snprintf(ctx->errorMsg, sizeof(ctx->errorMsg), "Response Bulk must be bigger than zero");
-                    return RESP_REPLY_ERR;
+                    ctx->typeState = PROC_BULK_READ_END;
+                    break;
                 }
 
                 ctx->typeState = PROC_BULK_READ;
@@ -232,11 +233,12 @@ RespRes readRespReplyBulk(RespReaderCtx *ctx, RespReplyBuff *buffInfo) {
                 }
 
                 ctx->typeState = PROC_BULK_READ_END;
-                /* fall-through */
+                break;
+        }
 
-            case PROC_BULK_READ_END:
-                ctx->typeState = 0;
-                return RESP_REPLY_OK;
+        if (ctx->typeState == PROC_BULK_READ_END) {
+            ctx->typeState = PROC_BULK_READ_INIT;
+            return RESP_REPLY_OK;
         }
     }
 }
@@ -299,9 +301,10 @@ static RespRes readRespReplyBulkArray(RespReaderCtx *ctx, RespReplyBuff *buffInf
                     return RESP_REPLY_ERR;
                 }
 
+                /* if empty array then jump to READ_END of array */
                 if (ctx->numBulksArray == 0) {
-                    snprintf(ctx->errorMsg, sizeof(ctx->errorMsg), "Bulk Array must be bigger than zero");
-                    return RESP_REPLY_ERR;
+                    ctx->typeArrayState = READ_END;
+                    break;
                 }
 
                 ctx->typeArrayState = READ_NEXT_BULK_HDR;
@@ -324,10 +327,12 @@ static RespRes readRespReplyBulkArray(RespReaderCtx *ctx, RespReplyBuff *buffInf
                     break;
                 }
                 ctx->typeArrayState = READ_END; /* fall-through */
+                break;
+        }
 
-            case READ_END:
-                ctx->typeArrayState = 0;
-                return RESP_REPLY_OK;
+        if (ctx->typeArrayState == READ_END) {
+            ctx->typeArrayState = READ_INIT;
+            return RESP_REPLY_OK;
         }
     }
 }
