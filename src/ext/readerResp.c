@@ -299,9 +299,10 @@ static RespRes readRespReplyBulkArray(RespReaderCtx *ctx, RespReplyBuff *buffInf
                     return RESP_REPLY_ERR;
                 }
 
+                /* if empty array then jump to READ_END of array */
                 if (ctx->numBulksArray == 0) {
-                    snprintf(ctx->errorMsg, sizeof(ctx->errorMsg), "Bulk Array must be bigger than zero");
-                    return RESP_REPLY_ERR;
+                    ctx->typeArrayState = READ_END;
+                    break;
                 }
 
                 ctx->typeArrayState = READ_NEXT_BULK_HDR;

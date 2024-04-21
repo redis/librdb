@@ -118,8 +118,8 @@ static void test_reply_long_err_trimmed_by_report(void **state) {
 static void test_mixture_and_fragmented(void **state) {
     UNUSED(state);
     RespRes res;
-    int expReplies = 5;
-    char bulk[] = "*3\r\n$2\r\n12\r\n$1\r\nA\r\n$3\r\nABC\r\n"
+    int expReplies = 6;
+    char bulk[] = "*0\r\n*3\r\n$2\r\n12\r\n$1\r\nA\r\n$3\r\nABC\r\n"
                   "+OK\r\n$5\r\nmylib\r\n+OK\r\n+OK\r\n";
     RespReaderCtx ctx;
 
