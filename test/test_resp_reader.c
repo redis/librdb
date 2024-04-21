@@ -27,6 +27,18 @@ static void test_single_status(void **state) {
                             1, RESP_REPLY_OK, 1);
 }
 
+static void test_empty_array(void **state) {
+    UNUSED(state);
+    test_resp_reader_common(NULL, STR_AND_SIZE("*0\r\n"),
+                            1, RESP_REPLY_OK, 1);
+}
+
+static void test_empty_bulk(void **state) {
+    UNUSED(state);
+    test_resp_reader_common(NULL, STR_AND_SIZE("$0\r\n"),
+                            1, RESP_REPLY_OK, 1);
+}
+
 static void test_single_int(void **state) {
     UNUSED(state);
     test_resp_reader_common(NULL, STR_AND_SIZE(":1\r\n"),
@@ -118,8 +130,8 @@ static void test_reply_long_err_trimmed_by_report(void **state) {
 static void test_mixture_and_fragmented(void **state) {
     UNUSED(state);
     RespRes res;
-    int expReplies = 6;
-    char bulk[] = "*0\r\n*3\r\n$2\r\n12\r\n$1\r\nA\r\n$3\r\nABC\r\n"
+    int expReplies = 5;
+    char bulk[] = "*3\r\n$2\r\n12\r\n$1\r\nA\r\n$3\r\nABC\r\n"
                   "+OK\r\n$5\r\nmylib\r\n+OK\r\n+OK\r\n";
     RespReaderCtx ctx;
 
@@ -141,6 +153,8 @@ static void test_mixture_and_fragmented(void **state) {
 int group_test_resp_reader(void) {
     const struct CMUnitTest tests[] = {
             cmocka_unit_test(test_single_status),
+            cmocka_unit_test(test_empty_array),
+            cmocka_unit_test(test_empty_bulk),
             cmocka_unit_test(test_single_int),
             cmocka_unit_test(test_array_single_bulk),
             cmocka_unit_test(test_array_3_bulks),
