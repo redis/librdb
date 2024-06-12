@@ -119,7 +119,7 @@ void cleanTmpFolder(void) {
 
         char file_path[1024];
         snprintf(file_path, sizeof(file_path), "%s/%s", folder_path, entry->d_name);
-        assert_true (remove(file_path) != -1);
+        assert_true (remove(file_path) == 0);
     }
 
     closedir(dir);
@@ -135,7 +135,7 @@ char *substring(char *str, size_t len, char *substr) {
     if (sublen > len)
         return NULL;
 
-    for (size_t cmpFromOffest = 0; cmpFromOffest < len - sublen; cmpFromOffest++) {
+    for (size_t cmpFromOffest = 0; cmpFromOffest <= len - sublen; cmpFromOffest++) {
         if (strncmp(&str[cmpFromOffest], substr, sublen) == 0) {
             return &str[cmpFromOffest];
         }
@@ -418,6 +418,8 @@ void setupRedisServer(const char *extraArgs) {
                 snprintf(redisVer, sizeof(redisVer),
                          MAX_SUPPORTED_REDIS_VERSION);
                 prefixVer = "Unresolved Version. Assumed ";
+                assert_int_equal(sscanf(MAX_SUPPORTED_REDIS_VERSION, "%d.%d",
+                           &redisVerMajor, &redisVerMinor), 2);
             }
             redisVersionInit = 1;
 
@@ -551,65 +553,103 @@ static unsigned char xorstr(const char *str) {
     return result;
 }
 
-/* sanitize, sort, and compare */
-#define MAX_LINE_LENGTH  4096
-#define MAX_LINES 4096
+/*
+ * Start a python service that reads JSON filename from its STDIN, generates its
+ * signature, ignoring elements order, and prints SHA256 signature to its STDOUT.
+ * The reason it is running as a service is to avoid the overhead of starting a
+ * new process for each evaluation and the intensive use of it.
+ */
+#define BUFFER_SIZE 1024
+static int pipe_in[2], pipe_out[2];
+static pid_t pid = -1;
+void start_json_sign_service() {
+    if (pipe(pipe_in) == -1 || pipe(pipe_out) == -1) {
+        perror("pipe failed");
+        exit(1);
+    }
+
+    if ( (pid = fork()) == -1) {
+        perror("fork failed");
+        exit(1);
+    }
+
+    if (pid == 0) {
+        /*child*/
+        close(pipe_in[1]);  /* Close write end of pipe_in */
+        close(pipe_out[0]); /* Close read end of pipe_out */
+        dup2(pipe_in[0], STDIN_FILENO); /* Redirect child STDIN */
+        dup2(pipe_out[1], STDOUT_FILENO); /* Redirect child STDOUT */
+        /* now replace child process with python service */
+        execlp("python3", "python3", "./test/json_signature_generator.py", NULL);
+        perror("execlp");
+        exit(1);
+    } else {
+        /*Parent*/
+        close(pipe_in[0]);  /* Close read end of pipe_in */
+        close(pipe_out[1]); /* Close write end of pipe_out */
+    }
+}
+
+int cmp_json_signatures(const char* filename1, const char* filename2) {
+    /* Run service if not already running */
+    if (pid == -1)
+        start_json_sign_service();
+
+    char buffer[BUFFER_SIZE];
+    snprintf(buffer, BUFFER_SIZE, "%s\n", filename1);
+    write(pipe_in[1], buffer, strlen(buffer));
+
+    ssize_t bytes_read = read(pipe_out[0], buffer, BUFFER_SIZE - 1);
+    if (bytes_read <= 0) {
+        perror("read");
+        return 0;
+    }
+    buffer[bytes_read] = '\0'; /* Null-terminate the string */
+    char signature1[BUFFER_SIZE];
+    strcpy(signature1, buffer);
+
+    snprintf(buffer, BUFFER_SIZE, "%s\n", filename2);
+    write(pipe_in[1], buffer, strlen(buffer));
+
+    bytes_read = read(pipe_out[0], buffer, BUFFER_SIZE - 1);
+
+    /* Verify that the signature is of the expected length (SHA256) */
+    if (bytes_read != 65) {
+        printf("strlen(buffer)=%ld %s\n", strlen(buffer), buffer);
+        perror("read");
+        return 0;
+    }
+    buffer[bytes_read] = '\0'; /* Null-terminate the string */
+    char signature2[BUFFER_SIZE];
+    strcpy(signature2, buffer);
+
+    /* Compare signatures */
+    if (strcmp(signature1, signature2) == 0) {
+        return 1;
+    } else {
+        return 0;
+    }
+}
+
+void cleanup_json_sign_service(void) {
+    if (pid != -1) {
+        close(pipe_in[1]);
+        close(pipe_out[0]);
+        kill(pid, SIGTERM);
+        waitpid(pid, NULL, 0);
+        pid = -1;
+    }
+}
+
 void assert_json_equal(const char* filename1, const char* filename2, int ignoreListOrder) {
-    char line1[MAX_LINE_LENGTH];
-    char line2[MAX_LINE_LENGTH];
-    char* lines1[MAX_LINES];
-    char* lines2[MAX_LINES];
-    int lineCount1 = 0;
-    int lineCount2 = 0;
-    int res = -1;
+    UNUSED(ignoreListOrder);
 
-    FILE* file1 = fopen(filename1, "r");
-    ASSERT_TRUE(file1, "Failed to open file: %s", filename1);
+    ASSERT_TRUE(access(filename1, F_OK) != -1, "Failed to open file: %s", filename1);
+    ASSERT_TRUE(access(filename2, F_OK) != -1, "Failed to open file: %s", filename2);
 
-    FILE* file2 = fopen(filename2, "r");
-    ASSERT_TRUE(file2, "Failed to open file: %s", filename2);
+    if (cmp_json_signatures(filename1, filename2))
+        return;
 
-    while (fgets(line1, MAX_LINE_LENGTH, file1)) {
-        sanitizeString(line1, ",{}[] \t\n"); /* roughly sanitize */
-        if (strlen(line1) != 0)
-            lines1[lineCount1++] = strdup(line1);
-    }
-
-    while (fgets(line2, MAX_LINE_LENGTH, file2)) {
-        sanitizeString(line2, ",{}[] \t\n"); /* roughly sanitize */
-        if (strlen(line2) != 0)
-            lines2[lineCount2++] = strdup(line2);
-    }
-
-    if (lineCount1 != lineCount2) goto end_cmp;
-
-    qsort(lines1, lineCount1, sizeof(char *), compare_json_lines);
-    qsort(lines2, lineCount2, sizeof(char *), compare_json_lines);
-
-    for (int i = 0; i < lineCount1; i++) {
-        /* simplify cmp for ignoreListOrder */
-        if ( ((ignoreListOrder) && (xorstr(lines1[i]) != xorstr(lines2[i]))) ||
-             ((!ignoreListOrder) && (strcmp(lines1[i], lines2[i]) != 0)) )
-        {
-            printf("strcmp fail: [%s] [%s]\n", lines1[i], lines2[i]);
-            goto end_cmp;
-        }
-    }
-
-    res = 0;
-
-end_cmp:
-    for (int i = 0; i < lineCount1; i++)
-        free(lines1[i]);
-    for (int i = 0; i < lineCount2; i++)
-        free(lines2[i]);
-
-    fclose(file1);
-    fclose(file2);
-
-    if (res == 0) return;
-
-    printf("Json files not equal.\n");
     printf("---- %s ----\n", filename1);
     char *f1 = readFile(filename1, NULL, NULL);
     printf ("%s", f1);
@@ -623,7 +663,6 @@ end_cmp:
 
     assert_true(0);
 }
-
 
 /* printHexDump() Generates a formatted hexadecimal and ASCII representation of binary
  * data. Given a memory address and its length, it produces a human-readable obuf,
@@ -640,10 +679,12 @@ end_cmp:
 int printHexDump(const char *input, size_t len, char *obuf, int obuflen) {
     size_t i;
     int iout=0, j, llen = 16; /* line len */
-    unsigned char buff[llen + 10];
+    unsigned char *buff = (unsigned char *)malloc(llen + 10);
 
-    if (input == NULL || len <= 0 || obuf == NULL || obuflen < 200 || obuflen > 0xFFFFFF)
+    if (input == NULL || len <= 0 || obuf == NULL || obuflen < 200 || obuflen > 0xFFFFFF) {
+        free(buff);
         return -1;
+    }
 
     for (i = 0, j = 0; (i < len) && (iout + 100 < obuflen) ; i++) {
         if ((i % llen) == 0) {

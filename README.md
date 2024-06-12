@@ -20,7 +20,7 @@ To see cool internal state printouts of the parser, set env-var `LIBRDB_DEBUG_DA
 
     % LIBRDB_DEBUG_DATA=1 make example
 
-To build and run tests, you need to have cmocka unit testing framework installed:
+To build and run tests, you need to have cmocka unit testing and python3 installed:
 
     % make test
 

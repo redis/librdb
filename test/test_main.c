@@ -309,6 +309,8 @@ int main(int argc, char *argv[]) {
     /* teardown redis if configured */
     teardownRedisServer();
 
+    cleanup_json_sign_service();
+
     printResPicture(result);
 
     return result;

@@ -1,9 +1,12 @@
-"redis-ver":"255.255.255",
-"redis-bits":"64",
-"ctime":"1672087814",
-"used-mem":"972952",
-"repl-stream-db":"0",
-"repl-id":"67ebe8f627f436e2630eef8661a697fa33563a8f",
-"repl-offset":"162341903",
-"aof-base":"0",
+"__aux__" : {
+  "redis-ver":"255.255.255",
+  "redis-bits":"64",
+  "ctime":"1672087814",
+  "used-mem":"972952",
+  "repl-stream-db":"0",
+  "repl-id":"67ebe8f627f436e2630eef8661a697fa33563a8f",
+  "repl-offset":"162341903",
+  "aof-base":"0"
+},
+
 "xxx":"111"
