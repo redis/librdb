@@ -1,22 +1,23 @@
-[{
+"__aux__" : {
   "redis-ver":"255.255.255",
   "redis-bits":"64",
   "ctime":"1713086666",
   "used-mem":"966312",
   "aof-base":"0"
-},{
+},
+
+"__func__": {
   "__Function_1":"#!lua name=mylib2\n\nlocal function my_hset2(keys, args)\n  local hash = keys[1]\n  local time = redis.call('TIME')[1]\n  return redis.call('HSET', hash, '_last_modified_', time, unpack(args))\nend\n\nlocal function my_hgetall2(keys, args)\n  redis.setresp(3)\n  local hash = keys[1]\n  local res = redis.call('HGETALL', hash)\n  res['map']['_last_modified_'] = nil\n  return res\nend\n\nlocal function my_hlastmodified2(keys, args)\n  local hash = keys[1]\n  return redis.call('HGET', hash, '_last_modified_')\nend\n\nredis.register_function('my_hset2', my_hset2)\nredis.register_function('my_hgetall2', my_hgetall2)\nredis.register_function('my_hlastmodified2', my_hlastmodified2)\n\n",
   "__Function_3":"#!lua name=mylib\n\nlocal function my_hset(keys, args)\n  local hash = keys[1]\n  local time = redis.call('TIME')[1]\n  return redis.call('HSET', hash, '_last_modified_', time, unpack(args))\nend\n\nlocal function my_hgetall(keys, args)\n  redis.setresp(3)\n  local hash = keys[1]\n  local res = redis.call('HGETALL', hash)\n  res['map']['_last_modified_'] = nil\n  return res\nend\n\nlocal function my_hlastmodified(keys, args)\n  local hash = keys[1]\n  return redis.call('HGET', hash, '_last_modified_')\nend\n\nredis.register_function('my_hset', my_hset)\nredis.register_function('my_hgetall', my_hgetall)\nredis.register_function('my_hlastmodified', my_hlastmodified)\n\n"
 },
-  {
-    "key_97":"value_97",
-    "key_90":"value_90",
-    "key_93":"value_93",
-    "key_99":"value_99",
-    "key_96":"value_96",
-    "key_92":"value_92",
-    "key_95":"value_95",
-    "key_91":"value_91",
-    "key_94":"value_94",
-    "key_98":"value_98"
-  }]
+
+"key_97":"value_97",
+"key_90":"value_90",
+"key_93":"value_93",
+"key_99":"value_99",
+"key_96":"value_96",
+"key_92":"value_92",
+"key_95":"value_95",
+"key_91":"value_91",
+"key_94":"value_94",
+"key_98":"value_98"

@@ -9,7 +9,7 @@
 #include "../api/librdb-api.h"  /* RDB library header */
 #include "../api/librdb-ext-api.h" /* RDB library extension header */
 
-#define MAX_SUPPORTED_REDIS_VERSION "7.2"
+#define MAX_SUPPORTED_REDIS_VERSION "7.4"
 
 #define UNUSED(...) unused( (void *) NULL, __VA_ARGS__);
 static inline void unused(void *dummy, ...) { (void)(dummy);}
@@ -48,6 +48,7 @@ void setValgrind();
 void setupRedisServer(const char *extraArgs);
 const char *getTargetRedisVersion(int *major, int *minor); /* call only after setupRedisServer() */
 void teardownRedisServer(void);
+void cleanup_json_sign_service(void);
 int isSetRedisServer(void);
 char *sendRedisCmd(char *cmd, int expRetType, char *expRsp);
 int isSupportRestoreModuleAux(void);

@@ -17,7 +17,7 @@ STD         = -std=c99
 STACK       = -fstack-protector-all -Wstack-protector
 WARNS       = -Wall -Wextra -pedantic -Werror -Wno-unused-function
 
-OPTIMIZATION?=-O3
+OPTIMIZATION?=-O0
 
 CFLAGS      = -fPIC $(OPTIMIZATION) $(STD) $(STACK) $(WARNS)
 DEBUG       = -g3 -DDEBUG=1
