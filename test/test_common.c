@@ -344,16 +344,14 @@ void get_redis_version(redisContext *c, int *majorptr, int *minorptr) {
     exit(1);
 }
 
+#define MAX_ARGS 50
 void setupRedisServer(const char *extraArgs) {
-
-    /* If redis not installed return gracefully */
     if (!redisInstallFolder) return;
 
-    /* execl() not accept empty string */
     const char *_extraArgs = (extraArgs) ? extraArgs : "--loglevel verbose";
 
     pid_t pid = fork();
-    assert_int_not_equal (pid, -1);
+    assert(pid != -1);
 
     int port = findFreePort(6500, 6600);
 
@@ -364,31 +362,38 @@ void setupRedisServer(const char *extraArgs) {
         snprintf(testrdbModulePath, sizeof(testrdbModulePath), "%s/../tests/modules/testrdb.so", redisInstallFolder);
         snprintf(redisPortStr, sizeof(redisPortStr), "%d", port);
 
-        /* if module testrdb.so exists (ci.yaml takes care to build testrdb), part
-         * of redis repo testing, then load it for test_rdb_to_redis_module. The
-         * test will run only if testrdb appear in the server "MODULE LIST",
-         * otherwise skipped gracefully. */
-        if (access(testrdbModulePath, F_OK) != -1) {
-            execl(fullpath, fullpath,
-                  "--enable-debug-command", "yes",
-                  "--port", redisPortStr,
-                  "--dir", "./test/tmp/",
-                  "--logfile", "./redis.log",
-                  "--loadmodule", testrdbModulePath, "4",
-                  _extraArgs,
-                  (char *) NULL);
-        } else {
-            execl(fullpath, fullpath,
-                  "--enable-debug-command", "yes",
-                  "--port", redisPortStr,
-                  "--dir", "./test/tmp/",
-                  "--logfile", "./redis.log",
-                  _extraArgs,
-                  (char *) NULL);
-       }
+        // Tokenize extraArgs and build the arguments list
+        char *args[MAX_ARGS];
+        int argIndex = 0;
 
-        /* If execl returns, an error occurred! */
-        perror("execl");
+        args[argIndex++] = fullpath;
+        args[argIndex++] = "--port";
+        args[argIndex++] = redisPortStr;
+        args[argIndex++] = "--dir";
+        args[argIndex++] = "./test/tmp/";
+        args[argIndex++] = "--logfile";
+        args[argIndex++] = "./redis.log";
+
+        // Add module loading arguments if the module exists
+        if (access(testrdbModulePath, F_OK) != -1) {
+            args[argIndex++] = "--loadmodule";
+            args[argIndex++] = testrdbModulePath;
+            args[argIndex++] = "4";
+        }
+
+        /* Tokenize extraArgs and add to the arguments list */
+        char *extraArgsCopy = strdup(_extraArgs);
+        char *token = strtok(extraArgsCopy, " ");
+        while (token && argIndex < MAX_ARGS - 1) {
+            args[argIndex++] = token;
+            token = strtok(NULL, " ");
+        }
+        args[argIndex] = NULL;
+
+        execvp(fullpath, args);
+
+        /* If execvp returns, an error occurred */
+        perror("execvp");
         exit(1);
     } else { /* parent */
         int retryCount = 3;
