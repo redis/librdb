@@ -153,7 +153,7 @@ static RdbRes toJsonDbSize(RdbParser *p, void *userData, uint64_t db_size, uint6
     }
 
     /* output json part */
-    fprintf(ctx->outfile, "    \"__dbsize__\": {\n");
+    fprintf(ctx->outfile, "    \"%sdbsize__\": {\n", jsonMetaPrefix); /* group dbsize with {..} */
     fprintf(ctx->outfile, "      \"size\": %" PRIu64 ",\n", db_size);
     fprintf(ctx->outfile, "      \"expires\": %" PRIu64 "\n", exp_size);
     fprintf(ctx->outfile, "    }%s\n", (db_size) ? "," : "");
@@ -171,7 +171,7 @@ static RdbRes toJsonSlotInfo(RdbParser *p, void *userData, RdbSlotInfo *info) {
     }
 
     /* output json part */
-    fprintf(ctx->outfile, "    \"__slotinfo__\": {\n");
+    fprintf(ctx->outfile, "    \"%sslotinfo__\": {\n", jsonMetaPrefix);
     fprintf(ctx->outfile, "      \"slotId\": %lu,\n", info->slot_id);
     fprintf(ctx->outfile, "      \"slotSize\": %lu,\n", info->slot_size);
     fprintf(ctx->outfile, "      \"slotSExpiresSize\": %lu\n", info->expires_slot_size);
@@ -184,7 +184,7 @@ static RdbRes toJsonAuxField(RdbParser *p, void *userData, RdbBulk auxkey, RdbBu
 
     if (ctx->state == R2J_IDLE) {
         ctx->state = R2J_AUX_FIELDS;
-        fprintf(ctx->outfile, "\"__aux__\" : {\n    "); /* group aux-fields with { ... } */
+        fprintf(ctx->outfile, " \"%saux__\": {\n", jsonMetaPrefix); /* group aux-fields with {..} */
     } else if (ctx->state == R2J_AUX_FIELDS) {
         fprintf(ctx->outfile, ",\n    ");
     } else {
@@ -503,9 +503,9 @@ static RdbRes toJsonFunction(RdbParser *p, void *userData, RdbBulk func) {
 
     if (ctx->state == R2J_IDLE) {
         ctx->state = R2J_FUNCTIONS;
-        fprintf(ctx->outfile, "\"__func__\": {\n");
+        fprintf(ctx->outfile, "\"%sfunc__\": {\n", jsonMetaPrefix);
     } else if (ctx->state == R2J_AUX_FIELDS) {
-        fprintf(ctx->outfile, "\n},\n \"__func__\": {\n");
+        fprintf(ctx->outfile, "\n},\n \"%sfunc__\": {\n", jsonMetaPrefix);
         ctx->state = R2J_FUNCTIONS;
     } else if (ctx->state == R2J_FUNCTIONS) {
         fprintf(ctx->outfile, ",\n");
