@@ -43,6 +43,7 @@ static void initOpcodeToType(RdbxFilter *ctx) {
     ctx->opToType[RDB_TYPE_ZSET_LISTPACK] = RDB_DATA_TYPE_ZSET;
     /*hash*/
     ctx->opToType[RDB_TYPE_HASH] = RDB_DATA_TYPE_HASH;
+    ctx->opToType[RDB_TYPE_HASH_METADATA] = RDB_DATA_TYPE_HASH;
     ctx->opToType[RDB_TYPE_HASH_ZIPMAP] = RDB_DATA_TYPE_HASH;
     ctx->opToType[RDB_TYPE_HASH_ZIPLIST] = RDB_DATA_TYPE_HASH;
     ctx->opToType[RDB_TYPE_HASH_LISTPACK] = RDB_DATA_TYPE_HASH;
@@ -120,8 +121,8 @@ static RdbRes filterList(RdbParser *p, void *userData, RdbBulk item) {
     return ((RdbxFilter *) userData)->cbReturnValue;
 }
 
-static RdbRes filterHash(RdbParser *p, void *userData, RdbBulk field, RdbBulk value) {
-    UNUSED(p, field, value);
+static RdbRes filterHash(RdbParser *p, void *userData, RdbBulk field, RdbBulk value, int64_t expireAt) {
+    UNUSED(p, field, value, expireAt);
     return ((RdbxFilter *) userData)->cbReturnValue;
 }
 
@@ -187,8 +188,8 @@ static RdbRes filterHashZL(RdbParser *p, void *userData, RdbBulk ziplist) {
     return ((RdbxFilter *) userData)->cbReturnValue;
 }
 
-static RdbRes filterHashPlain(RdbParser *p, void *userData, RdbBulk field, RdbBulk value) {
-    UNUSED(p, field, value);
+static RdbRes filterHashPlain(RdbParser *p, void *userData, RdbBulk field, RdbBulk value, int64_t expireAt) {
+    UNUSED(p, field, value, expireAt);
     return ((RdbxFilter *) userData)->cbReturnValue;
 }
 

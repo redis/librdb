@@ -62,6 +62,7 @@ struct ParsingElementInfo peInfo[PE_MAX] = {
         [PE_LIST_ZL]          = {elementListZL, "elementListZL", "Parsing Ziplist"},
         /* hash */
         [PE_HASH]             = {elementHash, "elementHash", "Parsing Hash"},
+        [PE_HASH_META]        = {elementHash, "elementHashMeta", "Parsing Hash with expiry on fields"},
         [PE_HASH_ZL]          = {elementHashZL, "elementHashZL", "Parsing hash Ziplist"},
         [PE_HASH_LP]          = {elementHashLP, "elementHashLP", "Parsing hash Listpack"},
         [PE_HASH_ZM]          = {elementHashZM, "elementHashZM", "Parsing hash Zipmap"},
@@ -95,6 +96,7 @@ struct ParsingElementInfo peInfo[PE_MAX] = {
         [PE_RAW_LIST_ZL]      = {elementRawListZL, "elementRawListZL", "Parsing raw list ZL (zip list)"},
         /* hash */
         [PE_RAW_HASH]         = {elementRawHash, "elementRawHash", "Parsing raw Hash"},
+        [PE_RAW_HASH_META]    = {elementRawHash, "elementRawHashMeta", "Parsing raw Hash with expiry"},
         [PE_RAW_HASH_ZL]      = {elementRawHashZL, "elementRawHashZL", "Parsing raw hash Ziplist"},
         [PE_RAW_HASH_LP]      = {elementRawHashLP, "elementRawHashLP", "Parsing raw hash Listpack"},
         [PE_RAW_HASH_ZM]      = {elementRawHashZM, "elementRawHashZM", "Parsing raw hash Zipmap"},
@@ -557,6 +559,7 @@ _LIBRDB_API int RDB_handleByLevel(RdbParser *p, RdbDataType type, RdbHandlersLev
             break;
         case RDB_DATA_TYPE_HASH:
             p->handleTypeObjByLevel[RDB_TYPE_HASH] = lvl;
+            p->handleTypeObjByLevel[RDB_TYPE_HASH_METADATA] = lvl;
             p->handleTypeObjByLevel[RDB_TYPE_HASH_ZIPMAP] = lvl;
             p->handleTypeObjByLevel[RDB_TYPE_HASH_ZIPLIST] = lvl;
             p->handleTypeObjByLevel[RDB_TYPE_HASH_LISTPACK] = lvl;
@@ -701,12 +704,12 @@ static inline RdbStatus nextParsingElementKeyValue(RdbParser *p,
                                                    ParsingElementType peRawValue,
                                                    ParsingElementType peValue) {
     p->elmCtx.key.handleByLevel = p->handleTypeObjByLevel[p->currOpcode];
-
+    /* Which level should parse this element (raw or struct/data) */
     if (p->handleTypeObjByLevel[p->currOpcode] == RDB_LEVEL_RAW) {
-        p->elmCtx.key.valueType = peRawValue;
+        p->elmCtx.key.parsingElemType = peRawValue;
         return nextParsingElement(p, PE_RAW_NEW_KEY);
     } else {
-        p->elmCtx.key.valueType = peValue;
+        p->elmCtx.key.parsingElemType = peValue;
         return nextParsingElement(p, PE_NEW_KEY);
     }
 }
@@ -1041,7 +1044,8 @@ static RdbStatus hashZiplist(RdbParser *p, BulkInfo *ziplistBulk) {
                          RDB_LEVEL_DATA,
                          rdbData.handleHashField,
                          embBulk1.binfo.ref,
-                         embBulk2.binfo.ref);
+                         embBulk2.binfo.ref,
+                         -1 /*no expiry*/);
     }
     return RDB_STATUS_OK;
 }
@@ -1096,7 +1100,8 @@ static RdbStatus hashListPack(RdbParser *p, BulkInfo *lpBulk) {
                          RDB_LEVEL_DATA,
                          rdbData.handleHashField,
                          embBulk1.binfo.ref,
-                         embBulk2.binfo.ref);
+                         embBulk2.binfo.ref,
+                         -1 /*no expiry*/);
     }
     return RDB_STATUS_OK;
 }
@@ -1139,7 +1144,8 @@ static RdbStatus hashZipMap(RdbParser *p, BulkInfo *zpBulk) {
                          RDB_LEVEL_DATA,
                          rdbData.handleHashField,
                          embBulk1.binfo.ref,
-                         embBulk2.binfo.ref);
+                         embBulk2.binfo.ref,
+                         -1 /*no expiry*/);
     }
     return RDB_STATUS_OK;
 }
@@ -1373,7 +1379,7 @@ RdbStatus elementNewKey(RdbParser *p) {
     p->elmCtx.key.numItemsHint = -1;
 
     /* Read value */
-    return nextParsingElement(p, p->elmCtx.key.valueType);
+    return nextParsingElement(p, p->elmCtx.key.parsingElemType);
 }
 
 /* load an expire-time, associated with the next key to load. */
@@ -1442,6 +1448,7 @@ RdbStatus elementNextRdbType(RdbParser *p) {
         case RDB_TYPE_LIST_ZIPLIST:         return nextParsingElementKeyValue(p, PE_RAW_LIST_ZL, PE_LIST_ZL);
         /* hash */
         case RDB_TYPE_HASH:                 return nextParsingElementKeyValue(p, PE_RAW_HASH, PE_HASH);
+        case RDB_TYPE_HASH_METADATA:        return nextParsingElementKeyValue(p, PE_RAW_HASH_META, PE_HASH_META);
         case RDB_TYPE_HASH_ZIPLIST:         return nextParsingElementKeyValue(p, PE_RAW_HASH_ZL, PE_HASH_ZL);
         case RDB_TYPE_HASH_LISTPACK:        return nextParsingElementKeyValue(p, PE_RAW_HASH_LP, PE_HASH_LP);
         case RDB_TYPE_HASH_ZIPMAP:          return nextParsingElementKeyValue(p, PE_RAW_HASH_ZM, PE_HASH_ZM);
@@ -1454,9 +1461,12 @@ RdbStatus elementNextRdbType(RdbParser *p) {
         case RDB_TYPE_ZSET_2:               return nextParsingElementKeyValue(p, PE_RAW_ZSET, PE_ZSET);
         case RDB_TYPE_ZSET_ZIPLIST:         return nextParsingElementKeyValue(p, PE_RAW_ZSET_ZL, PE_ZSET_ZL);
         case RDB_TYPE_ZSET_LISTPACK:        return nextParsingElementKeyValue(p, PE_RAW_ZSET_LP, PE_ZSET_LP);
-
         /* module */
         case RDB_TYPE_MODULE_2:             return nextParsingElementKeyValue(p, PE_RAW_MODULE, PE_MODULE);
+        /* stream */
+        case RDB_TYPE_STREAM_LISTPACKS:
+        case RDB_TYPE_STREAM_LISTPACKS_2:
+        case RDB_TYPE_STREAM_LISTPACKS_3:   return nextParsingElementKeyValue(p, PE_RAW_STREAM_LP, PE_STREAM_LP);
 
         case RDB_OPCODE_MODULE_AUX:         if (p->handleTypeObjByLevel[RDB_OPCODE_MODULE_AUX] == RDB_LEVEL_RAW)
                                                 return nextParsingElement(p, PE_RAW_MODULE_AUX);
@@ -1466,11 +1476,6 @@ RdbStatus elementNextRdbType(RdbParser *p) {
         case RDB_OPCODE_FUNCTION2:          return nextParsingElement(p, PE_FUNCTION);
 
         case RDB_OPCODE_EOF:                return nextParsingElement(p, PE_END_OF_FILE);
-
-        /* stream */
-        case RDB_TYPE_STREAM_LISTPACKS:
-        case RDB_TYPE_STREAM_LISTPACKS_2:
-        case RDB_TYPE_STREAM_LISTPACKS_3:   return nextParsingElementKeyValue(p, PE_RAW_STREAM_LP, PE_STREAM_LP);
 
         case RDB_OPCODE_FUNCTION:
             RDB_reportError(p, RDB_ERR_PRERELEASE_FUNC_FORMAT_NOT_SUPPORTED,
@@ -1680,6 +1685,9 @@ RdbStatus elementHash(RdbParser *p) {
             BulkInfo *binfoField, *binfoValue;
 
             while(ctx->hash.visitingField < ctx->hash.numFields) {
+                uint64_t expireAt = 0;
+                if (p->parsingElement == PE_HASH_META)
+                    IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &expireAt, NULL, NULL));
                 IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC_APP_BULK, NULL, &binfoField));
                 IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC_APP_BULK, NULL, &binfoValue));
 
@@ -1690,12 +1698,14 @@ RdbStatus elementHash(RdbParser *p) {
                 if (p->elmCtx.key.handleByLevel == RDB_LEVEL_STRUCT) {
                     CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_STRUCT, rdbStruct.handleHashPlain,
                                      binfoField->ref,
-                                     binfoValue->ref);
+                                     binfoValue->ref,
+                                     (expireAt) ? (int64_t) expireAt : -1);
                 }
                 else {
                     CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_DATA, rdbData.handleHashField,
                                      binfoField->ref,
-                                     binfoValue->ref);
+                                     binfoValue->ref,
+                                     (expireAt) ? (int64_t) expireAt : -1);
                 }
                 ++ctx->hash.visitingField;
 

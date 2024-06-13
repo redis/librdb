@@ -6,7 +6,7 @@
 #include <sys/wait.h>
 #include "test_common.h"
 
-int majorVersion;
+int serverMajorVer, serverMinorVer;
 
 void dummyLogger(RdbLogLevel l, const char *msg) { UNUSED(l, msg); }
 
@@ -16,7 +16,7 @@ static int setupTest(void **state) {
     sendRedisCmd("SAVE", REDIS_REPLY_STATUS, NULL);
 
     /* FUNCTION FLUSH if redis version is 7.0 or higher */
-    if (majorVersion >= 7) sendRedisCmd("FUNCTION FLUSH", REDIS_REPLY_STATUS, NULL);
+    if (serverMajorVer >= 7) sendRedisCmd("FUNCTION FLUSH", REDIS_REPLY_STATUS, NULL);
     return 0;
 }
 
@@ -67,6 +67,36 @@ static void rdb_to_json(const char *rdbfile, const char *outfile) {
     RDB_deleteParser(parser);
 }
 
+/* Save & Reload RDB file
+ *
+ * isDigest - if set, compare DB digest before and after reload
+ * isRestore - if set, use RESTORE command after reload. Otherwise, plain commands
+ */
+static void rdb_save_and_tcp_reload(int isDigest, int isRestore) {
+    char *res;
+    const char *rdbfile = DUMP_FOLDER("reload.rdb");
+    char expectedSha[100];
+
+    /* Calculate DB isDigest */
+    if (isDigest) {
+        res = sendRedisCmd("DEBUG DIGEST", REDIS_REPLY_STATUS, NULL);
+        memcpy(expectedSha, res, strlen(res) + 1);
+    }
+
+    /* Keep aside rdb file */
+    sendRedisCmd("SAVE", REDIS_REPLY_STATUS, NULL);
+    runSystemCmd("rm %s || true", rdbfile);
+    runSystemCmd("cp %s %s > /dev/null", TMP_FOLDER("dump.rdb"), rdbfile);
+
+    /* Flush Redis */
+    sendRedisCmd("FLUSHALL", REDIS_REPLY_STATUS, NULL);
+
+    /* Reload the RDB file */
+    rdb_to_tcp(rdbfile, 1, isRestore, NULL);
+
+    if (isDigest) sendRedisCmd("DEBUG DIGEST", REDIS_REPLY_STATUS, expectedSha);
+}
+
 /*
  * Testing RESP against live server:
  * 1. Convert RDB to Json (out1.json)
@@ -90,7 +120,7 @@ static void test_rdb_to_redis_common(const char *rdbfile, int ignoreListOrder, c
         sendRedisCmd("FLUSHALL", REDIS_REPLY_STATUS, NULL);
 
         /* FUNCTION FLUSH */
-        if (majorVersion >= 7)
+        if (serverMajorVer >= 7)
             sendRedisCmd("FUNCTION FLUSH", REDIS_REPLY_STATUS, NULL);
 
         /* 1. Convert RDB to Json (out1.json) */
@@ -154,9 +184,32 @@ static void test_rdb_to_redis_single_ziplist(void **state) {
     test_rdb_to_redis_common(DUMP_FOLDER("ziplist_v3.rdb"), 0, "$5\r\nRPUSH", NULL);
 }
 
-static void test_rdb_to_redis_plain_hash(void **state) {
+static void test_rdb_to_redis_hash(void **state) {
     UNUSED(state);
     test_rdb_to_redis_common(DUMP_FOLDER("plain_hash_v3.rdb"), 0, "$4\r\nHSET", NULL);
+}
+
+/* - Create hash with expiry on fields via HIREDIS.
+ * - Then rdb_save_and_tcp_reload and verify digest before and after
+ */
+static void test_rdb_to_redis_hash_with_expire(void **state) {
+    UNUSED(state);
+
+    /* hash-field-expiration available since 7.4 */
+    if ((serverMajorVer<7) || ((serverMajorVer==7) && (serverMinorVer<4)))
+        skip();
+
+    /* Test listpack - create RDB file with HFEs */
+
+    /* Test HT - create RDB file with HFEs & calculate DB digest */
+    sendRedisCmd("FLUSHALL", REDIS_REPLY_STATUS, NULL);
+    sendRedisCmd("CONFIG SET HASH-MAX-LISTPACK-ENTRIES 0", REDIS_REPLY_STATUS, NULL);
+    sendRedisCmd("HSET myhash f1 v1 f2 v2 f3 v3", REDIS_REPLY_INTEGER, "3");
+    sendRedisCmd("HPEXPIREAT myhash 70368744177663 FIELDS 2 f1 f2", REDIS_REPLY_ARRAY, "1 1");
+    rdb_save_and_tcp_reload(1 /*digest */, 0 /*restore*/);
+    rdb_save_and_tcp_reload(1 /*digest */, 1 /*restore*/);
+    sendRedisCmd("HPEXPIRETIME myhash FIELDS 3 f1 f2 f3", REDIS_REPLY_ARRAY,
+                 "70368744177663 70368744177663 -1"); /* verify expected output */
 }
 
 static void test_rdb_to_redis_hash_zl(void **state) {
@@ -241,7 +294,7 @@ static void test_rdb_to_redis_policy_lru(void **state) {
 static void test_rdb_to_redis_function(void **state) {
     UNUSED(state);
     /* function available since 7.0 */
-    if (majorVersion < 7)
+    if (serverMajorVer < 7)
         skip();
 
     test_rdb_to_redis_common(DUMP_FOLDER("function.rdb"), 1, NULL, NULL);
@@ -344,7 +397,7 @@ static void test_rdb_to_redis_func_lib_replace_if_exist(void **state) {
     int expectedStatus[] = {RDB_STATUS_OK, RDB_STATUS_ERROR, RDB_STATUS_OK};
 
     /* function available since 7.0 */
-    if (majorVersion < 7)
+    if (serverMajorVer < 7)
         skip();
 
     for (int i = 0 ; i < 3 ; i++) {
@@ -396,7 +449,7 @@ int group_rdb_to_redis(void) {
         return 0;
     }
 
-    getTargetRedisVersion(&majorVersion, NULL);
+    getTargetRedisVersion(&serverMajorVer, &serverMinorVer);
 
     const struct CMUnitTest tests[] = {
             /* string */
@@ -407,7 +460,8 @@ int group_rdb_to_redis(void) {
             cmocka_unit_test_setup(test_rdb_to_redis_quicklist, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_single_ziplist, setupTest),
             /* hash */
-            cmocka_unit_test_setup(test_rdb_to_redis_plain_hash, setupTest),
+            cmocka_unit_test_setup(test_rdb_to_redis_hash, setupTest),
+            cmocka_unit_test_setup(test_rdb_to_redis_hash_with_expire, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_hash_zl, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_hash_lp, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_hash_zm, setupTest),

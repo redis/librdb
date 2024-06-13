@@ -281,12 +281,15 @@ char *sendRedisCmd(char *cmd, int expRetType, char *expRsp) {
 
     size_t written = serializeRedisReply(reply, rspbuf, sizeof(rspbuf)-1);
 
+    /* Check if the response contains the expected substring */
     if (expRsp) {
-        /* For complex responses, check `expRsp` is a substring. Otherwise, exact match */
-        if (expRetType != REDIS_REPLY_ARRAY)
+        if (expRetType == REDIS_REPLY_INTEGER) {
+            char str[21];
+            sprintf(str, "%lld", reply->integer);
+            assert_string_equal(str, expRsp);
+        } else if (expRetType != REDIS_REPLY_ARRAY) {
             assert_string_equal(reply->str, expRsp);
-        else {
-
+        } else {
             if (NULL == substring(rspbuf, written, expRsp)) {
                 printf("Error: Response does not contain expected substring.\n");
                 printf("Actual Response: %s\n", rspbuf);
@@ -367,6 +370,7 @@ void setupRedisServer(const char *extraArgs) {
          * otherwise skipped gracefully. */
         if (access(testrdbModulePath, F_OK) != -1) {
             execl(fullpath, fullpath,
+                  "--enable-debug-command", "yes",
                   "--port", redisPortStr,
                   "--dir", "./test/tmp/",
                   "--logfile", "./redis.log",
@@ -375,6 +379,7 @@ void setupRedisServer(const char *extraArgs) {
                   (char *) NULL);
         } else {
             execl(fullpath, fullpath,
+                  "--enable-debug-command", "yes",
                   "--port", redisPortStr,
                   "--dir", "./test/tmp/",
                   "--logfile", "./redis.log",
@@ -718,5 +723,6 @@ int printHexDump(const char *input, size_t len, char *obuf, int obuflen) {
     iout += snprintf(obuf + iout, obuflen - iout, "  %s\n", buff);
     if (i < len)
         iout += snprintf(obuf + iout, obuflen - iout, "...");
+    free(buff);
     return iout;
 }

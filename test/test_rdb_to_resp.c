@@ -252,6 +252,12 @@ static void test_r2r_misc_with_stream(void **state) {
     runWithAndWithoutRestore("misc_with_stream.rdb");
 }
 
+static void test_r2r_hash_ex(void **state) {
+    UNUSED(state);
+    runWithAndWithoutRestore("hash_with_expire_v12.rdb");
+}
+
+
 static void test_r2r_module(void **state) {
     UNUSED(state);
     unsigned char expRespData[] = {

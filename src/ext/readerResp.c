@@ -101,6 +101,7 @@ static RespRes readRespReplyLine(RespReaderCtx *ctx, RespReplyBuff *buffInfo) {
                 ++(buffInfo->at);
                 /* fall-thru */
             case PROC_LINE_END:
+                ctx->typeState = 0;
                 return RESP_REPLY_OK;
         }
     }
@@ -141,14 +142,15 @@ RespRes readRespReplyBulk(RespReaderCtx *ctx, RespReplyBuff *buffInfo) {
     char ch;
     UNUSED(buffInfo);
 
+    /* Parsing : $<length>\r\n<data>\r\n */
     enum ProcessBulkReadStates {
         PROC_BULK_READ_INIT = 0,
-        PROC_BULK_READ_LEN,
-        PROC_BULK_READ_LEN_CR,
-        PROC_BULK_READ_LEN_NL,
-        PROC_BULK_READ,
-        PROC_BULK_READ_CR,
-        PROC_BULK_READ_NL,
+        PROC_BULK_READ_LEN,    /* Read bulk length */
+        PROC_BULK_READ_LEN_CR, /* Read CR */
+        PROC_BULK_READ_LEN_NL, /* Read NL */
+        PROC_BULK_READ,        /* Read data */
+        PROC_BULK_READ_CR,     /* Read CR */
+        PROC_BULK_READ_NL,     /* Read NL */
         PROC_BULK_READ_END,
     };
 
@@ -255,6 +257,7 @@ static RespRes readRespReplyBulkArray(RespReaderCtx *ctx, RespReplyBuff *buffInf
         READ_NUM_BULKS_NL,
         READ_NEXT_BULK_HDR,
         READ_NEXT_BULK,
+        READ_NEXT_LINE, /* int, double, null, bool, bignum */
         READ_END,
     };
 
@@ -311,12 +314,26 @@ static RespRes readRespReplyBulkArray(RespReaderCtx *ctx, RespReplyBuff *buffInf
                 break;
 
             case READ_NEXT_BULK_HDR:
-                if (buffInfo->buff[buffInfo->at++] != '$') {
-                    snprintf(ctx->errorMsg, sizeof(ctx->errorMsg),
-                             "Invalid Multi-Bulk response. Failed to read Bulk header.");
-                    return RESP_REPLY_ERR;
+                if (buffInfo->buff[buffInfo->at] == '$') {
+                    buffInfo->at++;
+                    ctx->typeArrayState = READ_NEXT_BULK;
+                    break;
                 }
-                ctx->typeArrayState = READ_NEXT_BULK; /* fall-thru */
+
+                if ((buffInfo->buff[buffInfo->at] == ':') || /*int*/
+                    (buffInfo->buff[buffInfo->at] == ',') || /*double*/
+                    (buffInfo->buff[buffInfo->at] == '_') || /*null*/
+                    (buffInfo->buff[buffInfo->at] == '#') || /*bool*/
+                    (buffInfo->buff[buffInfo->at] == '(')) /*bignum*/
+                {
+                    buffInfo->at++;
+                    ctx->typeArrayState = READ_NEXT_LINE;
+                    break;
+                }
+
+                snprintf(ctx->errorMsg, sizeof(ctx->errorMsg),
+                         "Invalid Multi-Bulk response. Failed to read Bulk header.");
+                return RESP_REPLY_ERR;
 
             case READ_NEXT_BULK:
                 if ( (res = readRespReplyBulk(ctx, buffInfo)) != RESP_REPLY_OK)
@@ -326,7 +343,18 @@ static RespRes readRespReplyBulkArray(RespReaderCtx *ctx, RespReplyBuff *buffInf
                     ctx->typeArrayState = READ_NEXT_BULK_HDR;
                     break;
                 }
-                ctx->typeArrayState = READ_END; /* fall-through */
+                ctx->typeArrayState = READ_END;
+                break;
+
+            case READ_NEXT_LINE:
+                if ( (res = readRespReplyLine(ctx, buffInfo)) != RESP_REPLY_OK)
+                    return res;
+
+                if (--ctx->numBulksArray) {
+                    ctx->typeArrayState = READ_NEXT_BULK_HDR;
+                    break;
+                }
+                ctx->typeArrayState = READ_END;
                 break;
         }
 
