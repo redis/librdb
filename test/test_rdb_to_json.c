@@ -429,6 +429,8 @@ static void test_r2j_single_string_raw(void **state) {
 static void test_r2j_multiple_dbs (void **state) {
     UNUSED(state);
     RdbxToJsonConf r2jConf = DEF_CONF(RDB_LEVEL_DATA);
+    r2jConf.includeAuxField = 0;
+    r2jConf.flatten = 0;
     testRdbToJsonCommon(DUMP_FOLDER("multiple_dbs.rdb"), DUMP_FOLDER("multiple_dbs_data.json"), &r2jConf);
 }
 

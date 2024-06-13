@@ -1,7 +1,10 @@
-"redis-ver":"255.255.255",
-"redis-bits":"64",
-"ctime":"1695280472",
-"used-mem":"1062024",
-"aof-base":"0",
+"__aux__" : {
+  "redis-ver":"255.255.255",
+  "redis-bits":"64",
+  "ctime":"1695280472",
+  "used-mem":"1062024",
+  "aof-base":"0"
+},
+
 "hash2":{"field7":"value7","field8":"value8","9":"value9","field10":"value10","field11":"11","12":"12.0"},
 "hash1":{"field2":"2","field3":"3","field4":"value4.0","field5":"5.0","6":"6"}

@@ -153,7 +153,7 @@ static RdbRes toJsonDbSize(RdbParser *p, void *userData, uint64_t db_size, uint6
     }
 
     /* output json part */
-    fprintf(ctx->outfile, "    \"%sdbSize\": {\n", jsonMetaPrefix);
+    fprintf(ctx->outfile, "    \"%sdbsize__\": {\n", jsonMetaPrefix); /* group dbsize with {..} */
     fprintf(ctx->outfile, "      \"size\": %" PRIu64 ",\n", db_size);
     fprintf(ctx->outfile, "      \"expires\": %" PRIu64 "\n", exp_size);
     fprintf(ctx->outfile, "    }%s\n", (db_size) ? "," : "");
@@ -171,7 +171,7 @@ static RdbRes toJsonSlotInfo(RdbParser *p, void *userData, RdbSlotInfo *info) {
     }
 
     /* output json part */
-    fprintf(ctx->outfile, "    \"%sSlotInfo\": {\n", jsonMetaPrefix);
+    fprintf(ctx->outfile, "    \"%sslotinfo__\": {\n", jsonMetaPrefix);
     fprintf(ctx->outfile, "      \"slotId\": %lu,\n", info->slot_id);
     fprintf(ctx->outfile, "      \"slotSize\": %lu,\n", info->slot_size);
     fprintf(ctx->outfile, "      \"slotSExpiresSize\": %lu\n", info->expires_slot_size);
@@ -184,7 +184,7 @@ static RdbRes toJsonAuxField(RdbParser *p, void *userData, RdbBulk auxkey, RdbBu
 
     if (ctx->state == R2J_IDLE) {
         ctx->state = R2J_AUX_FIELDS;
-        fprintf(ctx->outfile, "{\n    "); /* group aux-fields with { ... } */
+        fprintf(ctx->outfile, " \"%saux__\": {\n", jsonMetaPrefix); /* group aux-fields with {..} */
     } else if (ctx->state == R2J_AUX_FIELDS) {
         fprintf(ctx->outfile, ",\n    ");
     } else {
@@ -432,14 +432,20 @@ static RdbRes toJsonSet(RdbParser *p, void *userData, RdbBulk member) {
 static RdbRes toJsonZset(RdbParser *p, void *userData, RdbBulk member, double score) {
     RdbxToJson *ctx = userData;
 
-    char score_str[MAX_D2STRING_CHARS];
-    int len = d2string(score_str, sizeof(score_str), score);
+    char scoreStr[MAX_D2STRING_CHARS];
+    int len = d2string(scoreStr, sizeof(scoreStr), score);
+
+    /* -0 is a valid double, but we want to output it as 0 */
+    if ((len == 2) && (scoreStr[0] == '-') && (scoreStr[1] == '0')) {
+        scoreStr[0] = '0';
+        scoreStr[1] = '\0';
+    }
 
     if (ctx->state == R2J_IN_KEY) {
         /* output json part */
         fprintf(ctx->outfile, "{");
         outputQuotedEscaping(ctx, member, RDB_bulkLen(p, member));
-        fprintf(ctx->outfile,  ":\"%.*s\"", len, score_str);
+        fprintf(ctx->outfile, ":\"%.*s\"", len, scoreStr);
 
         /* update new state */
         ctx->state = R2J_IN_ZSET;
@@ -448,7 +454,7 @@ static RdbRes toJsonZset(RdbParser *p, void *userData, RdbBulk member, double sc
         /* output json part */
         fprintf(ctx->outfile, ",");
         outputQuotedEscaping(ctx, member, RDB_bulkLen(p, member));
-        fprintf(ctx->outfile,  ":\"%.*s\"", len, score_str);
+        fprintf(ctx->outfile, ":\"%.*s\"", len, scoreStr);
 
         /* state unchanged */
 
@@ -494,8 +500,9 @@ static RdbRes toJsonFunction(RdbParser *p, void *userData, RdbBulk func) {
 
     if (ctx->state == R2J_IDLE) {
         ctx->state = R2J_FUNCTIONS;
+        fprintf(ctx->outfile, "\"%sfunc__\": {\n", jsonMetaPrefix);
     } else if (ctx->state == R2J_AUX_FIELDS) {
-        fprintf(ctx->outfile, "\n},{\n");
+        fprintf(ctx->outfile, "\n},\n \"%sfunc__\": {\n", jsonMetaPrefix);
         ctx->state = R2J_FUNCTIONS;
     } else if (ctx->state == R2J_FUNCTIONS) {
         fprintf(ctx->outfile, ",\n");
