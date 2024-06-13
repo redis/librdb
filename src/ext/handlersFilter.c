@@ -178,6 +178,11 @@ static RdbRes filterHashLP(RdbParser *p, void *userData, RdbBulk listpack) {
     return ((RdbxFilter *) userData)->cbReturnValue;
 }
 
+static RdbRes filterHashLPEx(RdbParser *p, void *userData, RdbBulk listpackEx) {
+    UNUSED(p, listpackEx);
+    return ((RdbxFilter *) userData)->cbReturnValue;
+}
+
 static RdbRes filterHashZM(RdbParser *p, void *userData, RdbBulk zipmap) {
     UNUSED(p, zipmap);
     return ((RdbxFilter *) userData)->cbReturnValue;
@@ -311,6 +316,7 @@ static void defaultFilterStructCb(RdbHandlersStructCallbacks *structCb) {
         filterHashPlain,                    /*handleHashPlain*/
         filterHashZL,                       /*handleHashZL*/
         filterHashLP,                       /*handleHashLP*/
+        filterHashLPEx,                     /*handleHashLPEx*/
         filterHashZM,                       /*handleHashZM*/
         filterSetPlain,                     /*handleSetPlain*/
         filterSetIS,                        /*handleSetIS*/

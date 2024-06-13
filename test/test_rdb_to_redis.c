@@ -67,21 +67,19 @@ static void rdb_to_json(const char *rdbfile, const char *outfile) {
     RDB_deleteParser(parser);
 }
 
-/* Save & Reload RDB file
+/* Is saving RDB, and librdb reload generates same digest
  *
  * isDigest - if set, compare DB digest before and after reload
  * isRestore - if set, use RESTORE command after reload. Otherwise, plain commands
  */
-static void rdb_save_and_tcp_reload(int isDigest, int isRestore) {
+static void rdb_save_librdb_reload_eq(int isRestore) {
     char *res;
-    const char *rdbfile = DUMP_FOLDER("reload.rdb");
+    const char *rdbfile = TMP_FOLDER("reload.rdb");
     char expectedSha[100];
 
     /* Calculate DB isDigest */
-    if (isDigest) {
-        res = sendRedisCmd("DEBUG DIGEST", REDIS_REPLY_STATUS, NULL);
-        memcpy(expectedSha, res, strlen(res) + 1);
-    }
+    res = sendRedisCmd("DEBUG DIGEST", REDIS_REPLY_STATUS, NULL);
+    memcpy(expectedSha, res, strlen(res) + 1);
 
     /* Keep aside rdb file */
     sendRedisCmd("SAVE", REDIS_REPLY_STATUS, NULL);
@@ -94,7 +92,7 @@ static void rdb_save_and_tcp_reload(int isDigest, int isRestore) {
     /* Reload the RDB file */
     rdb_to_tcp(rdbfile, 1, isRestore, NULL);
 
-    if (isDigest) sendRedisCmd("DEBUG DIGEST", REDIS_REPLY_STATUS, expectedSha);
+    sendRedisCmd("DEBUG DIGEST", REDIS_REPLY_STATUS, expectedSha);
 }
 
 /*
@@ -186,12 +184,9 @@ static void test_rdb_to_redis_single_ziplist(void **state) {
 
 static void test_rdb_to_redis_hash(void **state) {
     UNUSED(state);
-    test_rdb_to_redis_common(DUMP_FOLDER("plain_hash_v3.rdb"), 0, "$4\r\nHSET", NULL);
+    test_rdb_to_redis_common(DUMP_FOLDER("hash_v3.rdb"), 0, "$4\r\nHSET", NULL);
 }
 
-/* - Create hash with expiry on fields via HIREDIS.
- * - Then rdb_save_and_tcp_reload and verify digest before and after
- */
 static void test_rdb_to_redis_hash_with_expire(void **state) {
     UNUSED(state);
 
@@ -199,16 +194,24 @@ static void test_rdb_to_redis_hash_with_expire(void **state) {
     if ((serverMajorVer<7) || ((serverMajorVer==7) && (serverMinorVer<4)))
         skip();
 
-    /* Test listpack - create RDB file with HFEs */
-
-    /* Test HT - create RDB file with HFEs & calculate DB digest */
+    /* dict (max-lp-entries=0) */
     sendRedisCmd("FLUSHALL", REDIS_REPLY_STATUS, NULL);
     sendRedisCmd("CONFIG SET HASH-MAX-LISTPACK-ENTRIES 0", REDIS_REPLY_STATUS, NULL);
     sendRedisCmd("HSET myhash f1 v1 f2 v2 f3 v3", REDIS_REPLY_INTEGER, "3");
     sendRedisCmd("HPEXPIREAT myhash 70368744177663 FIELDS 2 f1 f2", REDIS_REPLY_ARRAY, "1 1");
-    rdb_save_and_tcp_reload(1 /*digest */, 0 /*restore*/);
-    rdb_save_and_tcp_reload(1 /*digest */, 1 /*restore*/);
+    rdb_save_librdb_reload_eq(0 /*restore*/);
+    rdb_save_librdb_reload_eq(1 /*restore*/);
     sendRedisCmd("HPEXPIRETIME myhash FIELDS 3 f1 f2 f3", REDIS_REPLY_ARRAY,
+                 "70368744177663 70368744177663 -1"); /* verify expected output */
+
+    /* listpack */
+    sendRedisCmd("FLUSHALL", REDIS_REPLY_STATUS, NULL);
+    sendRedisCmd("CONFIG SET HASH-MAX-LISTPACK-ENTRIES 512", REDIS_REPLY_STATUS, NULL);
+    sendRedisCmd("HSET myhash f4 v1 f5 v2 f6 v3", REDIS_REPLY_INTEGER, "3");
+    sendRedisCmd("HPEXPIREAT myhash 70368744177663 FIELDS 2 f4 f5", REDIS_REPLY_ARRAY, "1 1");
+    rdb_save_librdb_reload_eq(0 /*restore*/);
+    rdb_save_librdb_reload_eq(1 /*restore*/);
+    sendRedisCmd("HPEXPIRETIME myhash FIELDS 3 f4 f5 f6", REDIS_REPLY_ARRAY,
                  "70368744177663 70368744177663 -1"); /* verify expected output */
 }
 

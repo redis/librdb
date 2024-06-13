@@ -180,7 +180,7 @@ void assert_file_payload(const char *filename, char *expData, int expLen, MatchT
         printf("%s\n---- file [%s] ----\n", errMsg, filename);
         printHexDump(filedata, filelen, buf, (int) sizeof(buf));
         printf("%s", buf);
-        printf("\n---- Expected %s %s ----\n", matchTypeName, (expMatch) ? "" : "not to match");
+        printf("\n---- Expected %s %s ----\n", matchTypeName, (expMatch) ? "" : "NOT to match");
         printHexDump(expData, expLen, buf, (int) sizeof(buf));
         printf("%s", buf);
         printf("\n------------\n");

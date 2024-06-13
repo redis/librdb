@@ -65,6 +65,7 @@ struct ParsingElementInfo peInfo[PE_MAX] = {
         [PE_HASH_META]        = {elementHash, "elementHashMeta", "Parsing Hash with expiry on fields"},
         [PE_HASH_ZL]          = {elementHashZL, "elementHashZL", "Parsing hash Ziplist"},
         [PE_HASH_LP]          = {elementHashLP, "elementHashLP", "Parsing hash Listpack"},
+        [PE_HASH_LP_EX]       = {elementHashLPEx, "elementHashLPEx", "Parsing hash ListpackEx (with expiry)"},
         [PE_HASH_ZM]          = {elementHashZM, "elementHashZM", "Parsing hash Zipmap"},
         /* set */
         [PE_SET]              = {elementSet, "elementSet", "Parsing set"},
@@ -99,6 +100,7 @@ struct ParsingElementInfo peInfo[PE_MAX] = {
         [PE_RAW_HASH_META]    = {elementRawHash, "elementRawHashMeta", "Parsing raw Hash with expiry"},
         [PE_RAW_HASH_ZL]      = {elementRawHashZL, "elementRawHashZL", "Parsing raw hash Ziplist"},
         [PE_RAW_HASH_LP]      = {elementRawHashLP, "elementRawHashLP", "Parsing raw hash Listpack"},
+        [PE_RAW_HASH_LP_EX]   = {elementRawHashLPEx, "elementRawHashLPEx", "Parsing raw hash ListpackEx"},
         [PE_RAW_HASH_ZM]      = {elementRawHashZM, "elementRawHashZM", "Parsing raw hash Zipmap"},
         /* set */
         [PE_RAW_SET]          = {elementRawSet, "elementRawSet", "Parsing raw set"},
@@ -563,6 +565,7 @@ _LIBRDB_API int RDB_handleByLevel(RdbParser *p, RdbDataType type, RdbHandlersLev
             p->handleTypeObjByLevel[RDB_TYPE_HASH_ZIPMAP] = lvl;
             p->handleTypeObjByLevel[RDB_TYPE_HASH_ZIPLIST] = lvl;
             p->handleTypeObjByLevel[RDB_TYPE_HASH_LISTPACK] = lvl;
+            p->handleTypeObjByLevel[RDB_TYPE_HASH_LISTPACK_EX] = lvl;
             break;
         case RDB_DATA_TYPE_MODULE:
             p->handleTypeObjByLevel[RDB_TYPE_MODULE_2] = lvl;
@@ -1050,7 +1053,7 @@ static RdbStatus hashZiplist(RdbParser *p, BulkInfo *ziplistBulk) {
     return RDB_STATUS_OK;
 }
 
-static RdbStatus hashListPack(RdbParser *p, BulkInfo *lpBulk) {
+static RdbStatus hashListPack(RdbParser *p, BulkInfo *lpBulk, int withExpiry) {
     size_t items = 0;
 
     if (unlikely(0 == lpValidateIntegrity(lpBulk->ref, lpBulk->len, p->deepIntegCheck, counterCallback, &items))) {
@@ -1059,21 +1062,27 @@ static RdbStatus hashListPack(RdbParser *p, BulkInfo *lpBulk) {
         return RDB_STATUS_ERROR;
     }
 
-    if (unlikely((items & 1))) {
+    /* [field][value][expiry] vs [field][value] */
+    int tupleSize = (withExpiry) ? 3 : 2;
+    if (unlikely((items % tupleSize) != 0)) {
         RDB_reportError(p, RDB_ERR_HASH_LP_INTEG_CHECK,
-                        "hashListPack(): Listpack integrity check failed. Uneven number of items.");
+                        "hashListPack(): listpack has unexpected number of items.");
         return RDB_STATUS_ERROR;
     }
 
     if (p->elmCtx.key.handleByLevel == RDB_LEVEL_STRUCT) {
         registerAppBulkForNextCb(p, lpBulk);
-        CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_STRUCT, rdbStruct.handleHashLP, lpBulk->ref);
+        if (withExpiry)
+            CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_STRUCT, rdbStruct.handleHashLPEx, lpBulk->ref);
+        else
+            CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_STRUCT, rdbStruct.handleHashLP, lpBulk->ref);
         return RDB_STATUS_OK;
     }
 
     p->elmCtx.key.numItemsHint = items;
     unsigned char *iterLP = lpFirst(lpBulk->ref);
     while (iterLP) {
+        int64_t expiryVal = -1;
         unsigned char *field, *value;
         unsigned int fieldLen, valueLen;
         long long fieldVal, valueVal;
@@ -1083,6 +1092,16 @@ static RdbStatus hashListPack(RdbParser *p, BulkInfo *lpBulk) {
         iterLP = lpNext(lpBulk->ref, iterLP);
         value = lpGetValue(iterLP, &valueLen, &valueVal);
         iterLP = lpNext(lpBulk->ref, iterLP);
+        if (withExpiry) {
+            if (lpGet(iterLP, &expiryVal, NULL) != NULL) {
+                RDB_reportError(p, RDB_ERR_HASH_LP_INTEG_CHECK,
+                                "hashListPack(): integrity check failed. Expiry is a string instead of value.");
+                return RDB_STATUS_ERROR;
+            }
+
+            if (expiryVal == 0) expiryVal = -1; /* If expiry not set */
+            iterLP = lpNext(lpBulk->ref, iterLP);
+        }
 
         if (!allocEmbeddedBulk(p, field, fieldLen, fieldVal, &embBulk1))
             return RDB_STATUS_ERROR;
@@ -1101,7 +1120,7 @@ static RdbStatus hashListPack(RdbParser *p, BulkInfo *lpBulk) {
                          rdbData.handleHashField,
                          embBulk1.binfo.ref,
                          embBulk2.binfo.ref,
-                         -1 /*no expiry*/);
+                         expiryVal);
     }
     return RDB_STATUS_OK;
 }
@@ -1451,6 +1470,7 @@ RdbStatus elementNextRdbType(RdbParser *p) {
         case RDB_TYPE_HASH_METADATA:        return nextParsingElementKeyValue(p, PE_RAW_HASH_META, PE_HASH_META);
         case RDB_TYPE_HASH_ZIPLIST:         return nextParsingElementKeyValue(p, PE_RAW_HASH_ZL, PE_HASH_ZL);
         case RDB_TYPE_HASH_LISTPACK:        return nextParsingElementKeyValue(p, PE_RAW_HASH_LP, PE_HASH_LP);
+        case RDB_TYPE_HASH_LISTPACK_EX:     return nextParsingElementKeyValue(p, PE_RAW_HASH_LP_EX, PE_HASH_LP_EX);
         case RDB_TYPE_HASH_ZIPMAP:          return nextParsingElementKeyValue(p, PE_RAW_HASH_ZM, PE_HASH_ZM);
         /* set */
         case RDB_TYPE_SET:                  return nextParsingElementKeyValue(p, PE_RAW_SET, PE_SET);
@@ -1734,6 +1754,19 @@ RdbStatus elementHashZL(RdbParser *p) {
     return nextParsingElement(p, PE_END_KEY);
 }
 
+RdbStatus elementHashLPEx(RdbParser *p) {
+    BulkInfo *listpackBulk;
+
+    IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC_APP_BULK, NULL, &listpackBulk));
+
+    /*** ENTER SAFE STATE ***/
+
+    if (RDB_STATUS_ERROR == hashListPack(p, listpackBulk, 1 /*withExpiry*/))
+        return RDB_STATUS_ERROR;
+
+    return nextParsingElement(p, PE_END_KEY);
+}
+
 RdbStatus elementHashLP(RdbParser *p) {
     BulkInfo *listpackBulk;
 
@@ -1741,7 +1774,7 @@ RdbStatus elementHashLP(RdbParser *p) {
 
     /*** ENTER SAFE STATE ***/
 
-    if (RDB_STATUS_ERROR == hashListPack(p, listpackBulk))
+    if (RDB_STATUS_ERROR == hashListPack(p, listpackBulk, 0 /*withExpiry*/))
         return RDB_STATUS_ERROR;
 
     return nextParsingElement(p, PE_END_KEY);

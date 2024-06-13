@@ -781,6 +781,7 @@ RdbxToJson *RDBX_createHandlersToJson(RdbParser *p, const char *filename, RdbxTo
                 toJsonHash,   /*handleHashPlain*/
                 toJsonStruct, /*handleHashZL*/
                 toJsonStruct, /*handleHashLP*/
+                toJsonStruct, /*handleHashLPEx*/
                 toJsonStruct, /*handleHashZM*/
                 /*set*/
                 toJsonSet,

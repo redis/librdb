@@ -187,9 +187,9 @@ static void test_r2r_multiple_lists_and_strings(void **state) {
     runWithAndWithoutRestore("multiple_lists_strings.rdb");
 }
 
-static void test_r2r_plain_hash(void **state) {
+static void test_r2r_hash(void **state) {
     UNUSED(state);
-    runWithAndWithoutRestore("plain_hash_v3.rdb");
+    runWithAndWithoutRestore("hash_v3.rdb");
 }
 
 static void test_r2r_hash_zl(void **state) {
@@ -252,9 +252,16 @@ static void test_r2r_misc_with_stream(void **state) {
     runWithAndWithoutRestore("misc_with_stream.rdb");
 }
 
+/* Test cases for hash with expire */
 static void test_r2r_hash_ex(void **state) {
     UNUSED(state);
     runWithAndWithoutRestore("hash_with_expire_v12.rdb");
+}
+
+/* Test cases for hash-listpack with expire. Supported since 7.4 */
+static void test_r2r_hash_lp_ex(void **state) {
+    UNUSED(state);
+    runWithAndWithoutRestore("hash_lp_with_hexpire_v12.rdb");
 }
 
 
@@ -323,10 +330,12 @@ int group_rdb_to_resp(void) {
             cmocka_unit_test(test_r2r_quicklist2_list),
             cmocka_unit_test(test_r2r_list_ziplist),
             /* hash */
-            cmocka_unit_test(test_r2r_plain_hash),
+            cmocka_unit_test(test_r2r_hash),
             cmocka_unit_test(test_r2r_hash_zl),
             cmocka_unit_test(test_r2r_hash_lp),
             cmocka_unit_test(test_r2r_hash_zm),
+            cmocka_unit_test(test_r2r_hash_ex),
+            cmocka_unit_test(test_r2r_hash_lp_ex),
             /* set */
             cmocka_unit_test(test_r2r_plain_set),
             cmocka_unit_test(test_r2r_set_is),

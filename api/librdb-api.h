@@ -263,6 +263,8 @@ typedef struct RdbHandlersStructCallbacks {
     RdbRes (*handleHashZL)(RdbParser *p, void *userData, RdbBulk ziplist);
     /* Callback to handle a listpack-based hash value */
     RdbRes (*handleHashLP)(RdbParser *p, void *userData, RdbBulk listpack);
+    /* Callback to handle a listpackex-based hash (with expiry on fields) */
+    RdbRes (*handleHashLPEx)(RdbParser *p, void *userData, RdbBulk listpackEx);
     /* Callback to handle a zipmap-based hash value */
     RdbRes (*handleHashZM)(RdbParser *p, void *userData, RdbBulk zipmap);
 

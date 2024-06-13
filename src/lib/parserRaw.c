@@ -525,6 +525,10 @@ RdbStatus elementRawHashLP(RdbParser *p) {
     return singleStringTypeHandling(p, listpackValidateIntegrityCb, "elementRawHashLP");
 }
 
+RdbStatus elementRawHashLPEx(RdbParser *p) {
+    return singleStringTypeHandling(p, listpackValidateIntegrityCb, "elementRawHashLPEx");
+}
+
 RdbStatus elementRawHashZM(RdbParser *p) {
     return singleStringTypeHandling(p, zipmapValidateIntegrityCb, "elementRawHashZM");
 }
