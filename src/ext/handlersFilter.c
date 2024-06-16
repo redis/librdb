@@ -47,6 +47,7 @@ static void initOpcodeToType(RdbxFilter *ctx) {
     ctx->opToType[RDB_TYPE_HASH_ZIPMAP] = RDB_DATA_TYPE_HASH;
     ctx->opToType[RDB_TYPE_HASH_ZIPLIST] = RDB_DATA_TYPE_HASH;
     ctx->opToType[RDB_TYPE_HASH_LISTPACK] = RDB_DATA_TYPE_HASH;
+    ctx->opToType[RDB_TYPE_HASH_LISTPACK_EX] = RDB_DATA_TYPE_HASH;
     /*module*/
     ctx->opToType[RDB_TYPE_MODULE_2] = RDB_DATA_TYPE_MODULE;
     ctx->opToType[RDB_OPCODE_MODULE_AUX] = RDB_DATA_TYPE_MODULE;
