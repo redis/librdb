@@ -489,7 +489,8 @@ static RdbRes toRespList(RdbParser *p, void *userData, RdbBulk item) {
     return writevWrap(ctx, iov, 6, &startCmd, 1);
 }
 
-static RdbRes toRespHash(RdbParser *p, void *userData, RdbBulk field, RdbBulk value) {
+static RdbRes toRespHash(RdbParser *p, void *userData, RdbBulk field, RdbBulk value, int64_t expireAt) {
+    char expireTimeStr[32], expireTimeLenStr[32];
     struct iovec iov[10];
     RdbxToResp *ctx = userData;
 
@@ -499,9 +500,9 @@ static RdbRes toRespHash(RdbParser *p, void *userData, RdbBulk field, RdbBulk va
     int fieldLen = RDB_bulkLen(p, field);
     int valueLen = RDB_bulkLen(p, value);
 
-    RdbxRespWriterStartCmd startCmd;
-    startCmd.cmd = "HSET";
-    startCmd.key = ctx->keyCtx.key;
+    RdbxRespWriterStartCmd hsetCmd;
+    hsetCmd.cmd = "HSET";
+    hsetCmd.key = ctx->keyCtx.key;
 
     /* write RPUSH */
     IOV_CONST(&iov[0], "*4\r\n$4\r\nHSET");
@@ -515,7 +516,26 @@ static RdbRes toRespHash(RdbParser *p, void *userData, RdbBulk field, RdbBulk va
     IOV_LENGTH(&iov[5], valueLen, valueLenStr);
     IOV_STRING(&iov[6], value, valueLen);
     IOV_CONST(&iov[7], "\r\n");
-    return writevWrap(ctx, iov, 8, &startCmd, 1);
+    IF_NOT_OK_RETURN(writevWrap(ctx, iov, 8, &hsetCmd, 1));
+
+    if (expireAt == -1) return RDB_OK;
+
+    RdbxRespWriterStartCmd hpexpireatCmd;
+    hpexpireatCmd.cmd = "HPEXPIREAT";
+    hpexpireatCmd.key = ctx->keyCtx.key;
+    /* write HPEXPIREAT */
+    IOV_CONST(&iov[0], "*6\r\n$10\r\nHPEXPIREAT");
+    /* write key */
+    IOV_LENGTH(&iov[1], ctx->keyCtx.keyLen, keyLenStr);
+    IOV_STRING(&iov[2], ctx->keyCtx.key, ctx->keyCtx.keyLen);
+    /* write expiration-time in msec */
+    IOV_LEN_AND_VAL(&iov[3], expireAt, expireTimeLenStr, expireTimeStr);
+    IOV_CONST(&iov[5], "$6\r\nFIELDS\r\n$1\r\n1");
+    /* write field */
+    IOV_LENGTH(&iov[6], fieldLen, fieldLenStr);
+    IOV_STRING(&iov[7], field, fieldLen);
+    IOV_CONST(&iov[8], "\r\n");
+    return writevWrap(ctx, iov, 9, &hpexpireatCmd, 1);
 }
 
 static RdbRes toRespSet(RdbParser *p, void *userData, RdbBulk member) {

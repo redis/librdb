@@ -156,22 +156,29 @@ static void test_r2j_plain_list_raw (void **state) {
     testRdbToJsonCommon(DUMP_FOLDER("plain_list_v6.rdb"), DUMP_FOLDER("plain_list_v6_raw.json"), &r2jConf);
 }
 
-static void test_r2j_plain_hash_data(void **state) {
+static void test_r2j_hash_data(void **state) {
     UNUSED(state);
     RdbxToJsonConf r2jConf = DEF_CONF(RDB_LEVEL_DATA);
-    testRdbToJsonCommon(DUMP_FOLDER("plain_hash_v3.rdb"), DUMP_FOLDER("plain_hash_data.json"), &r2jConf);
+    testRdbToJsonCommon(DUMP_FOLDER("hash_v3.rdb"), DUMP_FOLDER("hash_data.json"), &r2jConf);
 }
 
-static void test_r2j_plain_hash_struct(void **state) {
+static void test_r2j_hash_struct(void **state) {
     UNUSED(state);
     RdbxToJsonConf r2jConf = DEF_CONF(RDB_LEVEL_STRUCT);
-    testRdbToJsonCommon(DUMP_FOLDER("plain_hash_v3.rdb"), DUMP_FOLDER("plain_hash_struct.json"), &r2jConf);
+    testRdbToJsonCommon(DUMP_FOLDER("hash_v3.rdb"), DUMP_FOLDER("hash_struct.json"), &r2jConf);
 }
 
-static void test_r2j_plain_hash_raw (void **state) {
+static void test_r2j_hash_raw (void **state) {
     UNUSED(state);
     RdbxToJsonConf r2jConf = DEF_CONF(RDB_LEVEL_RAW);
-    testRdbToJsonCommon(DUMP_FOLDER("plain_hash_v3.rdb"), DUMP_FOLDER("plain_hash_raw.json"), &r2jConf);
+    testRdbToJsonCommon(DUMP_FOLDER("hash_v3.rdb"), DUMP_FOLDER("hash_raw.json"), &r2jConf);
+}
+
+/* hash with expiry on fields */
+static void test_r2j_hash_ex_data(void **state) {
+    UNUSED(state);
+    RdbxToJsonConf r2jConf = DEF_CONF(RDB_LEVEL_DATA);
+    testRdbToJsonCommon(DUMP_FOLDER("hash_with_expire_v12.rdb"), DUMP_FOLDER("hash_ex_v12_data.json"), &r2jConf);
 }
 
 static void test_r2j_hash_zl_data(void **state) {
@@ -196,6 +203,13 @@ static void test_r2j_hash_lp_data(void **state) {
     UNUSED(state);
     RdbxToJsonConf r2jConf = DEF_CONF(RDB_LEVEL_DATA);
     testRdbToJsonCommon(DUMP_FOLDER("hash_lp_v11.rdb"), DUMP_FOLDER("hash_lp_v11_data.json"), &r2jConf);
+}
+
+/* lp with expiry on fields */
+static void test_r2j_hash_lp_ex_data(void **state) {
+    UNUSED(state);
+    RdbxToJsonConf r2jConf = DEF_CONF(RDB_LEVEL_DATA);
+    testRdbToJsonCommon(DUMP_FOLDER("hash_lp_with_hexpire_v12.rdb"), DUMP_FOLDER("hash_lp_ex_v12_data.json"), &r2jConf);
 }
 
 static void test_r2j_hash_lp_struct(void **state) {
@@ -511,9 +525,11 @@ int group_rdb_to_json(void) {
         cmocka_unit_test(test_r2j_plain_list_raw),
 
         /* hash */
-        cmocka_unit_test(test_r2j_plain_hash_data),
-        cmocka_unit_test(test_r2j_plain_hash_struct),
-        cmocka_unit_test(test_r2j_plain_hash_raw),
+        cmocka_unit_test(test_r2j_hash_data),
+        cmocka_unit_test(test_r2j_hash_struct),
+        cmocka_unit_test(test_r2j_hash_raw),
+
+        cmocka_unit_test(test_r2j_hash_ex_data),
 
         cmocka_unit_test(test_r2j_hash_zl_data),
         cmocka_unit_test(test_r2j_hash_zl_struct),
@@ -522,6 +538,8 @@ int group_rdb_to_json(void) {
         cmocka_unit_test(test_r2j_hash_lp_data),
         cmocka_unit_test(test_r2j_hash_lp_struct),
         cmocka_unit_test(test_r2j_hash_lp_raw),
+
+        cmocka_unit_test(test_r2j_hash_lp_ex_data),
 
         cmocka_unit_test(test_r2j_hash_zm_data),
         cmocka_unit_test(test_r2j_hash_zm_struct),

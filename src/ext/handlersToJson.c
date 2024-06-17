@@ -467,7 +467,10 @@ static RdbRes toJsonZset(RdbParser *p, void *userData, RdbBulk member, double sc
     return RDB_OK;
 }
 
-static RdbRes toJsonHash(RdbParser *p, void *userData, RdbBulk field, RdbBulk value) {
+static RdbRes toJsonHash(RdbParser *p, void *userData, RdbBulk field,
+                         RdbBulk value, int64_t expireAt)
+{
+    UNUSED(expireAt);
     RdbxToJson *ctx = userData;
 
     if (ctx->state == R2J_IN_KEY) {
@@ -775,10 +778,11 @@ RdbxToJson *RDBX_createHandlersToJson(RdbParser *p, const char *filename, RdbxTo
                 toJsonStruct, /* handleListZL*/
                 toJsonStruct, /* handleListLP*/
                 /*hash*/
-                toJsonHash,
-                toJsonStruct, /* handleHashZL*/
-                toJsonStruct, /* handleHashLP*/
-                toJsonStruct, /* handleHashZM*/
+                toJsonHash,   /*handleHashPlain*/
+                toJsonStruct, /*handleHashZL*/
+                toJsonStruct, /*handleHashLP*/
+                toJsonStruct, /*handleHashLPEx*/
+                toJsonStruct, /*handleHashZM*/
                 /*set*/
                 toJsonSet,
                 toJsonStruct, /* handleSetIS*/

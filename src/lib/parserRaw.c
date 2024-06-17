@@ -436,14 +436,18 @@ RdbStatus elementRawListZL(RdbParser *p) {
 }
 
 RdbStatus elementRawHash(RdbParser *p) {
+    uint64_t expireAt;
+    int numDigits;
     size_t len;
     unsigned char *unusedData;
 
     enum RAW_HASH_STATES {
         ST_RAW_HASH_HEADER=0,            /* Retrieve number of nodes */
-        ST_RAW_HASH_READ_NEXT_FIELD_STR, /* Call PE_RAW_STRING as sub-element (read field) */
-        ST_RAW_HASH_READ_NEXT_VALUE_STR, /* Return from sub-element.
-                                          * Call PE_RAW_STRING as sub-element (read value) */
+        ST_RAW_HASH_READ_NEXT_EXPIRE,    /* Read hash-field expiry (if PE_RAW_HASH_META) */
+        ST_RAW_HASH_READ_NEXT_FIELD_STR, /* Call sub-element to read field */
+        ST_RAW_HASH_READ_NEXT_VALUE_STR, /* Returned from sub-element. Done reading field.
+                                          * Call sub-element to read value */
+        ST_RAW_HASH_DONE_READ_VALUE_STR  /* Return from sub-element. Done reading value */
     } ;
 
     ElementRawHashCtx *hashCtx = &p->elmCtx.rawHash;
@@ -451,45 +455,60 @@ RdbStatus elementRawHash(RdbParser *p) {
 
     switch (p->elmCtx.state) {
 
-        case ST_RAW_HASH_HEADER: {
-            int headerLen = 0;
-
+        case ST_RAW_HASH_HEADER:
+            numDigits = 0;
             aggMakeRoom(p, 10); /* worse case 9 bytes for len */
 
-            IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &hashCtx->numFields, (unsigned char *) rawCtx->at, &headerLen));
+            IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &hashCtx->numFields,
+                                        (unsigned char *) rawCtx->at, &numDigits));
 
             /*** ENTER SAFE STATE ***/
 
             hashCtx->visitField = 0;
 
             IF_NOT_OK_RETURN(cbHandleBegin(p, DATA_SIZE_UNKNOWN_AHEAD));
-            IF_NOT_OK_RETURN(aggUpdateWritten(p, headerLen));
-        }
-        updateElementState(p, ST_RAW_HASH_READ_NEXT_FIELD_STR, 0); /* fall-thru */
+            IF_NOT_OK_RETURN(aggUpdateWritten(p, numDigits));
+
+            if (hashCtx->numFields == 0)
+                return nextParsingElement(p, PE_RAW_END_KEY); /* empty-key */
+
+            updateElementState(p, ST_RAW_HASH_READ_NEXT_EXPIRE, 0); /* fall-thru */
+
+        case ST_RAW_HASH_READ_NEXT_EXPIRE:
+            if (p->parsingElement == PE_RAW_HASH_META) {
+                numDigits = 0;
+                aggMakeRoom(p, 32);
+                IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &expireAt,
+                                            (unsigned char *) rawCtx->at,
+                                            &numDigits));
+                /*** ENTER SAFE STATE ***/
+                IF_NOT_OK_RETURN(aggUpdateWritten(p, numDigits));
+            }
+            updateElementState(p, ST_RAW_HASH_READ_NEXT_FIELD_STR, 0); /* fall-thru */
 
         case ST_RAW_HASH_READ_NEXT_FIELD_STR:
-            /*** ENTER SAFE STATE ***/
-
-            /* if reached this state from ST_RAW_HASH_READ_NEXT_VALUE_STR */
-            if (hashCtx->visitField > 0) {
-                /* return from sub-element string parsing */
-                subElementCallEnd(p, (char **) &unusedData, &len);
-            }
-
-            if (hashCtx->visitField++ == hashCtx->numFields)
-                return nextParsingElement(p, PE_RAW_END_KEY); /* done */
-
+            /*** ENTER SAFE STATE (no rdb read)***/
             return subElementCall(p, PE_RAW_STRING, ST_RAW_HASH_READ_NEXT_VALUE_STR);
 
-        case ST_RAW_HASH_READ_NEXT_VALUE_STR: {
-            
+        case ST_RAW_HASH_READ_NEXT_VALUE_STR:
             /*** ENTER SAFE STATE (no rdb read)***/
+            /* returned from sub-element. Done reading field. */
+            subElementCallEnd(p, (char **) &unusedData, &len);
+            return subElementCall(p, PE_RAW_STRING, ST_RAW_HASH_DONE_READ_VALUE_STR);
 
+        case ST_RAW_HASH_DONE_READ_VALUE_STR:
+            /*** ENTER SAFE STATE (no rdb read)***/
             /* return from sub-element string parsing */
             subElementCallEnd(p, (char **) &unusedData, &len);
 
-            return subElementCall(p, PE_RAW_STRING, ST_RAW_HASH_READ_NEXT_FIELD_STR);
-        }
+            if (++hashCtx->visitField == hashCtx->numFields)
+                return nextParsingElement(p, PE_RAW_END_KEY); /* done */
+
+            /* More fields to read. Distinct between meta and plain hash */
+            if (p->parsingElement == PE_RAW_HASH_META)
+                return updateElementState(p, ST_RAW_HASH_READ_NEXT_EXPIRE, 0);
+            else
+                return updateElementState(p, ST_RAW_HASH_READ_NEXT_FIELD_STR, 0);
 
         default:
             RDB_reportError(p, RDB_ERR_PLAIN_HASH_INVALID_STATE,
@@ -504,6 +523,10 @@ RdbStatus elementRawHashZL(RdbParser *p) {
 
 RdbStatus elementRawHashLP(RdbParser *p) {
     return singleStringTypeHandling(p, listpackValidateIntegrityCb, "elementRawHashLP");
+}
+
+RdbStatus elementRawHashLPEx(RdbParser *p) {
+    return singleStringTypeHandling(p, listpackValidateIntegrityCb, "elementRawHashLPEx");
 }
 
 RdbStatus elementRawHashZM(RdbParser *p) {

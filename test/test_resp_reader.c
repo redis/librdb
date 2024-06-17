@@ -149,6 +149,19 @@ static void test_mixture_and_fragmented(void **state) {
     }
 }
 
+static void test_reply_array_misc_data_types (void **state) {
+    UNUSED(state);
+    RespReaderCtx ctx;
+    test_resp_reader_common(&ctx, STR_AND_SIZE("*6\r\n(34928903284"),
+                            1, RESP_REPLY_PARTIAL, 0);
+    test_resp_reader_common(&ctx, STR_AND_SIZE("0923850932485094385094"),
+                            0, RESP_REPLY_PARTIAL, 0);
+    test_resp_reader_common(&ctx, STR_AND_SIZE("3825024385\r\n#t\r"),
+                            0, RESP_REPLY_PARTIAL, 0);
+    test_resp_reader_common(&ctx, STR_AND_SIZE("\n_\r\n,1.23\r\n:1\r\n:1\r\n"),
+                            0, RESP_REPLY_OK, 1);
+}
+
 /*************************** group_test_resp_reader *******************************/
 int group_test_resp_reader(void) {
     const struct CMUnitTest tests[] = {
@@ -166,6 +179,7 @@ int group_test_resp_reader(void) {
             cmocka_unit_test(test_single_bulk),
             cmocka_unit_test(test_three_bulks),
             cmocka_unit_test(test_mixture_and_fragmented),
+            cmocka_unit_test(test_reply_array_misc_data_types),
     };
 
     return cmocka_run_group_tests(tests, NULL, NULL);

@@ -43,9 +43,11 @@ static void initOpcodeToType(RdbxFilter *ctx) {
     ctx->opToType[RDB_TYPE_ZSET_LISTPACK] = RDB_DATA_TYPE_ZSET;
     /*hash*/
     ctx->opToType[RDB_TYPE_HASH] = RDB_DATA_TYPE_HASH;
+    ctx->opToType[RDB_TYPE_HASH_METADATA] = RDB_DATA_TYPE_HASH;
     ctx->opToType[RDB_TYPE_HASH_ZIPMAP] = RDB_DATA_TYPE_HASH;
     ctx->opToType[RDB_TYPE_HASH_ZIPLIST] = RDB_DATA_TYPE_HASH;
     ctx->opToType[RDB_TYPE_HASH_LISTPACK] = RDB_DATA_TYPE_HASH;
+    ctx->opToType[RDB_TYPE_HASH_LISTPACK_EX] = RDB_DATA_TYPE_HASH;
     /*module*/
     ctx->opToType[RDB_TYPE_MODULE_2] = RDB_DATA_TYPE_MODULE;
     ctx->opToType[RDB_OPCODE_MODULE_AUX] = RDB_DATA_TYPE_MODULE;
@@ -120,8 +122,8 @@ static RdbRes filterList(RdbParser *p, void *userData, RdbBulk item) {
     return ((RdbxFilter *) userData)->cbReturnValue;
 }
 
-static RdbRes filterHash(RdbParser *p, void *userData, RdbBulk field, RdbBulk value) {
-    UNUSED(p, field, value);
+static RdbRes filterHash(RdbParser *p, void *userData, RdbBulk field, RdbBulk value, int64_t expireAt) {
+    UNUSED(p, field, value, expireAt);
     return ((RdbxFilter *) userData)->cbReturnValue;
 }
 
@@ -177,6 +179,11 @@ static RdbRes filterHashLP(RdbParser *p, void *userData, RdbBulk listpack) {
     return ((RdbxFilter *) userData)->cbReturnValue;
 }
 
+static RdbRes filterHashLPEx(RdbParser *p, void *userData, RdbBulk listpackEx) {
+    UNUSED(p, listpackEx);
+    return ((RdbxFilter *) userData)->cbReturnValue;
+}
+
 static RdbRes filterHashZM(RdbParser *p, void *userData, RdbBulk zipmap) {
     UNUSED(p, zipmap);
     return ((RdbxFilter *) userData)->cbReturnValue;
@@ -187,8 +194,8 @@ static RdbRes filterHashZL(RdbParser *p, void *userData, RdbBulk ziplist) {
     return ((RdbxFilter *) userData)->cbReturnValue;
 }
 
-static RdbRes filterHashPlain(RdbParser *p, void *userData, RdbBulk field, RdbBulk value) {
-    UNUSED(p, field, value);
+static RdbRes filterHashPlain(RdbParser *p, void *userData, RdbBulk field, RdbBulk value, int64_t expireAt) {
+    UNUSED(p, field, value, expireAt);
     return ((RdbxFilter *) userData)->cbReturnValue;
 }
 
@@ -310,6 +317,7 @@ static void defaultFilterStructCb(RdbHandlersStructCallbacks *structCb) {
         filterHashPlain,                    /*handleHashPlain*/
         filterHashZL,                       /*handleHashZL*/
         filterHashLP,                       /*handleHashLP*/
+        filterHashLPEx,                     /*handleHashLPEx*/
         filterHashZM,                       /*handleHashZM*/
         filterSetPlain,                     /*handleSetPlain*/
         filterSetIS,                        /*handleSetIS*/

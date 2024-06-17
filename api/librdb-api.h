@@ -257,12 +257,14 @@ typedef struct RdbHandlersStructCallbacks {
     /* Callback to handle a listpack-based list value */
     RdbRes (*handleListLP)(RdbParser *p, void *userData, RdbBulk listpack);
 
-    /* Callback to handle a field-value pair within a plain-hash */
-    RdbRes (*handleHashPlain)(RdbParser *p, void *userData, RdbBulk field, RdbBulk value);
+    /* Callback to handle a field-value pair within a plain-hash. expireAt -1 if not set. */
+    RdbRes (*handleHashPlain)(RdbParser *p, void *userData, RdbBulk field, RdbBulk value, int64_t expireAt);
     /* Callback to handle a ziplist-based hash value */
     RdbRes (*handleHashZL)(RdbParser *p, void *userData, RdbBulk ziplist);
     /* Callback to handle a listpack-based hash value */
     RdbRes (*handleHashLP)(RdbParser *p, void *userData, RdbBulk listpack);
+    /* Callback to handle a listpackex-based hash (with expiry on fields) */
+    RdbRes (*handleHashLPEx)(RdbParser *p, void *userData, RdbBulk listpackEx);
     /* Callback to handle a zipmap-based hash value */
     RdbRes (*handleHashZM)(RdbParser *p, void *userData, RdbBulk zipmap);
 
@@ -305,7 +307,7 @@ typedef struct RdbHandlersDataCallbacks {
     /* Callback to handle an item from a list */
     RdbRes (*handleListItem)(RdbParser *p, void *userData, RdbBulk item);
     /* Callback to handle a field-value pair within a hash */
-    RdbRes (*handleHashField)(RdbParser *p, void *userData, RdbBulk field, RdbBulk value);
+    RdbRes (*handleHashField)(RdbParser *p, void *userData, RdbBulk field, RdbBulk value, int64_t expireAt);
     /* Callback to handle a member within a set */
     RdbRes (*handleSetMember)(RdbParser *p, void *userData, RdbBulk member);
     /* Callback to handle a member within a sorted set along with its score */

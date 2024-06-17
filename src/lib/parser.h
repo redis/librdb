@@ -140,8 +140,10 @@ typedef enum ParsingElementType {
     PE_QUICKLIST,
     PE_LIST_ZL,
     PE_HASH,
+    PE_HASH_META,
     PE_HASH_ZL,
     PE_HASH_LP,
+    PE_HASH_LP_EX,
     PE_HASH_ZM,
     PE_SET,
     PE_SET_IS,
@@ -163,8 +165,10 @@ typedef enum ParsingElementType {
     PE_RAW_QUICKLIST,
     PE_RAW_LIST_ZL,
     PE_RAW_HASH,
+    PE_RAW_HASH_META,
     PE_RAW_HASH_ZL,
     PE_RAW_HASH_LP,
+    PE_RAW_HASH_LP_EX,
     PE_RAW_HASH_ZM,
     PE_RAW_SET,
     PE_RAW_SET_IS,
@@ -228,7 +232,7 @@ typedef struct {
 
 typedef struct {
     RdbKeyInfo info;
-    ParsingElementType valueType;
+    ParsingElementType parsingElemType;
     RdbHandlersLevel handleByLevel;
     int64_t numItemsHint; /* hint for the total number of items in the current parsed key. -1 if unknown */
 } ElementKeyCtx;
@@ -532,6 +536,7 @@ RdbStatus elementListZL(RdbParser *p);
 RdbStatus elementHash(RdbParser *p);
 RdbStatus elementHashZL(RdbParser *p);
 RdbStatus elementHashLP(RdbParser *p);
+RdbStatus elementHashLPEx(RdbParser *p);
 RdbStatus elementHashZM(RdbParser *p);
 RdbStatus elementSet(RdbParser *p);
 RdbStatus elementSetIS(RdbParser *p);
@@ -553,6 +558,7 @@ RdbStatus elementRawListZL(RdbParser *p);
 RdbStatus elementRawHash(RdbParser *p);
 RdbStatus elementRawHashZL(RdbParser *p);
 RdbStatus elementRawHashLP(RdbParser *p);
+RdbStatus elementRawHashLPEx(RdbParser *p);
 RdbStatus elementRawHashZM(RdbParser *p);
 RdbStatus elementRawSet(RdbParser *p);
 RdbStatus elementRawSetIS(RdbParser *p);
