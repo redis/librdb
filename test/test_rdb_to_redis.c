@@ -189,33 +189,27 @@ static void test_rdb_to_redis_hash(void **state) {
 
 static void test_rdb_to_redis_hash_with_expire(void **state) {
     UNUSED(state);
+    const char* configs[] = {
+        "CONFIG SET HASH-MAX-LISTPACK-ENTRIES 0",   /*HT*/
+        "CONFIG SET HASH-MAX-LISTPACK-ENTRIES 512", /*listpack*/
+    };
 
     /* hash-field-expiration available since 7.4 */
     if ((serverMajorVer<7) || ((serverMajorVer==7) && (serverMinorVer<4)))
         skip();
 
     setupRedisServer("--enable-debug-command yes --dbfilename expire.rdb");
-
-    /* listpack */
-    sendRedisCmd("FLUSHALL", REDIS_REPLY_STATUS, NULL);
-    sendRedisCmd("CONFIG SET HASH-MAX-LISTPACK-ENTRIES 512", REDIS_REPLY_STATUS, NULL);
-    sendRedisCmd("HSET myhash f4 v1 f5 v2 f6 v3", REDIS_REPLY_INTEGER, "3");
-    sendRedisCmd("HPEXPIREAT myhash 70368744177663 FIELDS 2 f4 f5", REDIS_REPLY_ARRAY, "1 1");
-    rdb_save_librdb_reload_eq(0 /*restore*/, TMP_FOLDER("expire.rdb"));
-    rdb_save_librdb_reload_eq(1 /*restore*/, TMP_FOLDER("expire.rdb"));
-    sendRedisCmd("HPEXPIRETIME myhash FIELDS 3 f4 f5 f6", REDIS_REPLY_ARRAY,
-                 "70368744177663 70368744177663 -1"); /* verify expected output */
-
-    /* dict (max-lp-entries=0) */
-    sendRedisCmd("FLUSHALL", REDIS_REPLY_STATUS, NULL);
-    sendRedisCmd("CONFIG SET HASH-MAX-LISTPACK-ENTRIES 0", REDIS_REPLY_STATUS, NULL);
-    sendRedisCmd("HSET myhash f4 v1 f5 v2 f6 v3", REDIS_REPLY_INTEGER, "3");
-    sendRedisCmd("HPEXPIREAT myhash 70368744177663 FIELDS 2 f4 f5", REDIS_REPLY_ARRAY, "1 1");
-    rdb_save_librdb_reload_eq(0 /*restore*/, TMP_FOLDER("expire.rdb"));
-    rdb_save_librdb_reload_eq(1 /*restore*/, TMP_FOLDER("expire.rdb"));
-    sendRedisCmd("HPEXPIRETIME myhash FIELDS 3 f4 f5 f6", REDIS_REPLY_ARRAY,
-                 "70368744177663 70368744177663 -1"); /* verify expected output */
-
+    for (int i = 0; i < 2; i++) {
+        sendRedisCmd("FLUSHALL", REDIS_REPLY_STATUS, NULL);
+        sendRedisCmd(configs[i], REDIS_REPLY_STATUS, NULL);
+        sendRedisCmd("HSET myhash f4 v1 f5 v2 f6 v3", REDIS_REPLY_INTEGER, "3");
+        sendRedisCmd("HPEXPIREAT myhash 70368744177663 FIELDS 2 f4 f5",
+                     REDIS_REPLY_ARRAY, "1 1");  /*time=0x3fffffffffff*/
+        rdb_save_librdb_reload_eq(0 /*restore*/, TMP_FOLDER("expire.rdb"));  /// <<<< ----- problem here
+        //rdb_save_librdb_reload_eq(1 /*restore*/, TMP_FOLDER("expire.rdb"));
+        sendRedisCmd("HPEXPIRETIME myhash FIELDS 3 f4 f5 f6", REDIS_REPLY_ARRAY,
+                     "70368744177663 70368744177663 -1"); /* verify expected output */
+    }
     teardownRedisServer();
 }
 

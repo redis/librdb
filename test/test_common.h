@@ -50,7 +50,7 @@ const char *getTargetRedisVersion(int *major, int *minor); /* call only after se
 void teardownRedisServer(void);
 void cleanup_json_sign_service(void);
 int isSetRedisServer(void);
-char *sendRedisCmd(char *cmd, int expRetType, char *expRsp);
+char *sendRedisCmd(const char *cmd, int expRetType, char *expRsp);
 int isSupportRestoreModuleAux(void);
 
 /* test groups */

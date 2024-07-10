@@ -44,7 +44,10 @@ static int listpackValidateIntegrityCb(unsigned char* str, size_t size, RdbParse
 static int zipmapValidateIntegrityCb(unsigned char* str, size_t size, RdbParser *p);
 static int intsetValidateIntegrityCb(unsigned char* str, size_t size, RdbParser *p);
 typedef int (*singleStringTypeValidateCb)(unsigned char* str, size_t size, RdbParser *p); // return 0 for error
-static RdbStatus singleStringTypeHandling(RdbParser *p, singleStringTypeValidateCb validateCb, char *callerName);
+static RdbStatus singleStringTypeHandling(RdbParser *p,
+                                          singleStringTypeValidateCb validateCb,
+                                          int digestHdrSize,
+                                          char *callerName);
 void moduleTypeNameByID(char *name, uint64_t moduleid);
 
 /*** init & release ***/
@@ -315,7 +318,8 @@ RdbStatus elementRawString(RdbParser *p) {
                         break;
                     default:
                         RDB_reportError(p, RDB_ERR_STRING_UNKNOWN_ENCODING_TYPE,
-                            "elementRawString(): Unknown RDB string encoding type: %lu", strCtx->len);
+                            "elementRawString(): Unknown RDB string encoding type: %lu (0x%lx)",
+                            strCtx->len, strCtx->len);
                         return RDB_STATUS_ERROR;
                 }
             }
@@ -419,7 +423,8 @@ RdbStatus elementRawString(RdbParser *p) {
             }
 
             RDB_reportError(p, RDB_ERR_STRING_UNKNOWN_ENCODING_TYPE,
-                           "elementRawString(): Unknown RDB string encoding type: %lu", strCtx->encoding);
+                           "elementRawString(): Unknown RDB string encoding type: %lu (0x%lx)",
+                           strCtx->encoding, strCtx->encoding);
             return RDB_STATUS_ERROR;
         }
 
@@ -432,12 +437,13 @@ RdbStatus elementRawString(RdbParser *p) {
 }
 
 RdbStatus elementRawListZL(RdbParser *p) {
-    return singleStringTypeHandling(p, ziplistValidateIntegrityCb, "elementRawListZL");
+    return singleStringTypeHandling(p, ziplistValidateIntegrityCb, 0, "elementRawListZL");
 }
 
 RdbStatus elementRawHash(RdbParser *p) {
+    BulkInfo *binfo;
     uint64_t expireAt;
-    int numDigits;
+    int offset, processedBytes;
     size_t len;
     unsigned char *unusedData;
 
@@ -456,18 +462,25 @@ RdbStatus elementRawHash(RdbParser *p) {
     switch (p->elmCtx.state) {
 
         case ST_RAW_HASH_HEADER:
-            numDigits = 0;
-            aggMakeRoom(p, 10); /* worse case 9 bytes for len */
+            offset = processedBytes = 0;
+
+            aggMakeRoom(p, 20); /* > optional 8 bytes + worse case 9 bytes for len */
+            if (p->currOpcode == RDB_TYPE_HASH_METADATA) {
+                /* load min expiration time. Do nothing with it since each field
+                 * goanna report anyway its expiration time */
+                IF_NOT_OK_RETURN(rdbLoad(p, 8, RQ_ALLOC_REF, rawCtx->at, &binfo));
+                offset = processedBytes = 8;
+            }
 
             IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &hashCtx->numFields,
-                                        (unsigned char *) rawCtx->at, &numDigits));
+                                        (unsigned char *) rawCtx->at + offset, &processedBytes));
 
             /*** ENTER SAFE STATE ***/
 
             hashCtx->visitField = 0;
 
             IF_NOT_OK_RETURN(cbHandleBegin(p, DATA_SIZE_UNKNOWN_AHEAD));
-            IF_NOT_OK_RETURN(aggUpdateWritten(p, numDigits));
+            IF_NOT_OK_RETURN(aggUpdateWritten(p, processedBytes));
 
             if (hashCtx->numFields == 0)
                 return nextParsingElement(p, PE_RAW_END_KEY); /* empty-key */
@@ -476,13 +489,13 @@ RdbStatus elementRawHash(RdbParser *p) {
 
         case ST_RAW_HASH_READ_NEXT_EXPIRE:
             if (p->parsingElement == PE_RAW_HASH_META) {
-                numDigits = 0;
+                processedBytes = 0;
                 aggMakeRoom(p, 32);
                 IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &expireAt,
                                             (unsigned char *) rawCtx->at,
-                                            &numDigits));
+                                            &processedBytes));
                 /*** ENTER SAFE STATE ***/
-                IF_NOT_OK_RETURN(aggUpdateWritten(p, numDigits));
+                IF_NOT_OK_RETURN(aggUpdateWritten(p, processedBytes));
             }
             updateElementState(p, ST_RAW_HASH_READ_NEXT_FIELD_STR, 0); /* fall-thru */
 
@@ -518,27 +531,28 @@ RdbStatus elementRawHash(RdbParser *p) {
 }
 
 RdbStatus elementRawHashZL(RdbParser *p) {
-    return singleStringTypeHandling(p, ziplistValidateIntegrityCb, "elementRawHashZL");
+    return singleStringTypeHandling(p, ziplistValidateIntegrityCb, 0, "elementRawHashZL");
 }
 
 RdbStatus elementRawHashLP(RdbParser *p) {
-    return singleStringTypeHandling(p, listpackValidateIntegrityCb, "elementRawHashLP");
+    return singleStringTypeHandling(p, listpackValidateIntegrityCb, 0, "elementRawHashLP");
 }
 
 RdbStatus elementRawHashLPEx(RdbParser *p) {
-    return singleStringTypeHandling(p, listpackValidateIntegrityCb, "elementRawHashLPEx");
+    int digestMinExpireSize = (p->currOpcode != RDB_TYPE_HASH_LISTPACK_EX_PRE_GA) ? 8 : 0;
+    return singleStringTypeHandling(p, listpackValidateIntegrityCb, digestMinExpireSize, "elementRawHashLPEx");
 }
 
 RdbStatus elementRawHashZM(RdbParser *p) {
-    return singleStringTypeHandling(p, zipmapValidateIntegrityCb, "elementRawHashZM");
+    return singleStringTypeHandling(p, zipmapValidateIntegrityCb, 0, "elementRawHashZM");
 }
 
 RdbStatus elementRawSetIS(RdbParser *p) {
-    return singleStringTypeHandling(p, intsetValidateIntegrityCb, "elementRawSetIS");
+    return singleStringTypeHandling(p, intsetValidateIntegrityCb, 0, "elementRawSetIS");
 }
 
 RdbStatus elementRawSetLP(RdbParser *p) {
-    return singleStringTypeHandling(p, listpackValidateIntegrityCb, "elementRawSetLP");
+    return singleStringTypeHandling(p, listpackValidateIntegrityCb, 0, "elementRawSetLP");
 }
 
 RdbStatus elementRawSet(RdbParser *p) {
@@ -595,11 +609,11 @@ RdbStatus elementRawSet(RdbParser *p) {
 }
 
 RdbStatus elementRawZsetLP(RdbParser *p) {
-    return singleStringTypeHandling(p, listpackValidateIntegrityCb, "elementRawZsetLP");
+    return singleStringTypeHandling(p, listpackValidateIntegrityCb, 0, "elementRawZsetLP");
 }
 
 RdbStatus elementRawZsetZL(RdbParser *p) {
-    return singleStringTypeHandling(p, ziplistValidateIntegrityCb, "elementRawZsetZL");
+    return singleStringTypeHandling(p, ziplistValidateIntegrityCb, 0, "elementRawZsetZL");
 }
 
 RdbStatus elementRawZset(RdbParser *p) {
@@ -1122,8 +1136,11 @@ static int intsetValidateIntegrityCb(unsigned char* str, size_t size, RdbParser 
     return intsetValidateIntegrity(str, size, 1);
 }
 
-static RdbStatus singleStringTypeHandling(RdbParser *p, singleStringTypeValidateCb validateCb, char *callerName) {
-
+static RdbStatus singleStringTypeHandling(RdbParser *p,
+                                          singleStringTypeValidateCb validateCb,
+                                          int digestHdrSize,
+                                          char *callerName) {
+    BulkInfo *binfo;
     enum RAW_SINGLE_STRING_TYPE_STATES {
         ST_RAW_SSTYPE_START=0,
         ST_RAW_SSTYPE_CALL_STR, /* Call PE_RAW_STRING as sub-element */
@@ -1132,6 +1149,12 @@ static RdbStatus singleStringTypeHandling(RdbParser *p, singleStringTypeValidate
 
     switch  (p->elmCtx.state) {
         case ST_RAW_SSTYPE_START:
+            if (digestHdrSize) {
+                IF_NOT_OK_RETURN(aggMakeRoom(p, digestHdrSize));
+                IF_NOT_OK_RETURN(rdbLoad(p, digestHdrSize, RQ_ALLOC_REF, p->rawCtx.at, &binfo));
+                /*** ENTER SAFE STATE ***/
+                IF_NOT_OK_RETURN(aggUpdateWritten(p, digestHdrSize));
+            }
             /* take care string won't propagate for having integrity check */
             IF_NOT_OK_RETURN(cbHandleBegin(p, DATA_SIZE_UNKNOWN_AHEAD));
 

@@ -267,7 +267,7 @@ size_t serializeRedisReply(const redisReply *reply, char *buffer, size_t bsize) 
  *
  * Return the response serialized
  */
-char *sendRedisCmd(char *cmd, int expRetType, char *expRsp) {
+char *sendRedisCmd(const char *cmd, int expRetType, char *expRsp) {
     static char rspbuf[1024];
 
     assert_int_not_equal(currRedisInst, -1);
