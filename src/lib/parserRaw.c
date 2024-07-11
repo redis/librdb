@@ -6,14 +6,13 @@
  * expects structured data, whereas LEVEL0 is a dump of raw data that its main purpose
  * is to use it along with RESTORE command to play it against live Redis server.
  */
-
+#include <inttypes.h>
 #include <assert.h>
 #include <string.h>
 #include "../../deps/redis/lzf.h"
 #include "bulkAlloc.h"
 #include "parser.h"
 #include "defines.h"
-#include "../../deps/redis/endianconv.h"
 #include "../../deps/redis/util.h"
 #include "../../deps/redis/listpack.h"
 #include "../../deps/redis/ziplist.h"
@@ -318,8 +317,8 @@ RdbStatus elementRawString(RdbParser *p) {
                         break;
                     default:
                         RDB_reportError(p, RDB_ERR_STRING_UNKNOWN_ENCODING_TYPE,
-                            "elementRawString(): Unknown RDB string encoding type: %lu (0x%lx)",
-                            strCtx->len, strCtx->len);
+                            "elementRawString(): Unknown RDB string encoding type: %"
+                            PRIu64 " (0x%" PRIx64 ")", strCtx->len, strCtx->len);
                         return RDB_STATUS_ERROR;
                 }
             }
@@ -423,8 +422,8 @@ RdbStatus elementRawString(RdbParser *p) {
             }
 
             RDB_reportError(p, RDB_ERR_STRING_UNKNOWN_ENCODING_TYPE,
-                           "elementRawString(): Unknown RDB string encoding type: %lu (0x%lx)",
-                           strCtx->encoding, strCtx->encoding);
+                           "elementRawString(): Unknown RDB string encoding type: %"
+                            PRIu64 " (0x%" PRIx64 ")", strCtx->encoding, strCtx->encoding);
             return RDB_STATUS_ERROR;
         }
 
@@ -464,10 +463,9 @@ RdbStatus elementRawHash(RdbParser *p) {
         case ST_RAW_HASH_HEADER:
             offset = processedBytes = 0;
 
-            aggMakeRoom(p, 20); /* > optional 8 bytes + worse case 9 bytes for len */
+            aggMakeRoom(p, 8 /*optional*/ + LONG_STR_SIZE);
             if (p->currOpcode == RDB_TYPE_HASH_METADATA) {
-                /* load min expiration time. Do nothing with it since each field
-                 * goanna report anyway its expiration time */
+                /* Load min expiration time */
                 IF_NOT_OK_RETURN(rdbLoad(p, 8, RQ_ALLOC_REF, rawCtx->at, &binfo));
                 offset = processedBytes = 8;
             }

@@ -12,7 +12,7 @@
  * in the README.md file as an introduction to this file implementation.
  */
 
-#include <endian.h>
+#include <inttypes.h>
 #include <assert.h>
 #include <stdarg.h>
 #include <string.h>
@@ -1698,7 +1698,7 @@ RdbStatus elementHash(RdbParser *p) {
         case ST_HASH_HEADER:
             if (p->currOpcode == RDB_TYPE_HASH_METADATA) {
                 /* digest min HFE expiration time. No need to pass it to handlers
-                   each field goanna report its expiration time anyway */
+                   as each field will report its own expiration time anyway */
                 BulkInfo *binfoExpire;
                 IF_NOT_OK_RETURN(rdbLoad(p, 8, RQ_ALLOC, NULL, &binfoExpire));
             }
@@ -1770,7 +1770,7 @@ RdbStatus elementHashLPEx(RdbParser *p) {
 
     if (p->currOpcode != RDB_TYPE_HASH_LISTPACK_EX_PRE_GA) {
         /* digest min HFE expiration time. No need to pass it to handlers
-           each field goanna report its expiration time anyway */
+           as each field will report its own expiration time anyway */
         BulkInfo *binfoExpire;
         IF_NOT_OK_RETURN(rdbLoad(p, 8, RQ_ALLOC, NULL, &binfoExpire));
     }
@@ -2666,8 +2666,8 @@ RdbStatus rdbLoadString(RdbParser *p, AllocTypeRq type, char *refBuf, BulkInfo *
                 return rdbLoadLzfString(p, type, refBuf, binfo);
             default:
                 RDB_reportError(p, RDB_ERR_STRING_UNKNOWN_ENCODING_TYPE,
-                                "rdbLoadString(): Unknown RDB string encoding type: %lu (0x%lx)",
-                                len, len);
+                                "rdbLoadString(): Unknown RDB string encoding type: %"
+                                PRIu64 " (0x%" PRIx64 ")", len, len);
                 return RDB_STATUS_ERROR;
         }
     }
