@@ -205,8 +205,8 @@ static void test_rdb_to_redis_hash_with_expire(void **state) {
         sendRedisCmd("HSET myhash f4 v1 f5 v2 f6 v3", REDIS_REPLY_INTEGER, "3");
         sendRedisCmd("HPEXPIREAT myhash 70368744177663 FIELDS 2 f4 f5",
                      REDIS_REPLY_ARRAY, "1 1");  /*time=0x3fffffffffff*/
-        rdb_save_librdb_reload_eq(0 /*restore*/, TMP_FOLDER("expire.rdb"));  /// <<<< ----- problem here
-        //rdb_save_librdb_reload_eq(1 /*restore*/, TMP_FOLDER("expire.rdb"));
+        rdb_save_librdb_reload_eq(0 /*restore*/, TMP_FOLDER("expire.rdb"));
+        rdb_save_librdb_reload_eq(1 /*restore*/, TMP_FOLDER("expire.rdb"));
         sendRedisCmd("HPEXPIRETIME myhash FIELDS 3 f4 f5 f6", REDIS_REPLY_ARRAY,
                      "70368744177663 70368744177663 -1"); /* verify expected output */
     }
