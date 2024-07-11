@@ -43,10 +43,12 @@ static void initOpcodeToType(RdbxFilter *ctx) {
     ctx->opToType[RDB_TYPE_ZSET_LISTPACK] = RDB_DATA_TYPE_ZSET;
     /*hash*/
     ctx->opToType[RDB_TYPE_HASH] = RDB_DATA_TYPE_HASH;
+    ctx->opToType[RDB_TYPE_HASH_METADATA_PRE_GA] = RDB_DATA_TYPE_HASH;
     ctx->opToType[RDB_TYPE_HASH_METADATA] = RDB_DATA_TYPE_HASH;
     ctx->opToType[RDB_TYPE_HASH_ZIPMAP] = RDB_DATA_TYPE_HASH;
     ctx->opToType[RDB_TYPE_HASH_ZIPLIST] = RDB_DATA_TYPE_HASH;
     ctx->opToType[RDB_TYPE_HASH_LISTPACK] = RDB_DATA_TYPE_HASH;
+    ctx->opToType[RDB_TYPE_HASH_LISTPACK_EX_PRE_GA] = RDB_DATA_TYPE_HASH;
     ctx->opToType[RDB_TYPE_HASH_LISTPACK_EX] = RDB_DATA_TYPE_HASH;
     /*module*/
     ctx->opToType[RDB_TYPE_MODULE_2] = RDB_DATA_TYPE_MODULE;

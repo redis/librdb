@@ -16,7 +16,6 @@
 #define RDB_TYPE_MODULE_PRE_GA 6 /* Used in 4.0 release candidates */
 #define RDB_TYPE_MODULE_2 7 /* Module value with annotations for parsing without
                                the generating module being loaded. */
-/* NOTE: WHEN ADDING NEW RDB TYPE, UPDATE rdbIsObjectType() BELOW */
 
 /* Object types for encoded objects. */
 #define RDB_TYPE_HASH_ZIPMAP        9
@@ -32,10 +31,12 @@
 #define RDB_TYPE_STREAM_LISTPACKS_2 19
 #define RDB_TYPE_SET_LISTPACK       20
 #define RDB_TYPE_STREAM_LISTPACKS_3 21
-#define RDB_TYPE_HASH_METADATA      22
-#define RDB_TYPE_HASH_LISTPACK_EX   23
-#define RDB_TYPE_MAX                24
-/* NOTE: WHEN ADDING NEW RDB TYPE, UPDATE rdbIsObjectType() BELOW */
+#define RDB_TYPE_HASH_METADATA_PRE_GA 22      /* Hash with HFEs. Doesn't attach min TTL at start (7.4 RC) */
+#define RDB_TYPE_HASH_LISTPACK_EX_PRE_GA 23   /* Hash LP with HFEs. Doesn't attach min TTL at start (7.4 RC) */
+#define RDB_TYPE_HASH_METADATA      24        /* Hash with HFEs. Attach min TTL at start */
+#define RDB_TYPE_HASH_LISTPACK_EX   25        /* Hash LP with HFEs. Attach min TTL at start */
+#define RDB_TYPE_MAX                26
+
 
 /* Special RDB opcodes (saved/loaded with rdbSaveType/rdbLoadType). */
 #define RDB_OPCODE_SLOT_INFO  244   /* Individual slot info, such as slot id and size (cluster mode only). */

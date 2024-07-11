@@ -12,7 +12,7 @@
  * in the README.md file as an introduction to this file implementation.
  */
 
-#include <endian.h>
+#include <inttypes.h>
 #include <assert.h>
 #include <stdarg.h>
 #include <string.h>
@@ -561,10 +561,12 @@ _LIBRDB_API int RDB_handleByLevel(RdbParser *p, RdbDataType type, RdbHandlersLev
             break;
         case RDB_DATA_TYPE_HASH:
             p->handleTypeObjByLevel[RDB_TYPE_HASH] = lvl;
+            p->handleTypeObjByLevel[RDB_TYPE_HASH_METADATA_PRE_GA] = lvl;
             p->handleTypeObjByLevel[RDB_TYPE_HASH_METADATA] = lvl;
             p->handleTypeObjByLevel[RDB_TYPE_HASH_ZIPMAP] = lvl;
             p->handleTypeObjByLevel[RDB_TYPE_HASH_ZIPLIST] = lvl;
             p->handleTypeObjByLevel[RDB_TYPE_HASH_LISTPACK] = lvl;
+            p->handleTypeObjByLevel[RDB_TYPE_HASH_LISTPACK_EX_PRE_GA] = lvl;
             p->handleTypeObjByLevel[RDB_TYPE_HASH_LISTPACK_EX] = lvl;
             break;
         case RDB_DATA_TYPE_MODULE:
@@ -1467,9 +1469,11 @@ RdbStatus elementNextRdbType(RdbParser *p) {
         case RDB_TYPE_LIST_ZIPLIST:         return nextParsingElementKeyValue(p, PE_RAW_LIST_ZL, PE_LIST_ZL);
         /* hash */
         case RDB_TYPE_HASH:                 return nextParsingElementKeyValue(p, PE_RAW_HASH, PE_HASH);
+        case RDB_TYPE_HASH_METADATA_PRE_GA: return nextParsingElementKeyValue(p, PE_RAW_HASH_META, PE_HASH_META);
         case RDB_TYPE_HASH_METADATA:        return nextParsingElementKeyValue(p, PE_RAW_HASH_META, PE_HASH_META);
         case RDB_TYPE_HASH_ZIPLIST:         return nextParsingElementKeyValue(p, PE_RAW_HASH_ZL, PE_HASH_ZL);
         case RDB_TYPE_HASH_LISTPACK:        return nextParsingElementKeyValue(p, PE_RAW_HASH_LP, PE_HASH_LP);
+        case RDB_TYPE_HASH_LISTPACK_EX_PRE_GA:     return nextParsingElementKeyValue(p, PE_RAW_HASH_LP_EX, PE_HASH_LP_EX);
         case RDB_TYPE_HASH_LISTPACK_EX:     return nextParsingElementKeyValue(p, PE_RAW_HASH_LP_EX, PE_HASH_LP_EX);
         case RDB_TYPE_HASH_ZIPMAP:          return nextParsingElementKeyValue(p, PE_RAW_HASH_ZM, PE_HASH_ZM);
         /* set */
@@ -1692,6 +1696,13 @@ RdbStatus elementHash(RdbParser *p) {
 
     switch (ctx->state) {
         case ST_HASH_HEADER:
+            if (p->currOpcode == RDB_TYPE_HASH_METADATA) {
+                /* digest min HFE expiration time. No need to pass it to handlers
+                   as each field will report its own expiration time anyway */
+                BulkInfo *binfoExpire;
+                IF_NOT_OK_RETURN(rdbLoad(p, 8, RQ_ALLOC, NULL, &binfoExpire));
+            }
+
             IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &(ctx->hash.numFields), NULL, NULL));
 
             ctx->key.numItemsHint = ctx->hash.numFields;
@@ -1756,6 +1767,13 @@ RdbStatus elementHashZL(RdbParser *p) {
 
 RdbStatus elementHashLPEx(RdbParser *p) {
     BulkInfo *listpackBulk;
+
+    if (p->currOpcode != RDB_TYPE_HASH_LISTPACK_EX_PRE_GA) {
+        /* digest min HFE expiration time. No need to pass it to handlers
+           as each field will report its own expiration time anyway */
+        BulkInfo *binfoExpire;
+        IF_NOT_OK_RETURN(rdbLoad(p, 8, RQ_ALLOC, NULL, &binfoExpire));
+    }
 
     IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC_APP_BULK, NULL, &listpackBulk));
 
@@ -2648,7 +2666,8 @@ RdbStatus rdbLoadString(RdbParser *p, AllocTypeRq type, char *refBuf, BulkInfo *
                 return rdbLoadLzfString(p, type, refBuf, binfo);
             default:
                 RDB_reportError(p, RDB_ERR_STRING_UNKNOWN_ENCODING_TYPE,
-                                "rdbLoadString(): Unknown RDB string encoding type: %lu",len);
+                                "rdbLoadString(): Unknown RDB string encoding type: %"
+                                PRIu64 " (0x%" PRIx64 ")", len, len);
                 return RDB_STATUS_ERROR;
         }
     }
