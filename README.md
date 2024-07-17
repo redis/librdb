@@ -196,17 +196,23 @@ destruction, or when newer block replacing old one.
 
 ### rdb-cli usage
 
-    Usage: rdb-cli /path/to/dump.rdb [OPTIONS] {json|resp|redis} [FORMAT_OPTIONS]
+    Usage: rdb-cli /path/to/dump.rdb [OPTIONS] {print|json|resp|redis} [FORMAT_OPTIONS]
     OPTIONS:
             -l, --log-file <PATH>         Path to the log file or stdout (Default: './rdb-cli.log')
-    
-            Multiple filters combination of keys/types/dbs can be specified:
             -k, --key <REGEX>             Include only keys that match REGEX
             -K  --no-key <REGEX>          Exclude all keys that match REGEX
             -t, --type <TYPE>             Include only selected TYPE {str|list|set|zset|hash|module|func}
             -T, --no-type <TYPE>          Exclude TYPE {str|list|set|zset|hash|module|func}
             -d, --dbnum <DBNUM>           Include only selected db number
             -D, --no-dbnum <DBNUM>        Exclude DB number
+            -e, --expired                 Include only expired keys
+            -E, --no-expired              Exclude expired keys
+
+    FORMAT_OPTIONS ('print'):
+            -a, --aux-val <FMT>           %f=Auxiliary-Field, %v=Auxiliary-Value (Default: "")
+            -k, --key <FMT>               %d=Db %k=Key %v=Value %t=Type %e=Expiry %r=LRU %f=LFU %i=Items
+                                          (Default: "%d,%k,%v,%t,%e,%i")
+            -o, --output <FILE>           Specify the output file. If not specified, output to stdout
     
     FORMAT_OPTIONS ('json'):
             -i, --include <EXTRAS>        To include: {aux-val|func|stream-meta}

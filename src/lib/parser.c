@@ -164,6 +164,7 @@ static RdbStatus finalizeConfig(RdbParser *p, int isParseFromBuff);
 static RdbStatus parserMainLoop(RdbParser *p);
 
 /*** misc ***/
+static inline RdbDataType getDataType(int opcode);
 static RdbHandlers *createHandlersCommon(RdbParser *p, void *userData, RdbFreeFunc f, RdbHandlersLevel level);
 static void loggerCbDefault(RdbLogLevel l, const char *msg);
 static inline RdbStatus updateStateAfterParse(RdbParser *p, RdbStatus status);
@@ -599,6 +600,50 @@ _LIBRDB_API int RDB_getMaxSuppportRdbVersion(void) {
 }
 
 /*** various functions ***/
+
+static inline RdbDataType getDataType(int opcode) {
+    switch (opcode) {
+        case RDB_TYPE_STRING:
+            return RDB_DATA_TYPE_STRING;
+        case RDB_TYPE_LIST:
+        case RDB_TYPE_LIST_ZIPLIST:
+        case RDB_TYPE_LIST_QUICKLIST:
+        case RDB_TYPE_LIST_QUICKLIST_2:
+            return RDB_DATA_TYPE_LIST;
+
+        case RDB_TYPE_SET:
+        case RDB_TYPE_SET_INTSET:
+        case RDB_TYPE_SET_LISTPACK:
+            return RDB_DATA_TYPE_SET;
+
+        case RDB_TYPE_ZSET:
+        case RDB_TYPE_ZSET_2:
+        case RDB_TYPE_ZSET_ZIPLIST:
+        case RDB_TYPE_ZSET_LISTPACK:
+            return RDB_DATA_TYPE_ZSET;
+
+        case RDB_TYPE_HASH:
+        case RDB_TYPE_HASH_METADATA_PRE_GA:
+        case RDB_TYPE_HASH_METADATA:
+        case RDB_TYPE_HASH_ZIPMAP:
+        case RDB_TYPE_HASH_ZIPLIST:
+        case RDB_TYPE_HASH_LISTPACK:
+        case RDB_TYPE_HASH_LISTPACK_EX_PRE_GA:
+        case RDB_TYPE_HASH_LISTPACK_EX:
+            return RDB_DATA_TYPE_HASH;
+
+        case RDB_TYPE_MODULE_2:
+        case RDB_OPCODE_MODULE_AUX:
+            return RDB_DATA_TYPE_MODULE;
+
+        case RDB_TYPE_STREAM_LISTPACKS:
+        case RDB_TYPE_STREAM_LISTPACKS_2:
+        case RDB_TYPE_STREAM_LISTPACKS_3:
+            return RDB_DATA_TYPE_STREAM;
+        default:
+            return RDB_DATA_TYPE_MAX;
+    }
+}
 
 static uint64_t dummyCrcFunc(uint64_t crc, const unsigned char *s, uint64_t l) {
     UNUSED(crc, s, l);
@@ -1389,6 +1434,7 @@ RdbStatus elementNewKey(RdbParser *p) {
     /*** ENTER SAFE STATE ***/
 
     p->elmCtx.key.info.opcode = p->currOpcode; /* tell cb what is current opcode */
+    p->elmCtx.key.info.dataType = getDataType(p->currOpcode);
 
     registerAppBulkForNextCb(p, binfoKey);
     CALL_HANDLERS_CB(p, NOP, p->elmCtx.key.handleByLevel, common.handleNewKey, binfoKey->ref, &p->elmCtx.key.info);

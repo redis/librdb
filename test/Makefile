@@ -19,7 +19,7 @@ WARNS       = -Wall -Wextra -pedantic -Werror -Wno-unused-function
 
 OPTIMIZATION?=-O0
 
-CFLAGS      = -fPIC $(OPTIMIZATION) $(STD) $(STACK) $(WARNS)
+CFLAGS      = -D_DEFAULT_SOURCE -fPIC $(OPTIMIZATION) $(STD) $(STACK) $(WARNS)
 DEBUG       = -g3 -DDEBUG=1
 LIBS        = -l cmocka -L /usr/lib -L $(LIB_DIR) -l $(LIB_NAME) -l $(LIB_NAME_EXT) -l:$(LIBHIREDIS)
 LIBS_STATIC = -l cmocka -L /usr/lib -L $(LIB_DIR) -l:lib$(LIB_NAME_EXT).a -l:$(LIBHIREDIS)

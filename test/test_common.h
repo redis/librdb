@@ -36,7 +36,7 @@ typedef enum MatchType {
 } MatchType;
 
 /* system() commands */
-void runSystemCmd(const char *cmdFormat, ...);
+char *runSystemCmd(const char *cmdFormat, ...);
 
 /* assert */
 void assert_json_equal(const char *f1, const char *f2, int ignoreListOrder);
