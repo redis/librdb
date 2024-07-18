@@ -17,6 +17,7 @@ FILE* logfile = NULL;
 /* common options to all FORMATTERS */
 typedef struct Options {
     const char *logfilePath;
+    int progressMb;  /* print progress every <progressMb> MB. Set to 0 if disabled */
     RdbRes (*formatFunc)(RdbParser *p, int argc, char **argv);
 } Options;
 
@@ -100,6 +101,7 @@ static void printUsage(int shortUsage) {
     printf("Usage: rdb-cli /path/to/dump.rdb [OPTIONS] {print|json|resp|redis} [FORMAT_OPTIONS]\n");
     printf("OPTIONS:\n");
     printf("\t-l, --log-file <PATH>         Path to the log file or stdout (Default: './rdb-cli.log')\n");
+    printf("\t-s, --show-progress <INT>     Show progress after every <INT> megabytes processed\n");
     printf("\t-k, --key <REGEX>             Include only keys that match REGEX\n");
     printf("\t-K  --no-key <REGEX>          Exclude all keys that match REGEX\n");
     printf("\t-t, --type <TYPE>             Include only selected TYPE {str|list|set|zset|hash|module|func}\n");
@@ -350,6 +352,7 @@ int readCommonOptions(RdbParser *p, int argc, char* argv[], Options *options, in
     int at;
 
     /* default */
+    options->progressMb = 0;
     options->logfilePath = LOG_FILE_PATH_DEF;
     options->formatFunc = formatJson;
 
@@ -358,6 +361,9 @@ int readCommonOptions(RdbParser *p, int argc, char* argv[], Options *options, in
         char *opt = argv[at];
 
         if (getOptArg(argc, argv, &at, "-l", "--log-file", NULL, &(options->logfilePath)))
+            continue;
+
+        if (getOptArgVal(argc, argv, &at, "-s", "--show-progress", NULL, &options->progressMb, 0, INT_MAX))
             continue;
 
         if (getOptArg(argc, argv, &at, "-k", "--key", NULL, &keyFilter)) {
@@ -481,7 +487,22 @@ int main(int argc, char **argv)
     /* now that the formatter got registered, attach filters */
     readCommonOptions(parser, argc, argv, &options, 1);
 
-    while ((status = RDB_parse(parser)) == RDB_STATUS_WAIT_MORE_DATA);
+    /* If requested to print progress */
+    if (options.progressMb) {
+        RDB_setPauseInterval(parser, options.progressMb * 1024 * 1024);
+        while (1) {
+            status = RDB_parse(parser);
+            if (status == RDB_STATUS_WAIT_MORE_DATA)
+                continue;
+            else if (status == RDB_STATUS_PAUSED)
+                printf("... Processed %zuMBytes ...\n",
+                       RDB_getBytesProcessed(parser) / (1024 * 1024));
+            else
+                break;
+        }
+    } else {
+        while ((status = RDB_parse(parser)) == RDB_STATUS_WAIT_MORE_DATA);
+    }
 
     if (status != RDB_STATUS_OK)
         return RDB_getErrorCode(parser);
