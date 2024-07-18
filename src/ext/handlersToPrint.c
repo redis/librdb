@@ -29,7 +29,7 @@ struct RdbxToPrint {
 };
 
 static void deleteRdbToPrintCtx(RdbParser *p, void *data) {
-    RdbxToPrint *ctx = (RdbxToPrint *) data;
+    RdbxToPrint *ctx = data;
 
     RDB_bulkCopyFree(p, ctx->keyCtx.key);
 
@@ -52,7 +52,8 @@ static RdbxToPrint *initRdbToPrintCtx(RdbParser *p, const char *auxFmt,
         outFilename = _STDOUT_STR;
     } else if (!(f = fopen(outFilename, "w"))) {
         RDB_reportError(p, RDB_ERR_FAILED_OPEN_FILE,
-                        "HandlersRdbToPrint: Failed to open file. errno=%d: %s", errno, strerror(errno));
+                        "HandlersRdbToPrint: Failed to open file `%s`. errno=%d: %s",
+                        outFilename, errno, strerror(errno));
         return NULL;
     }
 
@@ -70,8 +71,8 @@ static RdbxToPrint *initRdbToPrintCtx(RdbParser *p, const char *auxFmt,
 }
 
 static void outputPlainEscaping(RdbxToPrint *ctx, char *p, size_t len) {
-    while(len--) {
-        switch(*p) {
+    while (len--) {
+        switch (*p) {
             case '\\':
             case '"':
                 fprintf(ctx->outfile, "\\%c", *p); break;

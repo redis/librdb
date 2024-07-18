@@ -1,3 +1,6 @@
+/* This file tests rdb-cli. Additionally, it also tests the 'print' formatter,
+ * which does not have its own separate test file. */
+
 #include <string.h>
 #include <unistd.h>
 #include "test_common.h"
@@ -74,26 +77,29 @@ static void test_rdb_cli_resp_to_redis(void **state) {
 
 static void test_rdb_cli_filter_db(void **state) {
     UNUSED(state);
-    char *output;
+
     /* -d/--dbnum 0 (found x but not y or z) */
-    output =  runSystemCmd(" $RDB_CLI_CMD ./test/dumps/multiple_dbs.rdb -d 0 print -k \"%%k\" | sort");
-    assert_string_equal(output, "x\n");
+    assert_string_equal(
+        runSystemCmd(" $RDB_CLI_CMD ./test/dumps/multiple_dbs.rdb -d 0 print -k \"%%k\" | sort"),
+        "x\n");
 
     /* -D/--no-dbnum 0 (found y and z but not x) */
-    output = runSystemCmd(" $RDB_CLI_CMD ./test/dumps/multiple_dbs.rdb --no-dbnum 0 print -k \"%%k\" | sort");
-    assert_string_equal(output, "y\nz\n");
+    assert_string_equal(
+        runSystemCmd(" $RDB_CLI_CMD ./test/dumps/multiple_dbs.rdb --no-dbnum 0 print -k \"%%k\" | sort"),
+        "y\nz\n");
 }
 
 static void test_rdb_cli_filter_key(void **state) {
-    char *output;
     UNUSED(state);
     /* -k/--key (found string2 but not mylist1 or lzf_compressed) */
-    output = runSystemCmd(" $RDB_CLI_CMD ./test/dumps/multiple_lists_strings.rdb -k string2 print -k \"%%k\" | sort");
-    assert_string_equal(output, "string2\n");
+    assert_string_equal(
+        runSystemCmd(" $RDB_CLI_CMD ./test/dumps/multiple_lists_strings.rdb -k string2 print -k \"%%k\" | sort"),
+        "string2\n");
 
     /* -K/--no-key (found mylist1 or lzf_compressed but not string2) */
-    output = runSystemCmd(" $RDB_CLI_CMD ./test/dumps/multiple_lists_strings.rdb -K string2 print -k \"%%k\" | sort");
-    assert_string_equal(output, "lzf_compressed\nmylist1\nmylist2\nmylist3\nstring1\n");
+    assert_string_equal(
+        runSystemCmd(" $RDB_CLI_CMD ./test/dumps/multiple_lists_strings.rdb -K string2 print -k \"%%k\" | sort"),
+        "lzf_compressed\nmylist1\nmylist2\nmylist3\nstring1\n");
 }
 
 static void test_rdb_cli_filter_invalid_input(void **state) {
@@ -104,55 +110,68 @@ static void test_rdb_cli_filter_invalid_input(void **state) {
 
 static void test_rdb_cli_filter_type(void **state) {
     UNUSED(state);
-    char *output;
-    /* -t/--type */
-    output = runSystemCmd(" $RDB_CLI_CMD ./test/dumps/multiple_lists_strings.rdb --type str print -k \"%%k\" | sort");
-    assert_string_equal(output, "lzf_compressed\nstring1\nstring2\n");
 
-    output = runSystemCmd(" $RDB_CLI_CMD ./test/dumps/multiple_lists_strings.rdb -t str print -k \"%%k\" | sort");
-    assert_string_equal(output, "lzf_compressed\nstring1\nstring2\n");
+    /* -t/--type */
+    assert_string_equal(
+        runSystemCmd(" $RDB_CLI_CMD ./test/dumps/multiple_lists_strings.rdb --type str print -k \"%%k\" | sort"),
+        "lzf_compressed\nstring1\nstring2\n");
+
+    assert_string_equal(
+        runSystemCmd(" $RDB_CLI_CMD ./test/dumps/multiple_lists_strings.rdb -t str print -k \"%%k\" | sort"),
+        "lzf_compressed\nstring1\nstring2\n");
 
     /* -T/--no-type */
-    output = runSystemCmd(" $RDB_CLI_CMD ./test/dumps/multiple_lists_strings.rdb --no-type str print -k \"%%k\" | sort");
-    assert_string_equal(output, "mylist1\nmylist2\nmylist3\n");
+    assert_string_equal(
+        runSystemCmd(" $RDB_CLI_CMD ./test/dumps/multiple_lists_strings.rdb --no-type str print -k \"%%k\" | sort"),
+        "mylist1\nmylist2\nmylist3\n");
 
-    output = runSystemCmd(" $RDB_CLI_CMD ./test/dumps/multiple_lists_strings.rdb -T str print -k \"%%k\" | sort");
-    assert_string_equal(output, "mylist1\nmylist2\nmylist3\n");
+    assert_string_equal(
+        runSystemCmd(" $RDB_CLI_CMD ./test/dumps/multiple_lists_strings.rdb -T str print -k \"%%k\" | sort"),
+        "mylist1\nmylist2\nmylist3\n");
 }
 
 static void test_rdb_cli_filter_expire(void **state) {
     UNUSED(state);
-    char *output;
     sendRedisCmd("SET persistKey STAM", REDIS_REPLY_STATUS, NULL);
     sendRedisCmd("SET volatileKey XXX", REDIS_REPLY_STATUS, NULL);
     sendRedisCmd("HSET persistHash f1 v1", REDIS_REPLY_INTEGER, "1");
     sendRedisCmd("SAVE", REDIS_REPLY_STATUS, NULL);
     sendRedisCmd("PEXPIRE volatileKey 10", REDIS_REPLY_INTEGER, "1");
     sendRedisCmd("SAVE", REDIS_REPLY_STATUS, NULL);
-    runSystemCmd("cp %s %s > /dev/null", TMP_FOLDER("dump.rdb"), TMP_FOLDER("test_rdb_cli_print.rdb"));
+    runSystemCmd("cp %s %s > /dev/null", TMP_FOLDER("dump.rdb"), TMP_FOLDER("with_expires.rdb"));
     usleep(20000); /*20ms*/
-    output = runSystemCmd("$RDB_CLI_CMD %s print -k \"%%k\" | sort", TMP_FOLDER("test_rdb_cli_print.rdb"));
-    assert_string_equal(output, "persistHash\npersistKey\nvolatileKey\n");
-    output = runSystemCmd("$RDB_CLI_CMD %s -e print -k \"%%k\" | sort", TMP_FOLDER("test_rdb_cli_print.rdb"));
-    assert_string_equal(output, "volatileKey\n");
-    output = runSystemCmd("$RDB_CLI_CMD %s -E print | sort", TMP_FOLDER("test_rdb_cli_print.rdb"));
-    assert_string_equal(output, "0,persistHash,{...},hash,-1,1\n0,persistKey,STAM,string,-1,0\n");
+
+    assert_string_equal(
+        runSystemCmd("$RDB_CLI_CMD %s print -k \"%%k\" | sort", TMP_FOLDER("with_expires.rdb")),
+        "persistHash\npersistKey\nvolatileKey\n");
+
+    assert_string_equal(
+        runSystemCmd("$RDB_CLI_CMD %s -e print -k \"%%k\" | sort", TMP_FOLDER("with_expires.rdb")),
+        "volatileKey\n");
+
+    assert_string_equal(
+        runSystemCmd("$RDB_CLI_CMD %s -E print | sort", TMP_FOLDER("with_expires.rdb")),
+        "0,persistHash,{...},hash,-1,1\n0,persistKey,STAM,string,-1,0\n");
 }
 
 static void test_rdb_cli_filter_mix(void **state) {
     UNUSED(state);
-    char *output;
+
     /* Combine 'type' and 'key' filters */
-    output = runSystemCmd(" $RDB_CLI_CMD ./test/dumps/multiple_lists_strings.rdb --type str --key string print -k \"%%k\" | sort");
-    assert_string_equal(output, "string1\nstring2\n");
-    output = runSystemCmd(" $RDB_CLI_CMD ./test/dumps/multiple_lists_strings.rdb -t str -k string print -k \"%%k\" | sort");
-    assert_string_equal(output, "string1\nstring2\n");
+    assert_string_equal(
+        runSystemCmd(" $RDB_CLI_CMD ./test/dumps/multiple_lists_strings.rdb --type str --key string print -k \"%%k\" | sort"),
+        "string1\nstring2\n");
+
+    assert_string_equal(
+        runSystemCmd(" $RDB_CLI_CMD ./test/dumps/multiple_lists_strings.rdb -t str -k string print -k \"%%k\" | sort"),
+        "string1\nstring2\n");
 }
 
 static void test_rdb_cli_input_fd_reader(void **state) {
     UNUSED(state);
-    char *out = runSystemCmd(" cat ./test/dumps/single_key.rdb | $RDB_CLI_CMD - print -k \"%%k\" | sort");
-    assert_string_equal(out, "xxx\n");
+    assert_string_equal(
+        runSystemCmd(" cat ./test/dumps/single_key.rdb | $RDB_CLI_CMD - print -k \"%%k\" | sort"),
+        "xxx\n");
 }
 
 static void test_rdb_cli_redis_auth(void **state) {
@@ -186,18 +205,24 @@ static void test_rdb_cli_redis_auth(void **state) {
 
 static void test_rdb_cli_print(void **state) {
     UNUSED(state);
-    char *output;
     sendRedisCmd("SET ABC STAM", REDIS_REPLY_STATUS, NULL);
     sendRedisCmd("HSET myhash f1 v1", REDIS_REPLY_INTEGER, "1");
     sendRedisCmd("SAVE", REDIS_REPLY_STATUS, NULL);
 
     /* Check default ouput of print */
-    output = runSystemCmd("$RDB_CLI_CMD %s print | sort", TMP_FOLDER("dump.rdb"));
-    assert_string_equal(output, "0,ABC,STAM,string,-1,0\n0,myhash,{...},hash,-1,1\n");
+    assert_string_equal(
+        runSystemCmd("$RDB_CLI_CMD %s print | sort", TMP_FOLDER("dump.rdb")),
+        "0,ABC,STAM,string,-1,0\n0,myhash,{...},hash,-1,1\n");
 
-    /* Check customized output of print */
-    output = runSystemCmd("$RDB_CLI_CMD %s print -k \"%%k\" | sort", TMP_FOLDER("dump.rdb"));
-    assert_string_equal(output, "ABC\nmyhash\n");
+    /* Check customized output */
+    assert_string_equal(
+        runSystemCmd("$RDB_CLI_CMD %s print -k \"%%k\" | sort", TMP_FOLDER("dump.rdb")),
+        "ABC\nmyhash\n");
+
+    /* Check customized aux-val output */
+    assert_string_equal(
+        runSystemCmd(" $RDB_CLI_CMD ./test/dumps/multiple_dbs.rdb print -k \"\" -a \"%%f=%%v\""),
+        "redis-ver=255.255.255\nredis-bits=64\nctime=1683103535\nused-mem=967040\naof-base=0\n");
 }
 
 /*************************** group_test_rdb_cli *******************************/
