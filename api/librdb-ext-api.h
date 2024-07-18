@@ -15,6 +15,7 @@ typedef struct RdbxReaderFileDesc RdbxReaderFileDesc;
 typedef struct RdbxFilter RdbxFilter;
 typedef struct RdbxToJson RdbxToJson;
 typedef struct RdbxToResp RdbxToResp;
+typedef struct RdbxToPrint RdbxToPrint;
 typedef struct RdbxRespToRedisLoader RdbxRespToRedisLoader;
 
 /****************************************************************
@@ -94,6 +95,28 @@ _LIBRDB_API RdbxToJson *RDBX_createHandlersToJson(RdbParser *p,
                                                   RdbxToJsonConf *c);
 
 /****************************************************************
+ * Create PRINT Handlers
+ *
+ * auxFmt - Format string for auxiliary values, where:
+ *          %f = Auxiliary field name
+ *          %v = Auxiliary field value
+ * keyFmt - Format string for key details, where:
+ *          %d = Database number
+ *          %k = Key
+ *          %v = Value (If the value is a string, it will be printed as escaped string)
+ *          %t = Type
+ *          %e = Expiry
+ *          %r = LRU
+ *          %f = LFU
+ *          %i = Items
+ *
+ ****************************************************************/
+_LIBRDB_API RdbxToPrint *RDBX_createHandlersToPrint(RdbParser *p,
+                                                    const char *auxFmt,
+                                                    const char *keyFmt,
+                                                    const char *outFilename);
+
+/****************************************************************
  * Create Filter Handlers
  ****************************************************************/
 
@@ -108,6 +131,9 @@ _LIBRDB_API RdbxFilter *RDBX_createHandlersFilterType(RdbParser *p,
 _LIBRDB_API RdbxFilter *RDBX_createHandlersFilterDbNum(RdbParser *p,
                                                        int dbnum,
                                                        uint32_t exclude);
+
+_LIBRDB_API RdbxFilter *RDBX_createHandlersFilterExpired(RdbParser *p,
+                                                         uint32_t exclude);
 
 /****************************************************************
  * Create RDB to RESP Handlers

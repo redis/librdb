@@ -54,7 +54,7 @@ RdbxRespToFileWriter *RDBX_createRespToFileWriter(RdbParser *p, RdbxToResp *rdbT
     } else {
         filePtr = fopen(filePath, "wb");
         if (filePtr == NULL) {
-            RDB_reportError(p, RDB_ERR_FAILED_OPEN_FILE, "createRespWriter: Failed to open file: %s. errno:%d",
+            RDB_reportError(p, RDB_ERR_FAILED_OPEN_FILE, "createRespWriter: Failed to open file: `%s`. errno:%d",
                             filePath, errno);
             return NULL;
         }

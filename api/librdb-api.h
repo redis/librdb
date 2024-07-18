@@ -149,6 +149,7 @@ typedef struct RdbKeyInfo {
     long long lruIdle;      /* -1 if not set */
     int lfuFreq;            /* -1 if not set */
     int opcode;
+    int dataType;          /* See enum RdbDataType */
 } RdbKeyInfo;
 
 typedef struct RdbSlotInfo {

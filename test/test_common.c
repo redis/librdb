@@ -42,7 +42,9 @@ const char *getTargetRedisVersion(int *major, int *minor) {
     return redisVer;
 }
 
-void runSystemCmd(const char *cmdFormat, ...) {
+/* Run provided command and return its output. Panic on failure. */
+char *runSystemCmd(const char *cmdFormat, ...) {
+    static char output[16384];
     char cmd[2048];
     va_list args;
     static int setup = 0;
@@ -60,10 +62,19 @@ void runSystemCmd(const char *cmdFormat, ...) {
     /* remove any valgrind log file leftover from previous test */
     if (useValgrind) remove(RDB_CLI_VALGRIND_LOG_FILE);
 
-    //printf ("runSystemCmd(): %s\n", cmd);
-    int res = system(cmd);
-    if (res) {
+    FILE *fp = popen(cmd, "r");
+    if (fp == NULL) {
         printf("\nFailed to run command: %s\n", cmd);
+        assert_true(0);
+    }
+
+    /* Read the output into the buffer */
+    size_t bytesRead = fread(output, 1, sizeof(output) - 1, fp);
+    output[bytesRead] = '\0';
+
+    int res = pclose(fp);
+    if (res) {
+        printf("Failed to run command: %s\n", cmd);
         assert_true(0);
     }
 
@@ -71,6 +82,8 @@ void runSystemCmd(const char *cmdFormat, ...) {
      * log due to potential issues with '--error-exitcode=1' and pipelines ('|'). */
     if (useValgrind && strstr(cmd, "$RDB_CLI_CMD"))
         checkValgrindLog(RDB_CLI_VALGRIND_LOG_FILE);
+
+    return output;
 }
 
 char *readFile(const char *filename,  size_t *length, char *ignoredCh) {

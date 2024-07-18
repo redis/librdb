@@ -11,6 +11,7 @@ struct RdbxFilter {
 
     int regexInitialized;  /* for filter keys */
     RdbDataType type;      /* for filter types */
+    int isExpireFilter;   /* for filter expired */
     int dbnum;             /* for filter db */
 };
 
@@ -20,45 +21,6 @@ static void deleteFilterCtx(RdbParser *p, void *data) {
         regfree(&ctx->regex_compiled);
     }
     RDB_free(p, ctx);
-}
-
-/* mapping opcode to type */
-static void initOpcodeToType(RdbxFilter *ctx) {
-    memset(ctx->opToType, 0, sizeof(ctx->opToType));
-    /*string*/
-    ctx->opToType[RDB_TYPE_STRING] = RDB_DATA_TYPE_STRING;
-    /*list*/
-    ctx->opToType[RDB_TYPE_LIST] = RDB_DATA_TYPE_LIST;
-    ctx->opToType[RDB_TYPE_LIST_ZIPLIST] = RDB_DATA_TYPE_LIST;
-    ctx->opToType[RDB_TYPE_LIST_QUICKLIST] = RDB_DATA_TYPE_LIST;
-    ctx->opToType[RDB_TYPE_LIST_QUICKLIST_2] = RDB_DATA_TYPE_LIST;
-    /*set*/
-    ctx->opToType[RDB_TYPE_SET] = RDB_DATA_TYPE_SET;
-    ctx->opToType[RDB_TYPE_SET_INTSET] = RDB_DATA_TYPE_SET;
-    ctx->opToType[RDB_TYPE_SET_LISTPACK] = RDB_DATA_TYPE_SET;
-    /*zset*/
-    ctx->opToType[RDB_TYPE_ZSET] = RDB_DATA_TYPE_ZSET;
-    ctx->opToType[RDB_TYPE_ZSET_2] = RDB_DATA_TYPE_ZSET;
-    ctx->opToType[RDB_TYPE_ZSET_ZIPLIST] = RDB_DATA_TYPE_ZSET;
-    ctx->opToType[RDB_TYPE_ZSET_LISTPACK] = RDB_DATA_TYPE_ZSET;
-    /*hash*/
-    ctx->opToType[RDB_TYPE_HASH] = RDB_DATA_TYPE_HASH;
-    ctx->opToType[RDB_TYPE_HASH_METADATA_PRE_GA] = RDB_DATA_TYPE_HASH;
-    ctx->opToType[RDB_TYPE_HASH_METADATA] = RDB_DATA_TYPE_HASH;
-    ctx->opToType[RDB_TYPE_HASH_ZIPMAP] = RDB_DATA_TYPE_HASH;
-    ctx->opToType[RDB_TYPE_HASH_ZIPLIST] = RDB_DATA_TYPE_HASH;
-    ctx->opToType[RDB_TYPE_HASH_LISTPACK] = RDB_DATA_TYPE_HASH;
-    ctx->opToType[RDB_TYPE_HASH_LISTPACK_EX_PRE_GA] = RDB_DATA_TYPE_HASH;
-    ctx->opToType[RDB_TYPE_HASH_LISTPACK_EX] = RDB_DATA_TYPE_HASH;
-    /*module*/
-    ctx->opToType[RDB_TYPE_MODULE_2] = RDB_DATA_TYPE_MODULE;
-    ctx->opToType[RDB_OPCODE_MODULE_AUX] = RDB_DATA_TYPE_MODULE;
-    /*stream*/
-    ctx->opToType[RDB_TYPE_STREAM_LISTPACKS] = RDB_DATA_TYPE_STREAM;
-    ctx->opToType[RDB_TYPE_STREAM_LISTPACKS_2] = RDB_DATA_TYPE_STREAM;
-    ctx->opToType[RDB_TYPE_STREAM_LISTPACKS_3] = RDB_DATA_TYPE_STREAM;
-    /*func*/
-    ctx->opToType[RDB_OPCODE_FUNCTION2] = RDB_DATA_TYPE_FUNCTION;
 }
 
 /*** filtering BY key, type or dbnum ***/
@@ -75,10 +37,30 @@ static RdbRes filterNewKeyByRegex(RdbParser *p, void *userData, RdbBulk key, Rdb
 static RdbRes filterNewKeyByType(RdbParser *p, void *userData, RdbBulk key, RdbKeyInfo *info) {
     UNUSED(p, key);
     RdbxFilter *ctx = userData;
-    if (ctx->opToType[info->opcode] == ctx->type) /* if match */
+
+    if (info->dataType == (int) ctx->type)
         return ctx->cbReturnValue = (ctx->exclude) ? RDB_OK_DONT_PROPAGATE : RDB_OK;
     else
         return ctx->cbReturnValue = (ctx->exclude) ? RDB_OK : RDB_OK_DONT_PROPAGATE;
+}
+
+static RdbRes filterNewKeyByExpiry(RdbParser *p, void *userData, RdbBulk key, RdbKeyInfo *info) {
+    UNUSED(p, key);
+    RdbxFilter *ctx = userData;
+
+    /* if persistent key */
+    if (info->expiretime == -1)
+        return ctx->cbReturnValue = (ctx->exclude) ? RDB_OK : RDB_OK_DONT_PROPAGATE;
+
+    struct timeval te;
+    gettimeofday(&te, NULL);
+    long long milliseconds = te.tv_sec*1000LL + te.tv_usec/1000;
+
+    if (info->expiretime > milliseconds)
+        return ctx->cbReturnValue = (ctx->exclude) ? RDB_OK : RDB_OK_DONT_PROPAGATE;
+
+    return ctx->cbReturnValue = (ctx->exclude) ? RDB_OK_DONT_PROPAGATE
+                                               : RDB_OK;
 }
 
 static RdbRes filterNewDbByNumber(RdbParser *p, void *userData,  int dbnum) {
@@ -356,6 +338,7 @@ static RdbxFilter *createHandlersFilterCommon(RdbParser *p,
                                               const char *keyRegex,
                                               RdbDataType *type,
                                               int *dbnum,
+                                              int isExpireFilter,
                                               uint32_t exclude) {
     RdbRes (*handleNewKey)(RdbParser *p, void *userData, RdbBulk key, RdbKeyInfo *info) = filterNewKey;
     RdbRes (*handleNewDb)(RdbParser *p, void *userData,  int dbnum) = filterNewDb;
@@ -363,8 +346,7 @@ static RdbxFilter *createHandlersFilterCommon(RdbParser *p,
 
     if ( (ctx = RDB_alloc(p, sizeof(RdbxFilter))) == NULL)
         return NULL;
-
-    ctx->regexInitialized = 0;
+    memset(ctx, 0, sizeof(RdbxFilter));
 
     /* specific if-else init to filter regex/type/dbnum */
     if (keyRegex) {   /* filter keys by regex */
@@ -383,7 +365,9 @@ static RdbxFilter *createHandlersFilterCommon(RdbParser *p,
     } else if (type) { /* filter keys by type */
         ctx->type = *type;
         handleNewKey = filterNewKeyByType;
-        initOpcodeToType(ctx);
+    } else if (isExpireFilter) {
+        ctx->isExpireFilter = 1;
+        handleNewKey = filterNewKeyByExpiry;
     } else {  /* filter by dbnum */
         ctx->dbnum = *dbnum;
         handleNewDb = filterNewDbByNumber;
@@ -421,13 +405,17 @@ static RdbxFilter *createHandlersFilterCommon(RdbParser *p,
 /*** API ***/
 
 _LIBRDB_API RdbxFilter *RDBX_createHandlersFilterKey(RdbParser *p, const char *keyRegex, uint32_t exclude) {
-    return createHandlersFilterCommon(p, keyRegex, NULL, NULL, exclude);
+    return createHandlersFilterCommon(p, keyRegex, NULL, NULL, 0, exclude);
 }
 
 _LIBRDB_API RdbxFilter *RDBX_createHandlersFilterType(RdbParser *p, RdbDataType type, uint32_t exclude) {
-    return createHandlersFilterCommon(p, NULL, &type, NULL, exclude);
+    return createHandlersFilterCommon(p, NULL, &type, NULL, 0, exclude);
 }
 
 _LIBRDB_API RdbxFilter *RDBX_createHandlersFilterDbNum(RdbParser *p, int dbnum, uint32_t exclude) {
-    return createHandlersFilterCommon(p, NULL, NULL, &dbnum, exclude);
+    return createHandlersFilterCommon(p, NULL, NULL, &dbnum, 0, exclude);
+}
+
+_LIBRDB_API RdbxFilter *RDBX_createHandlersFilterExpired(RdbParser *p, uint32_t exclude) {
+    return createHandlersFilterCommon(p, NULL, NULL, NULL, 1, exclude);
 }

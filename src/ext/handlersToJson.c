@@ -60,8 +60,8 @@ struct RdbxToJson {
 const char *jsonMetaPrefix = "__";  /* Distinct meta from data with prefix string. */
 
 static void outputPlainEscaping(RdbxToJson *ctx, char *p, size_t len) {
-    while(len--) {
-        switch(*p) {
+    while (len--) {
+        switch (*p) {
             case '\\':
             case '"':
                 fprintf(ctx->outfile, "\\%c", *p); break;
@@ -105,7 +105,8 @@ static RdbxToJson *initRdbToJsonCtx(RdbParser *p, const char *outfilename, RdbxT
         outfilename = _STDOUT_STR;
     } else if (!(f = fopen(outfilename, "w"))) {
         RDB_reportError(p, RDB_ERR_FAILED_OPEN_FILE,
-                        "HandlersRdbToJson: Failed to open file. errno=%d: %s", errno, strerror(errno));
+                        "HandlersRdbToJson: Failed to open file `%s`. errno=%d: %s",
+                        outfilename, errno, strerror(errno));
         return NULL;
     }
 
