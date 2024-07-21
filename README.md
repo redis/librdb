@@ -199,6 +199,7 @@ destruction, or when newer block replacing old one.
     Usage: rdb-cli /path/to/dump.rdb [OPTIONS] {print|json|resp|redis} [FORMAT_OPTIONS]
     OPTIONS:
             -l, --log-file <PATH>         Path to the log file or stdout (Default: './rdb-cli.log')
+            -s, --show-progress <MBytes>  Show progress to STDOUT after every <MBytes> processed
             -k, --key <REGEX>             Include only keys that match REGEX
             -K  --no-key <REGEX>          Exclude all keys that match REGEX
             -t, --type <TYPE>             Include only selected TYPE {str|list|set|zset|hash|module|func}

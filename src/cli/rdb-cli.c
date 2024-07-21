@@ -4,6 +4,7 @@
 #include <string.h>
 #include <errno.h>
 #include <limits.h>
+#include <sys/stat.h>
 
 /* Rely only on API (and not internal parser headers) */
 #include "../../api/librdb-api.h"
@@ -17,6 +18,7 @@ FILE* logfile = NULL;
 /* common options to all FORMATTERS */
 typedef struct Options {
     const char *logfilePath;
+    int progressMb;  /* print progress every <progressMb> MB. Set to 0 if disabled */
     RdbRes (*formatFunc)(RdbParser *p, int argc, char **argv);
 } Options;
 
@@ -100,6 +102,7 @@ static void printUsage(int shortUsage) {
     printf("Usage: rdb-cli /path/to/dump.rdb [OPTIONS] {print|json|resp|redis} [FORMAT_OPTIONS]\n");
     printf("OPTIONS:\n");
     printf("\t-l, --log-file <PATH>         Path to the log file or stdout (Default: './rdb-cli.log')\n");
+    printf("\t-s, --show-progress <MBytes>  Show progress to STDOUT after every <MBytes> processed\n");
     printf("\t-k, --key <REGEX>             Include only keys that match REGEX\n");
     printf("\t-K  --no-key <REGEX>          Exclude all keys that match REGEX\n");
     printf("\t-t, --type <TYPE>             Include only selected TYPE {str|list|set|zset|hash|module|func}\n");
@@ -350,6 +353,7 @@ int readCommonOptions(RdbParser *p, int argc, char* argv[], Options *options, in
     int at;
 
     /* default */
+    options->progressMb = 0;
     options->logfilePath = LOG_FILE_PATH_DEF;
     options->formatFunc = formatJson;
 
@@ -358,6 +362,9 @@ int readCommonOptions(RdbParser *p, int argc, char* argv[], Options *options, in
         char *opt = argv[at];
 
         if (getOptArg(argc, argv, &at, "-l", "--log-file", NULL, &(options->logfilePath)))
+            continue;
+
+        if (getOptArgVal(argc, argv, &at, "-s", "--show-progress", NULL, &options->progressMb, 0, INT_MAX))
             continue;
 
         if (getOptArg(argc, argv, &at, "-k", "--key", NULL, &keyFilter)) {
@@ -427,6 +434,7 @@ void closeLogFileOnExit() {
 
 int main(int argc, char **argv)
 {
+    size_t fileSize = 0;
     Options options;
     RdbStatus status;
     int at;
@@ -470,6 +478,15 @@ int main(int argc, char **argv)
     } else {
         if (RDBX_createReaderFile(parser, input /*file*/) == NULL)
             return RDB_ERR_GENERAL;
+
+        /* If input is a file, then get its size */
+        struct stat st;
+        if (stat(input, &st) == 0) {
+            fileSize = st.st_size;
+        } else {
+            printf("Error getting file size: %s\n", strerror(errno));
+            return RDB_ERR_GENERAL;
+        }
     }
 
     if (RDB_OK != (res = options.formatFunc(parser, argc - at, argv + at)))
@@ -481,7 +498,29 @@ int main(int argc, char **argv)
     /* now that the formatter got registered, attach filters */
     readCommonOptions(parser, argc, argv, &options, 1);
 
-    while ((status = RDB_parse(parser)) == RDB_STATUS_WAIT_MORE_DATA);
+    /* If requested to print progress */
+    if (options.progressMb) {
+        RDB_setPauseInterval(parser, options.progressMb * 1024 * 1024);
+        while (1) {
+            status = RDB_parse(parser);
+            if (status == RDB_STATUS_WAIT_MORE_DATA)
+                continue;
+            else if (status == RDB_STATUS_PAUSED) {
+                size_t bytes = RDB_getBytesProcessed(parser);
+                /* If file size is known, print percentage */
+                if (fileSize != 0)
+                    printf("... Processed %zuMBytes (%.2f%%) ...\n",
+                           bytes / (1024 * 1024), (bytes * 100.0) / fileSize);
+                else
+                    printf("... Processed %zuMBytes ...\n", bytes / (1024 * 1024));
+                continue;
+            }
+
+            break; /* RDB_STATUS_ERROR */
+        }
+    } else {
+        while ((status = RDB_parse(parser)) == RDB_STATUS_WAIT_MORE_DATA);
+    }
 
     if (status != RDB_STATUS_OK)
         return RDB_getErrorCode(parser);
