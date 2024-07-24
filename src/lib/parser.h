@@ -211,6 +211,7 @@ typedef struct {
 typedef struct {
     uint64_t numFields;
     uint64_t visitingField;
+    int64_t hexpireMinMsec;
 } ElementHashCtx;
 
 typedef struct {

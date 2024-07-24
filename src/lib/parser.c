@@ -1742,12 +1742,8 @@ RdbStatus elementHash(RdbParser *p) {
 
     switch (ctx->state) {
         case ST_HASH_HEADER:
-            if (p->currOpcode == RDB_TYPE_HASH_METADATA) {
-                /* digest min HFE expiration time. No need to pass it to handlers
-                   as each field will report its own expiration time anyway */
-                BulkInfo *binfoExpire;
-                IF_NOT_OK_RETURN(rdbLoad(p, 8, RQ_ALLOC, NULL, &binfoExpire));
-            }
+            if (p->currOpcode == RDB_TYPE_HASH_METADATA)
+                IF_NOT_OK_RETURN(rdbLoadMillisecTime(p, &ctx->hash.hexpireMinMsec));
 
             IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &(ctx->hash.numFields), NULL, NULL));
 
@@ -1762,9 +1758,24 @@ RdbStatus elementHash(RdbParser *p) {
             BulkInfo *binfoField, *binfoValue;
 
             while(ctx->hash.visitingField < ctx->hash.numFields) {
-                uint64_t expireAt = 0;
-                if (p->parsingElement == PE_HASH_META)
-                    IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &expireAt, NULL, NULL));
+                uint64_t val, expireAt = -1;
+
+                /* If parsing a hash with metadata, read field's expiration time
+                 * (Applicable for opcodes RDB_TYPE_HASH_METADATA and
+                 * RDB_TYPE_HASH_METADATA_PRE_GA) */
+                if (p->parsingElement == PE_HASH_META) {
+                    IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &val, NULL, NULL));
+                    if (val != 0) {
+                        if (p->currOpcode == RDB_TYPE_HASH_METADATA) {
+                            /* Value is relative to minExpire (with +1 to avoid
+                             * 0 which indicates no expiration) */
+                            expireAt = val + ctx->hash.hexpireMinMsec - 1;
+                        } else {
+                            /* absolute expiration time */
+                            expireAt = val;
+                        }
+                    }
+                }
                 IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC_APP_BULK, NULL, &binfoField));
                 IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC_APP_BULK, NULL, &binfoValue));
 
@@ -1772,17 +1783,18 @@ RdbStatus elementHash(RdbParser *p) {
 
                 registerAppBulkForNextCb(p, binfoField);
                 registerAppBulkForNextCb(p, binfoValue);
+
                 if (p->elmCtx.key.handleByLevel == RDB_LEVEL_STRUCT) {
                     CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_STRUCT, rdbStruct.handleHashPlain,
                                      binfoField->ref,
                                      binfoValue->ref,
-                                     (expireAt) ? (int64_t) expireAt : -1);
+                                     expireAt);
                 }
                 else {
                     CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_DATA, rdbData.handleHashField,
                                      binfoField->ref,
                                      binfoValue->ref,
-                                     (expireAt) ? (int64_t) expireAt : -1);
+                                     expireAt);
                 }
                 ++ctx->hash.visitingField;
 
