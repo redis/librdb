@@ -5,6 +5,12 @@
 
 #define STR_AND_SIZE(str) str, (sizeof(str)-1)
 
+const char *ignoreThisRespErr = "ERR Oopsie Daisy!";
+int onRespErrorCb(void *callerCtx, char *msg) {
+    UNUSED(callerCtx);
+    return (strcmp(msg, ignoreThisRespErr)==0) ? 0 /*mask*/ : 1 /*propagate*/;
+}
+
 static void test_resp_reader_common(RespReaderCtx *ctx,
                                     char *payload,
                                     int payloadSize,
@@ -14,7 +20,10 @@ static void test_resp_reader_common(RespReaderCtx *ctx,
 {
     RespReaderCtx alterCtx;
     if (!ctx) ctx = &alterCtx;
-    if (initCtx) readRespInit(ctx);
+    if (initCtx) {
+        readRespInit(ctx);
+        setErrorCb(ctx, NULL, onRespErrorCb);
+    }
 
     RespRes res = readRespReplies(ctx, payload, payloadSize);
     assert_int_equal(res, expRes);
@@ -162,6 +171,14 @@ static void test_reply_array_misc_data_types (void **state) {
                             0, RESP_REPLY_OK, 1);
 }
 
+/* Masked error should be counted as valid response */
+static void test_masked_errors (void **state) {
+    UNUSED(state);
+    /* The function test_resp_reader_common mask "-ERR Oopsie Daisy!" */
+    test_resp_reader_common(NULL, STR_AND_SIZE("$5\r\nmylib\r\n$4\r\nm\rib\r\n-ERR Oopsie Daisy!\r\n$8\r\nm123ylib\r\n"),
+                            1, RESP_REPLY_OK, 4);
+}
+
 /*************************** group_test_resp_reader *******************************/
 int group_test_resp_reader(void) {
     const struct CMUnitTest tests[] = {
@@ -180,6 +197,7 @@ int group_test_resp_reader(void) {
             cmocka_unit_test(test_three_bulks),
             cmocka_unit_test(test_mixture_and_fragmented),
             cmocka_unit_test(test_reply_array_misc_data_types),
+            cmocka_unit_test(test_masked_errors),
     };
 
     return cmocka_run_group_tests(tests, NULL, NULL);

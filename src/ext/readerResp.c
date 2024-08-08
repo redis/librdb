@@ -132,7 +132,11 @@ static RespRes readRespReplyError(RespReaderCtx *ctx, RespReplyBuff *buffInfo) {
         else
             ctx->errorMsg[ctx->errorMsgLen - 1] = '\0';
 
-        res = RESP_REPLY_ERR;
+        /* Report the error. cb return 1 to propagate. 0 to mask */
+        if ((ctx->errCb) && (ctx->errCb(ctx->errCbCtx, ctx->errorMsg) == 0))
+            return RESP_REPLY_OK;
+
+        return RESP_REPLY_ERR;
     }
 
     return res;
@@ -450,9 +454,12 @@ static RespRes readRespReply(RespReaderCtx *ctx, RespReplyBuff *buffInfo) {
 /*** non-static functions (public) ***/
 
 void readRespInit(RespReaderCtx *ctx) {
-    ctx->type = 0;
-    ctx->errorMsgLen = 0;
-    ctx->countReplies = 0;
+    memset(ctx, 0, sizeof(RespReaderCtx));
+}
+
+void setErrorCb(RespReaderCtx *respReaderCtx, void *errorCbCtx, OnRespErrorCb cb) {
+    respReaderCtx->errCbCtx = errorCbCtx;
+    respReaderCtx->errCb = cb;
 }
 
 RespRes readRespReplies(RespReaderCtx *ctx, const char *buff, int buffLen) {
