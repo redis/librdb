@@ -5,12 +5,6 @@
 
 #define STR_AND_SIZE(str) str, (sizeof(str)-1)
 
-const char *ignoreThisRespErr = "ERR Oopsie Daisy!";
-int onRespErrorCb(void *callerCtx, char *msg) {
-    UNUSED(callerCtx);
-    return (strcmp(msg, ignoreThisRespErr)==0) ? 0 /*mask*/ : 1 /*propagate*/;
-}
-
 static void test_resp_reader_common(RespReaderCtx *ctx,
                                     char *payload,
                                     int payloadSize,
@@ -20,10 +14,7 @@ static void test_resp_reader_common(RespReaderCtx *ctx,
 {
     RespReaderCtx alterCtx;
     if (!ctx) ctx = &alterCtx;
-    if (initCtx) {
-        readRespInit(ctx);
-        setErrorCb(ctx, NULL, onRespErrorCb);
-    }
+    if (initCtx) readRespInit(ctx);
 
     RespRes res = readRespReplies(ctx, payload, payloadSize);
     assert_int_equal(res, expRes);
@@ -172,11 +163,23 @@ static void test_reply_array_misc_data_types (void **state) {
 }
 
 /* Masked error should be counted as valid response */
+const char *ignoreThisRespErr = "ERR Oopsie Daisy!";
+int onRespErrorCb(void *callerCtx, char *msg) {
+    UNUSED(callerCtx);
+    return (strcmp(msg, ignoreThisRespErr)==0) ? 0 /*mask*/ : 1 /*propagate*/;
+}
 static void test_masked_errors (void **state) {
     UNUSED(state);
-    /* The function test_resp_reader_common mask "-ERR Oopsie Daisy!" */
-    test_resp_reader_common(NULL, STR_AND_SIZE("$5\r\nmylib\r\n$4\r\nm\rib\r\n-ERR Oopsie Daisy!\r\n$8\r\nm123ylib\r\n"),
-                            1, RESP_REPLY_OK, 4);
+    /* Ignore "ERR Oopsie Daisy" */
+    char *payload = "$5\r\nmylib\r\n$4\r\nm\rib\r\n-ERR Oopsie Daisy!\r\n$8\r\n"
+                    "m123ylib\r\n-ERR reported error\r\n-ERR never reached\r\n";
+    RespReaderCtx ctx;
+    readRespInit(&ctx);
+    setErrorCb(&ctx, NULL, onRespErrorCb);
+    RespRes res = readRespReplies(&ctx, payload, strlen(payload));
+    assert_int_equal(res, RESP_REPLY_ERR);
+    assert_int_equal(ctx.countReplies, 4);
+    assert_string_equal(ctx.errorMsg, "ERR reported error");
 }
 
 /*************************** group_test_resp_reader *******************************/
