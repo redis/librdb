@@ -1106,7 +1106,7 @@ static inline RdbStatus cbHandleEnd(RdbParser *p) {
 
     /* report entire/leftover to cb handlers */
     for(int j = 0 ; j <= ctx->curBulkIndex ; ++j)
-        cbHandleFrag(p, ctx->bulkArray + j);
+        IF_NOT_OK_RETURN(cbHandleFrag(p, ctx->bulkArray + j));
 
     aggFlushBulks(p);
 

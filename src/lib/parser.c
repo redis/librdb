@@ -80,7 +80,7 @@ struct ParsingElementInfo peInfo[PE_MAX] = {
         [PE_FUNCTION]         = {elementFunction, "elementFunction", "Parsing Function"},
         /* module */
         [PE_MODULE]           = {elementModule, "elementModule", "Parsing silently Module element"},
-        [PE_MODULE_AUX]       = {elementModule, "elementModule", "Parsing silently Module Auxiliary data"},
+        [PE_MODULE_AUX]       = {elementModule, "elementModule(aux)", "Parsing silently Module Auxiliary data"},
         /* stream */
         [PE_STREAM_LP]        = {elementStreamLP, "elementStreamLP", "Parsing stream Listpack"},
 
