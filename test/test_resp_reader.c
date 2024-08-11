@@ -162,6 +162,26 @@ static void test_reply_array_misc_data_types (void **state) {
                             0, RESP_REPLY_OK, 1);
 }
 
+/* Masked error should be counted as valid response */
+const char *ignoreThisRespErr = "ERR Oopsie Daisy!";
+int onRespErrorCb(void *callerCtx, char *msg) {
+    UNUSED(callerCtx);
+    return (strcmp(msg, ignoreThisRespErr)==0) ? 0 /*mask*/ : 1 /*propagate*/;
+}
+static void test_masked_errors (void **state) {
+    UNUSED(state);
+    /* Ignore "ERR Oopsie Daisy" */
+    char *payload = "$5\r\nmylib\r\n$4\r\nm\rib\r\n-ERR Oopsie Daisy!\r\n$8\r\n"
+                    "m123ylib\r\n-ERR reported error\r\n-ERR never reached\r\n";
+    RespReaderCtx ctx;
+    readRespInit(&ctx);
+    setErrorCb(&ctx, NULL, onRespErrorCb);
+    RespRes res = readRespReplies(&ctx, payload, strlen(payload));
+    assert_int_equal(res, RESP_REPLY_ERR);
+    assert_int_equal(ctx.countReplies, 4);
+    assert_string_equal(ctx.errorMsg, "ERR reported error");
+}
+
 /*************************** group_test_resp_reader *******************************/
 int group_test_resp_reader(void) {
     const struct CMUnitTest tests[] = {
@@ -180,6 +200,7 @@ int group_test_resp_reader(void) {
             cmocka_unit_test(test_three_bulks),
             cmocka_unit_test(test_mixture_and_fragmented),
             cmocka_unit_test(test_reply_array_misc_data_types),
+            cmocka_unit_test(test_masked_errors),
     };
 
     return cmocka_run_group_tests(tests, NULL, NULL);

@@ -50,6 +50,7 @@ typedef enum {
     RDBX_ERR_RESP2REDIS_FAILED_WRITE,
     RDBX_ERR_RESP2REDIS_CONN_CLOSE,
     RDBX_ERR_RESP2REDIS_MAX_RETRIES,
+    RDBX_ERR_RESP2REDIS_SET_TIMEOUT,
 } RdbxRes;
 
 /****************************************************************
@@ -198,14 +199,21 @@ _LIBRDB_API RdbxToResp *RDBX_createHandlersToResp(RdbParser *, RdbxToRespConf *)
  *           <user-defined-writer>
  ****************************************************************/
 
-/* On start command pass command info. NULL otherwise.  */
+/* As streaming RESP protocol, when starting a new command, provide details
+ * about the command. Otherwise, pass NULL. This information will be used to log
+ * and report the command in case of a failure from Redis server. */
 typedef struct RdbxRespWriterStartCmd {
     /* Redis Command name (Ex: "SET", "RESTORE"). Owned by the caller. It is
      * constant static string and Valid for ref behind the duration of the call. */
     const char *cmd;
+
     /* If key available as part of command. Else empty string.
      * Owned by the caller. */
     const char *key;
+
+    /* On restore command, size of serialized data. Otherwise, set to 0. */
+    size_t restoreSize;
+
 } RdbxRespWriterStartCmd;
 
 typedef struct RdbxRespWriter {
