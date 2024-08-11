@@ -199,7 +199,9 @@ _LIBRDB_API RdbxToResp *RDBX_createHandlersToResp(RdbParser *, RdbxToRespConf *)
  *           <user-defined-writer>
  ****************************************************************/
 
-/* On start command pass command info. NULL otherwise.  */
+/* As streaming RESP protocol, when starting a new command, provide details
+ * about the command. Otherwise, pass NULL. This information will be used to log
+ * and report the command in case of a failure from Redis server. */
 typedef struct RdbxRespWriterStartCmd {
     /* Redis Command name (Ex: "SET", "RESTORE"). Owned by the caller. It is
      * constant static string and Valid for ref behind the duration of the call. */

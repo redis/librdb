@@ -243,10 +243,7 @@ static RdbRes redisAuthCustomized(RdbxRespToRedisLoader *ctx, RdbxRedisAuth *aut
 
     char prefix[32];
 
-    RdbxRespWriterStartCmd startCmd;
-    startCmd.cmd = "<AUTH_CUSTOMIZED_CMD>";
-    startCmd.key = "";
-    startCmd.restoreSize = 0;
+    RdbxRespWriterStartCmd startCmd = {"<AUTH_CUSTOMIZED_CMD>", "", 0};
 
     /* allocate iovec (2 for header and trailer. 3 for each argument) */
     struct iovec *iov = (struct iovec *)malloc((auth->cmd.argc * 3 + 2) * sizeof(struct iovec));
@@ -293,10 +290,7 @@ static RdbRes redisAuth(RdbxRespToRedisLoader *ctx, RdbxRedisAuth *auth) {
 
     /* AUTH [username] password */
 
-    RdbxRespWriterStartCmd startCmd;
-    startCmd.cmd = "AUTH";
-    startCmd.key = "";
-    startCmd.restoreSize = 0;
+    RdbxRespWriterStartCmd startCmd = {"AUTH", "", 0};
 
     struct iovec iov[10];
     if (auth->user) {
