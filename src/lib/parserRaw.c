@@ -729,7 +729,7 @@ RdbStatus elementRawModule(RdbParser *p) {
                 IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &ma->when, NULL, NULL));
                 if (unlikely(ma->when_opcode != RDB_MODULE_OPCODE_UINT)) {
                     RDB_reportError(p, RDB_ERR_MODULE_INVALID_WHEN_OPCODE,
-                                    "elementRawModule() : Invalid when opcode: %ld.", ma->when_opcode);
+                                    "elementRawModule() : Invalid when opcode: %" PRIu64 ".", ma->when_opcode);
                     return RDB_STATUS_ERROR;
                 }
                 /*** ENTER SAFE STATE ***/
@@ -1214,7 +1214,7 @@ static RdbStatus aggMakeRoom(RdbParser *p, size_t numBytesRq) {
     size_t freeRoomLeft = currBuff->len - currBuff->written;
 
     if (unlikely(p->maxRawSize < ctx->totalSize + numBytesRq)) {
-        RDB_reportError(p, RDB_ERR_MAX_RAW_LEN_EXCEEDED_FOR_KEY, "Maximum raw length exceeded for key (len=%lu)",
+        RDB_reportError(p, RDB_ERR_MAX_RAW_LEN_EXCEEDED_FOR_KEY, "Maximum raw length exceeded for key (len=%zu)",
                         ctx->totalSize + numBytesRq);
         return RDB_STATUS_ERROR;
     }
@@ -1287,7 +1287,7 @@ void printAggAraryDbg(RdbParser *p) {
     RawContext *ctx = &p->rawCtx;
     for (int i = 0; i <= ctx->curBulkIndex ; ++i) {
         BulkInfo *b = ctx->bulkArray+i;
-        printf("bulkArray[%d]: bulkType=%d ref=%p len=%lu written=%lu next=%p\n",
+        printf("bulkArray[%d]: bulkType=%d ref=%p len=%zu written=%zu next=%p\n",
                i, b->bulkType, (void *)b->ref, b->len, b->written, (void *)b->next);
     }
 }
