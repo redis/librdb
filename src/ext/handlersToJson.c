@@ -173,9 +173,9 @@ static RdbRes toJsonSlotInfo(RdbParser *p, void *userData, RdbSlotInfo *info) {
 
     /* output json part */
     fprintf(ctx->outfile, "    \"%sslotinfo__\": {\n", jsonMetaPrefix);
-    fprintf(ctx->outfile, "      \"slotId\": %lu,\n", info->slot_id);
-    fprintf(ctx->outfile, "      \"slotSize\": %lu,\n", info->slot_size);
-    fprintf(ctx->outfile, "      \"slotSExpiresSize\": %lu\n", info->expires_slot_size);
+    fprintf(ctx->outfile, "      \"slotId\": %" PRIu64 ",\n", info->slot_id);
+    fprintf(ctx->outfile, "      \"slotSize\": %" PRIu64 ",\n", info->slot_size);
+    fprintf(ctx->outfile, "      \"slotSExpiresSize\": %" PRIu64 "\n", info->expires_slot_size);
     fprintf(ctx->outfile, "    },\n");
     return RDB_OK;
 }
@@ -353,7 +353,7 @@ static RdbRes toJsonModule(RdbParser *p, void *userData, RdbBulk moduleName, siz
     }
 
     /* output json part */
-    fprintf(ctx->outfile, "\"<Content of Module '%s'. Occupies a serialized size of %ld bytes>\"",
+    fprintf(ctx->outfile, "\"<Content of Module '%s'. Occupies a serialized size of %zu bytes>\"",
             moduleName,
             serializedSize);
 
@@ -532,7 +532,7 @@ static RdbRes toJsonStreamItem(RdbParser *p, void *userData, RdbStreamID *id, Rd
             fprintf(ctx->outfile, "{\n      \"entries\":[");
 
         /* output another stream entry */
-        fprintf(ctx->outfile, "%c\n        { \"id\":\"%lu-%lu\", ",
+        fprintf(ctx->outfile, "%c\n        { \"id\":\"%" PRIu64 "-%" PRIu64 "\", ",
                 (ctx->state == R2J_IN_STREAM_ENTRIES) ? ',' : ' ',
                 id->ms, id->seq );
         fprintf(ctx->outfile, "\"items\":{");
@@ -570,11 +570,11 @@ static RdbRes toJsonStreamMetadata(RdbParser *p, void *userData, RdbStreamMeta *
         return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
     }
     ctx->state = R2J_IN_STREAM;
-    fprintf(ctx->outfile, "],\n      \"length\": %lu, ", meta->length);
-    fprintf(ctx->outfile, "\n      \"entriesAdded\": %lu, ", meta->entriesAdded);
-    fprintf(ctx->outfile, "\n      \"firstID\": \"%lu-%lu\", ", meta->firstID.ms, meta->firstID.seq);
-    fprintf(ctx->outfile, "\n      \"lastID\": \"%lu-%lu\", ", meta->lastID.ms, meta->lastID.seq);
-    fprintf(ctx->outfile, "\n      \"maxDelEntryID\": \"%lu-%lu\",", meta->maxDelEntryID.ms, meta->maxDelEntryID.seq);
+    fprintf(ctx->outfile, "],\n      \"length\": %" PRIu64 ", ", meta->length);
+    fprintf(ctx->outfile, "\n      \"entriesAdded\": %" PRIu64 ", ", meta->entriesAdded);
+    fprintf(ctx->outfile, "\n      \"firstID\": \"%" PRIu64 "-%" PRIu64 "\", ", meta->firstID.ms, meta->firstID.seq);
+    fprintf(ctx->outfile, "\n      \"lastID\": \"%" PRIu64 "-%" PRIu64 "\", ", meta->lastID.ms, meta->lastID.seq);
+    fprintf(ctx->outfile, "\n      \"maxDelEntryID\": \"%" PRIu64 "-%" PRIu64 "\",", meta->maxDelEntryID.ms, meta->maxDelEntryID.seq);
     return RDB_OK;
 }
 
@@ -596,7 +596,7 @@ static RdbRes toJsonStreamNewCGroup(RdbParser *p, void *userData, RdbBulk grpNam
                         "toJsonStreamNewCGroup(): Invalid state value: %d", ctx->state);
         return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
     }
-    fprintf(ctx->outfile, "%s        {\"name\": \"%s\", \"lastid\": \"%lu-%lu\", \"entriesRead\": %lu",
+    fprintf(ctx->outfile, "%s        {\"name\": \"%s\", \"lastid\": \"%" PRIu64 "-%" PRIu64 "\", \"entriesRead\": %" PRIu64,
             prefix, grpName, meta->lastId.ms, meta->lastId.seq, meta->entriesRead);
 
     ctx->state = R2J_IN_STREAM_CG;
@@ -616,7 +616,7 @@ static RdbRes toJsonStreamCGroupPendingEntry(RdbParser *p, void *userData, RdbSt
                         "toJsonStreamCGroupPendingEntry(): Invalid state value: %d", ctx->state);
         return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
     }
-    fprintf(ctx->outfile, "%s\n           { \"sent\": %lu, \"id\":\"%lu-%lu\", \"count\": %lu }",
+    fprintf(ctx->outfile, "%s\n           { \"sent\": %" PRIu64 ", \"id\":\"%" PRIu64 "-%" PRIu64 "\", \"count\": %" PRIu64 " }",
             prefix, pe->deliveryTime, pe->id.ms, pe->id.seq, pe->deliveryCount);
     return RDB_OK;
 }
@@ -659,7 +659,7 @@ static RdbRes toJsonStreamConsumerPendingEntry(RdbParser *p, void *userData, Rdb
     }
 
     ctx->state = R2J_IN_STREAM_CG_CONSUMER_PEL;
-    fprintf(ctx->outfile, "%s\n               {\"id\":\"%lu-%lu\"}", prefix, streamId->ms, streamId->seq);
+    fprintf(ctx->outfile, "%s\n               {\"id\":\"%" PRIu64 "-%" PRIu64 "\"}", prefix, streamId->ms, streamId->seq);
     return RDB_OK;
 }
 

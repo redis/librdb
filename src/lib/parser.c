@@ -2178,7 +2178,7 @@ RdbStatus elementModule(RdbParser *p) {
                     IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &when, NULL, NULL));
                     if (unlikely(when_opcode != RDB_MODULE_OPCODE_UINT)) {
                         RDB_reportError(p, RDB_ERR_MODULE_INVALID_WHEN_OPCODE,
-                            "elementModule() : Invalid when opcode: %ld.", when_opcode);
+                            "elementModule() : Invalid when opcode: %" PRIu64 ".", when_opcode);
                         return RDB_STATUS_ERROR;
                     }
                 }
