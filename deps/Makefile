@@ -1,10 +1,10 @@
 all:
-	$(MAKE) -C redis -f Makefile all
-	$(MAKE) -C hiredis -f Makefile all
+	$(MAKE) -C redis all
+	$(MAKE) -C hiredis all
 
 clean:
-	$(MAKE) -C redis -f Makefile clean
-	$(MAKE) -C hiredis -f Makefile all
+	$(MAKE) -C redis clean
+	$(MAKE) -C hiredis all
 
 
 .PHONY: all clean
