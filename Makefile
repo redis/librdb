@@ -22,20 +22,20 @@ export LIBRDB_VERSION
 
 # ------------------------- ALL --------------------------------------
 
-all:
-	$(MAKE) -C deps -f Makefile all
-	$(MAKE) -C src/lib -f Makefile all
-	$(MAKE) -C src/ext -f Makefile all
-	$(MAKE) -C src/cli -f Makefile all
-	$(MAKE) -C examples -f Makefile all
+all: ./deps/hiredis/hiredis.h
+	$(MAKE) -C deps  all
+	$(MAKE) -C src/lib  all
+	$(MAKE) -C src/ext  all
+	$(MAKE) -C src/cli  all
+	$(MAKE) -C examples  all
 
 clean:
-	$(MAKE) -C deps -f Makefile clean
-	$(MAKE) -C src/lib -f Makefile clean
-	$(MAKE) -C src/ext -f Makefile clean
-	$(MAKE) -C src/cli -f Makefile clean
-	$(MAKE) -C examples -f Makefile clean
-	$(MAKE) -C test -f Makefile clean
+	$(MAKE) -C deps  clean
+	$(MAKE) -C src/lib  clean
+	$(MAKE) -C src/ext  clean
+	$(MAKE) -C src/cli  clean
+	$(MAKE) -C examples  clean
+	$(MAKE) -C test  clean
 	rm -f librdb.pc
 	rm -f librdb-ext.pc
 
@@ -43,6 +43,9 @@ distclean: clean
 
 example: all
 	cd examples && export LD_LIBRARY_PATH=../lib && ./example1
+
+./deps/hiredis/hiredis.h:
+	git submodule update --init deps/hiredis
 
 # ------------------------- DEBUG -------------------------------------
 
