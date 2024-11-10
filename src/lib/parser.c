@@ -588,17 +588,6 @@ _LIBRDB_API int RDB_handleByLevel(RdbParser *p, RdbDataType type, RdbHandlersLev
     return 0;
 }
 
-_LIBRDB_API const char *RDB_getLibVersion(int *major, int *minor, int *patch) {
-    if (major) *major = LIBRDB_MAJOR_VERSION;
-    if (minor) *minor = LIBRDB_MINOR_VERSION;
-    if (patch) *patch = LIBRDB_PATCH_VERSION;
-    return LIBRDB_VERSION_STRING;
-}
-
-_LIBRDB_API int RDB_getMaxSuppportRdbVersion(void) {
-    return LIBRDB_SUPPORT_MAX_RDB_VER;
-}
-
 /*** various functions ***/
 
 static inline RdbDataType getDataType(int opcode) {
