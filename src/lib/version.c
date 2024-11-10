@@ -1,7 +1,7 @@
 #include <stddef.h>
 
 #include "version.h"
-#include "../../api/librdb-api.h"
+#include "parser.h"
 
 #define STATIC_ASSERT(COND,MSG) typedef char static_assertion[(COND)?1:-1]
 
