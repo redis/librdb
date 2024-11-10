@@ -1,4 +1,5 @@
 #include <stddef.h>
+#include <assert.h>
 
 #include "version.h"
 #include "parser.h"
