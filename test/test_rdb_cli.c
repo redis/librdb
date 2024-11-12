@@ -105,7 +105,7 @@ static void test_rdb_cli_filter_key(void **state) {
 static void test_rdb_cli_filter_invalid_input(void **state) {
     UNUSED(state);
     /* invalid regex */
-    runSystemCmd(" $RDB_CLI_CMD ./test/dumps/single_key.rdb -k \"[*x\" json | grep \"Unmatched \\[\" > /dev/null");
+    runSystemCmd(" $RDB_CLI_CMD ./test/dumps/single_key.rdb -k \"[*x\" json | grep \"FilterKey: Error compiling regular expression\" > /dev/null");
 }
 
 static void test_rdb_cli_filter_type(void **state) {
