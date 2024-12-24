@@ -1571,7 +1571,7 @@ RdbStatus elementFreq(RdbParser *p) {
 
     /*** ENTER SAFE STATE ***/
 
-    p->elmCtx.key.info.lfuFreq =  *((int8_t *) binfoFreq->ref);
+    p->elmCtx.key.info.lfuFreq =  *((uint8_t *) binfoFreq->ref);
     return nextParsingElement(p, PE_NEXT_RDB_TYPE);
 }
 
