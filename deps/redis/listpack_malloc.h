@@ -38,13 +38,21 @@
 
 #ifndef LISTPACK_ALLOC_H
 #define LISTPACK_ALLOC_H
-//#include "zmalloc.h"
+
+#ifdef __APPLE__
+#include <malloc/malloc.h>
+#else
 #include "malloc.h"
-/* We use zmalloc_usable/zrealloc_usable instead of zmalloc/zrealloc
- * to ensure the safe invocation of 'zmalloc_usable_size().
- * See comment in zmalloc_usable_size(). */
+#endif
+
 #define lp_malloc(sz) malloc(sz)
 #define lp_realloc(ptr,sz) realloc(ptr,sz)
 #define lp_free free
+
+#ifdef __APPLE__
+#define lp_malloc_size malloc_size
+#else
 #define lp_malloc_size malloc_usable_size
+#endif
+
 #endif
