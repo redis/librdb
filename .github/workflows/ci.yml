@@ -7,66 +7,54 @@ on:
     - cron: '0 0 * * 0'  # Run every Sunday at midnight UTC
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v3
-        with:
-          submodules: 'recursive'
+  build-linux:
+    strategy:
+      matrix:
+        version:
+          - "5.0"
+          - "6.0"
+          - "6.2"
+          - "7.2"
+          - "7.4"
+          - "unstable"
+        compiler:
+          - "gcc"
+          - "clang"
 
-      - name: Install Prerequisites and clone Redis
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y cmake libssl-dev valgrind git
-          git clone https://git.cryptomilk.org/projects/cmocka.git
-          cd cmocka
-          mkdir build
-          cd build
-          cmake .. -DCMAKE_INSTALL_PREFIX=/usr/local
-          make
-          ctest
-          sudo make install
-          git clone https://github.com/redis/redis.git ~/redis
+    runs-on: "ubuntu-latest"
 
-        shell: bash
-
-      - name: Test librdb vs. redis-5.0
-        run: |
-          pushd ~/redis
-          git checkout 5.0
-          make distclean
-          make -j 4 -C ~/redis
-          popd
-          export LIBRDB_REDIS_FOLDER=~/redis/src
-          make test
-        working-directory: ${{github.workspace}}
-
-      - name: Test librdb vs. redis-unstable
-        run: |
-          pushd ~/redis
-          git checkout unstable
-          make -j 4 -C ~/redis
-          make -C ~/redis/tests/modules
-          popd
-          export LIBRDB_REDIS_FOLDER=~/redis/src
-          make all example valgrind
-        working-directory: ${{github.workspace}}
-
-  build-clang:
-    runs-on: ubuntu-latest
     env:
-      CC: clang
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v3
-        with:
-          submodules: 'recursive'
+      DEBIAN_FRONTEND: noninteractive
+      CC: ${{ matrix.compiler }}
 
-      - name: Install Prerequisites and clone Redis
+    # TODO: would be nice to connect to a redis server instead of building from source
+    # services:
+    #   redis:
+    #     image: redis:${{ matrix.version }}
+    #     options: >-
+    #       --health-cmd "redis-cli ping"
+    #       --health-interval 10s
+    #       --health-timeout 5s
+    #       --health-retries 5
+
+    steps:
+      - name: Checkout librdb
+        uses: actions/checkout@v4
+        with:
+          submodules: "recursive"
+
+      - name: Clone Redis (${{ matrix.version }})
+        uses: actions/checkout@v4
+        with:
+          repository: redis/redis
+          ref: ${{ matrix.version }}
+          path: redis
+
+      - name: Install prerequisites
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake libssl-dev git clang
+          sudo apt-get install -y cmake clang libssl-dev git bc
+
           git clone https://git.cryptomilk.org/projects/cmocka.git
           cd cmocka
           mkdir build
@@ -74,30 +62,54 @@ jobs:
           cmake .. -DCMAKE_INSTALL_PREFIX=/usr/local
           make
           sudo make install
-          
-          git clone https://github.com/redis/redis.git ~/redis
+
+      - name: Test on redis-${{ matrix.version }}
         shell: bash
-
-      - name: Test librdb vs. redis-6.0
         run: |
-          pushd ~/redis
-          git checkout 6.0
-          make distclean
-          make -j 4 -C ~/redis
-          popd
-          export LIBRDB_REDIS_FOLDER=~/redis/src
-          make test
+          make -j -C ${{ github.workspace }}/redis
+
+          if [ $(bc -l <<< "${{ matrix.version }} >= 6.2") -eq 1 ] || [ "${{ matrix.version }}" = "unstable" ]; then
+            make -j -C ${{ github.workspace }}/redis/tests/modules
+          fi
+
+          LIBRDB_REDIS_FOLDER="${{ github.workspace }}/redis/src" make clean debug test example
         working-directory: ${{github.workspace}}
 
-      - name: Test librdb vs. redis-6.2
-        run: |
-          # clang is more strict to shared-obj versioning. Satisfy its needs.
-          pushd ~/redis
-          git checkout 6.2
-          make -j 4 -C ~/redis
-          make -C ~/redis/tests/modules
-          popd
-          export LIBRDB_REDIS_FOLDER=~/redis/src
-          make clean debug test
-        working-directory: ${{github.workspace}}
+  build-osx:
+    strategy:
+      matrix:
+        version:
+          - "6.2"
+          - "7.2"
+          - "7.4"
+          - "unstable"
 
+    runs-on: "macos-latest"
+
+    steps:
+      - name: Checkout librdb
+        uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+
+      - name: Clone Redis (${{ matrix.version }})
+        uses: actions/checkout@v4
+        with:
+          repository: redis/redis
+          ref: ${{ matrix.version }}
+          path: redis
+
+      - name: Install prerequisites
+        run: |
+          brew install cmocka bc llvm grep
+
+      - name: Test on redis-${{ matrix.version }}
+        shell: bash
+        run: |
+          export PATH="$(brew --prefix)/opt/grep/libexec/gnubin:${PATH}"
+
+          make -j -C ${{ github.workspace }}/redis
+          make -j -C ${{ github.workspace }}/redis/tests/modules
+
+          LIBRDB_REDIS_FOLDER="${{ github.workspace }}/redis/src" make clean debug test example
+        working-directory: ${{github.workspace}}

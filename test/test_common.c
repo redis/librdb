@@ -138,7 +138,7 @@ void cleanTmpFolder(void) {
     closedir(dir);
 }
 
-void setEnvVar (const char *name, const char *val) {
+void setEnvVar(const char *name, const char *val) {
     setenv(name, val, 1);
 }
 
@@ -422,8 +422,8 @@ void setupRedisServer(const char *extraArgs) {
                 exit(1);
             }
 
-            /* Sleep 50msec */
-            struct timespec req = {0, 50000*1000}, rem;
+            /* Sleep 500msec */
+            struct timespec req = {0, 500000*1000}, rem;
             nanosleep(&req, &rem);
 
             redisConnContext = redisConnect("localhost", port);
