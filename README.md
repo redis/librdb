@@ -45,6 +45,12 @@ To run CLI extension of this library and let it parse RDB file to json:
       ]}
     }]
 
+To generate formatted print:
+
+    rdb-cli dump.rdb print --key "db%d,%k,%v"
+    db0,key1,value1
+    db0,key2,value2
+    ...
 
 To generate RESP commands:
 
