@@ -4,7 +4,7 @@ OBJECTS = $(patsubst %,%.o,$(SOURCES))
 OPTIMIZATION?=-O3
 
 STD            = -std=c99
-WARNS          = -Wall -Wextra -pedantic -Werror
+WARNS          = -Wall -Wextra -pedantic
 CFLAGS         = -fPIC $(OPTIMIZATION) $(STD) $(WARNS) -fvisibility=hidden
 DEBUG          = -g3 -DDEBUG=1
 LIBS           =

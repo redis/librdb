@@ -44,7 +44,7 @@ void assert_json_equal(const char *f1, const char *f2, int ignoreListOrder);
 /* Test against Redis Server */
 void setRedisInstallFolder(const char *path);
 int getRedisPort(void);
-void setValgrind();
+void setValgrind(void);
 void setupRedisServer(const char *extraArgs);
 const char *getTargetRedisVersion(int *major, int *minor); /* call only after setupRedisServer() */
 void teardownRedisServer(void);
