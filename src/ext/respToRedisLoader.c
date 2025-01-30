@@ -6,7 +6,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <errno.h>
-#include "common.h"
+#include "extCommon.h"
 #include "readerResp.h"
 
 #ifdef USE_OPENSSL
@@ -71,10 +71,11 @@ static int onReadRepliesErrorCb(void *context, char *msg) {
         (strstr(msg, "not found")))              /* error includes "not found" */
         return 0; /* mask error */
 
+    char buf[9];
     RDB_reportError(ctx->p, (RdbRes) RDBX_ERR_RESP_WRITE,
                     "\nerror from dst '-%s' on key '%s' on command '%s' (RESP Command #%zu)\n",
                     msg,
-                    ctx->pendingCmds.key[currIdx],
+                    __RDB_key(ctx->p, ctx->pendingCmds.key[currIdx], buf),
                     ctx->pendingCmds.cmd[currIdx],
                     ctx->respReader.countReplies);
 

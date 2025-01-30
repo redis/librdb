@@ -2,7 +2,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <ctype.h>
-#include "common.h"
+#include "extCommon.h"
 #include "../../deps/redis/util.h"
 
 struct RdbxToPrint;

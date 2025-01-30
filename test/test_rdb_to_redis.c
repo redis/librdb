@@ -415,6 +415,62 @@ static void test_rdb_to_redis_del_before_write(void **state) {
     }
 }
 
+/* This test verifies the behavior of the RDB parser when the `hideKeysInLog`
+ * option is set. Specifically, it ensures that keys in error messages are
+ * replaced with the first 8 hex digits of their SHA256 hash, rather than being
+ * logged directly.
+ */
+static void test_rdb_to_redis_hide_keys_in_log(void **state) {
+    UNUSED(state);
+    RdbParser *p;
+    RdbStatus status;
+
+    RdbxToRespConf rdb2respConf = {
+            .delKeyBeforeWrite = 0,
+            .funcLibReplaceIfExist=0,
+            .supportRestore = 1,
+            .dstRedisVersion = getTargetRedisVersion(NULL, NULL),
+    };
+
+    /* create key that goanna appear as well in the RDB file */
+    sendRedisCmd("set mylist27 1", REDIS_REPLY_STATUS, NULL);
+
+    /* RDB to TCP */
+    RdbxToResp *rdbToResp;
+    p = RDB_createParserRdb(NULL);
+
+    /* hide keys in log */
+    RDB_hideKeysInLog(p);
+
+    RDB_setLogger(p, dummyLogger);
+    assert_non_null(RDBX_createReaderFile(p, DUMP_FOLDER("100_lists.rdb")));
+    assert_non_null(rdbToResp = RDBX_createHandlersToResp(p, &rdb2respConf));
+
+    assert_non_null(RDBX_createRespToRedisTcp(p,
+                                              rdbToResp,
+                                              NULL,
+                                              "127.0.0.1",
+                                              getRedisPort()));
+
+    while ((status = RDB_parse(p)) == RDB_STATUS_WAIT_MORE_DATA);
+    
+    /* verify returned error code. Verify error message. */
+    assert_int_equal(status, RDB_STATUS_ERROR);
+    assert_int_equal(RDB_getErrorCode(p), RDBX_ERR_RESP_WRITE);
+    
+    /* Expected to print first 8 hex digits of SHA256(key) instead of the key 
+     * itself. To eval via bash apply:
+     * > echo -n "mylist27" | sha256sum | cut -c 1-8 
+     */
+    printf("%s\n", RDB_getErrorMessage(p));
+    assert_non_null(strstr(RDB_getErrorMessage(p), "0bdab52c")); /* sha256("mylist27") */
+    
+    /* Verify that the key is not in the log */
+    assert_null(strstr(RDB_getErrorMessage(p), "mylist27"));    
+    
+    RDB_deleteParser(p);
+}
+
 /* Load "function.rdb" more than once. If 'funcLibReplaceIfExist' is not set, then
  * expected to fail */
 static void test_rdb_to_redis_func_lib_replace_if_exist(void **state) {
@@ -520,6 +576,7 @@ int group_rdb_to_redis(void) {
             cmocka_unit_test_setup(test_rdb_to_redis_multiple_lists_strings, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_multiple_lists_strings_pipeline_depth_1, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_del_before_write, setupTest),
+            cmocka_unit_test_setup(test_rdb_to_redis_hide_keys_in_log, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_multiple_dbs, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_function, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_func_lib_replace_if_exist, setupTest),

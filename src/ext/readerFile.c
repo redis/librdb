@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <errno.h>
-#include "common.h"
+#include "extCommon.h"
 
 struct RdbxReaderFile {
     RdbParser *parser;

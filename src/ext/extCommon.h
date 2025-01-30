@@ -50,4 +50,7 @@ static inline void iov_plain(struct iovec *iov, const char *s, size_t l) {
     iov->iov_len = l;
 }
 
+/*** hidden LIB API function (not declared in librdb-api.h) ***/
+_LIBRDB_API char *__RDB_key(RdbParser *p, char *key, char buf[9]);
+
 #endif /*define RDBX_COMMON_H*/

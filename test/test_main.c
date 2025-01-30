@@ -142,6 +142,8 @@ RdbRes handle_start_rdb_report_long_errors(RdbParser *p, void *userData, int rdb
     return 1001; /* This value will be eventually returned as the error code */
 }
 
+/* Test a faulty parser handler that reports on 999 errors. Only the first 
+ * errors are reported, and the last one is kept as well. */ 
 static void test_report_long_error(void **state) {
     RdbStatus  status;
     UNUSED(state);

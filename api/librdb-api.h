@@ -436,20 +436,31 @@ _LIBRDB_API void RDB_IgnoreChecksum(RdbParser *p);
  * terminate its operation. The default threshold is unlimited. */
 _LIBRDB_API void RDB_setMaxRawSize(RdbParser *p, size_t maxSize);
 
-/* logger */
-_LIBRDB_API void RDB_setLogLevel(RdbParser *p, RdbLogLevel l);
-_LIBRDB_API void RDB_setLogger(RdbParser *p, RdbLoggerCB f);
-#ifdef __GNUC__
-_LIBRDB_API void RDB_log(RdbParser *p, RdbLogLevel lvl, const char *format, ...)
-                                          __attribute__((format(printf, 3, 4)));
-#else
-_LIBRDB_API void RDB_log(RdbParser *p, RdbLogLevel lvl, const char *format, ...);
-#endif
-
 /* Following function returns a hint for the total number of items in the current
  * parsed key context - to assist with memory allocation or other optimizations.
  * If hint is not available, then return -1. */
 _LIBRDB_API int64_t RDB_getNumItemsHint(RdbParser *p);
+
+/****************************************************************
+ * Logger
+ ****************************************************************/
+/* Set the logging level for the parser */
+_LIBRDB_API void RDB_setLogLevel(RdbParser *p, RdbLogLevel l);
+
+/* Set a custom logger callback function */
+_LIBRDB_API void RDB_setLogger(RdbParser *p, RdbLoggerCB f);
+
+/* Log a message with the specified log level */
+#ifdef __GNUC__
+_LIBRDB_API void RDB_log(RdbParser *p, RdbLogLevel lvl, const char *format, ...)
+                         __attribute__((format(printf, 3, 4)));
+#else
+_LIBRDB_API void RDB_log(RdbParser *p, RdbLogLevel lvl, const char *format, ...);
+#endif
+
+/* To hide keys in logs by printing first 8 hex digits of SHA256(key) instead of 
+ * printing the key itself */
+_LIBRDB_API void RDB_hideKeysInLog(RdbParser *p);
 
 /****************************************************************
  * Pause the Parser

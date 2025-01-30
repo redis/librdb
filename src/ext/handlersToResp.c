@@ -2,7 +2,7 @@
 #include <assert.h>
 #include <sys/uio.h>
 #include <inttypes.h>
-#include "common.h"
+#include "extCommon.h"
 
 #include "../../deps/redis/crc64.h"
 #include "../../deps/redis/util.h"
