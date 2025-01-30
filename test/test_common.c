@@ -475,7 +475,7 @@ int getRedisPort(void) {
     return redisPort[currRedisInst];
 }
 
-void setValgrind() {
+void setValgrind(void) {
     useValgrind = 1;
 }
 
@@ -503,7 +503,7 @@ void checkValgrindLog(const char *filename) {
 /* Redis OSS does not support restoring module auxiliary data. This feature
  * is currently available only in Redis Enterprise. There are plans to bring
  * this functionality to Redis OSS in the near future. */
-int isSupportRestoreModuleAux() {
+int isSupportRestoreModuleAux(void) {
     static int supported = -1;   /* -1=UNINIT, 0=NO, 1=YES */
     if (supported == -1) {
         char *res = sendRedisCmd("RESTOREMODAUX", REDIS_REPLY_ERROR, NULL);
@@ -585,7 +585,7 @@ static unsigned char xorstr(const char *str) {
 #define BUFFER_SIZE 1024
 static int pipe_in[2], pipe_out[2];
 static pid_t pid = -1;
-void start_json_sign_service() {
+void start_json_sign_service(void) {
     if (pipe(pipe_in) == -1 || pipe(pipe_out) == -1) {
         perror("pipe failed");
         exit(1);

@@ -427,7 +427,7 @@ int readCommonOptions(RdbParser *p, int argc, char* argv[], Options *options, in
     return at;
 }
 
-void closeLogFileOnExit() {
+void closeLogFileOnExit(void) {
     if (logfile != NULL)
         fclose(logfile);
 }

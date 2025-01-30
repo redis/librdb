@@ -952,7 +952,7 @@ RdbStatus allocFromCache(RdbParser *p,
 
 static inline RdbStatus unpackList(RdbParser *p, unsigned char *lp) {
     unsigned char *eptr, *item;
-    unsigned int itemLen;
+    unsigned int itemLen = 0;
     long long itemVal;
 
     eptr = lpFirst( lp);
