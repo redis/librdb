@@ -342,8 +342,8 @@ int matchRdbDataType(const char *dataTypeStr) {
     if (!strcmp(dataTypeStr, "func")) return RDB_DATA_TYPE_FUNCTION;
 
     loggerWrap(RDB_LOG_ERR,
-               "Invalid TYPE argument (%s). Valid values: str, list, set, zset, hash, module, stream, func",
-               dataTypeStr);
+        "Invalid TYPE argument (%s). Valid values: str, list, set, zset, hash, module, stream, func",
+        dataTypeStr);
     exit(1);
 }
 

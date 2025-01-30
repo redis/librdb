@@ -368,6 +368,7 @@ struct RdbParser {
     int ignoreChecksum;
     CrcFunc crcFunc;
     RdbLoggerCB loggerCb;
+    int hideKeysInLog;
     RdbLogLevel logLevel;
     size_t maxRawSize;
 

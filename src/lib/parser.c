@@ -33,6 +33,7 @@
 #include "../../deps/redis/lzf.h"
 #include "../../deps/redis/stream.h"
 #include "../../deps/redis/t_zset.h"
+#include "../../deps/redis/sha256.h"
 
 #define DONE_FILL_BULK SIZE_MAX
 
@@ -183,6 +184,23 @@ static RdbStatus readRdbFromReader(RdbParser *p, size_t len, AllocTypeRq type, c
 static RdbStatus readRdbFromBuff(RdbParser *p, size_t len, AllocTypeRq type, char *refBuf, BulkInfo **binfo);
 static RdbStatus readRdbWaitMoreDataDbg(RdbParser *p, size_t len, AllocTypeRq type, char *refBuf, BulkInfo **binfo);
 
+/*** hidden LIB API function (not declared in librdb-api.h) ***/
+
+_LIBRDB_API char *__RDB_key(RdbParser *p, char *key, char buf[9]) {
+    if (!(p->hideKeysInLog)) return key;
+
+    BYTE hash[SHA256_BLOCK_SIZE];
+    SHA256_CTX ctx;
+    sha256_init(&ctx);
+    sha256_update(&ctx, (unsigned char*) key, strlen(key));
+    sha256_final(&ctx, hash);
+
+    for (int i = 0; i < 4; i++)
+        snprintf(buf + (i * 2), 3, "%02x", hash[i]);
+    buf[8] = '\0';
+    return buf;
+}
+
 /*** LIB API functions ***/
 
 _LIBRDB_API RdbParser *RDB_createParserRdb(RdbMemAlloc *memAlloc) {
@@ -215,6 +233,7 @@ _LIBRDB_API RdbParser *RDB_createParserRdb(RdbMemAlloc *memAlloc) {
     p->errorMsgAt = 0;
     p->appCbCtx.numBulks = 0;
     p->loggerCb = loggerCbDefault;
+    p->hideKeysInLog = 0;
     p->logLevel = RDB_LOG_DBG;
     p->maxRawSize = SIZE_MAX;
     p->errorCode = RDB_OK;
@@ -426,6 +445,10 @@ _LIBRDB_API void RDB_log(RdbParser *p, RdbLogLevel lvl, const char *format, ...)
 
 _LIBRDB_API int64_t RDB_getNumItemsHint(RdbParser *p) {
     return p->elmCtx.key.numItemsHint;
+}
+
+_LIBRDB_API void RDB_hideKeysInLog(RdbParser *p) {
+    p->hideKeysInLog = 1;
 }
 
 _LIBRDB_API void RDB_setLogLevel(RdbParser *p, RdbLogLevel l) {
@@ -872,11 +895,11 @@ static RdbStatus finalizeConfig(RdbParser *p, int isParseFromBuff) {
 }
 
 static void printParserState(RdbParser *p) {
-    RDB_log(p, RDB_LOG_ERR, "Parser error message: %s", RDB_getErrorMessage(p));
     RDB_log(p, RDB_LOG_ERR, "Parser error code: %d", RDB_getErrorCode(p));
     RDB_log(p, RDB_LOG_ERR, "Parser element func name: %s(state=%d)",
                             peInfo[p->parsingElement].funcname, p->elmCtx.state);
     RDB_log(p, RDB_LOG_ERR, "Parsed opcode: %d", p->currOpcode);
+    RDB_log(p, RDB_LOG_ERR, "Parser 'bytesRead': %zu", p->bytesRead);
 }
 
 static void loggerCbDefault(RdbLogLevel l, const char *msg) {
@@ -1561,6 +1584,8 @@ RdbStatus elementNextRdbType(RdbParser *p) {
 RdbStatus elementEndKey(RdbParser *p) {
     /*** ENTER SAFE STATE ***/
     CALL_HANDLERS_CB_NO_ARGS(p, NOP, p->elmCtx.key.handleByLevel, common.handleEndKey);
+
+    p->elmCtx.key.info.dataType = RDB_DATA_TYPE_MAX;
 
     return nextParsingElement(p, PE_NEXT_RDB_TYPE);
 }

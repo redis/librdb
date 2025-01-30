@@ -1,7 +1,7 @@
 #include <regex.h>
 #include <string.h>
 #include "../lib/defines.h" /* valid include since it brings only RDB_* defines */
-#include "common.h"
+#include "extCommon.h"
 
 struct RdbxFilter {
     regex_t regex_compiled;

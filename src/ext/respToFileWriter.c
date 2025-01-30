@@ -1,5 +1,5 @@
 #include <stdio.h>
-#include "common.h"
+#include "extCommon.h"
 #include <string.h>
 #include <errno.h>
 

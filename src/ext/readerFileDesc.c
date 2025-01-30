@@ -5,7 +5,7 @@
 #include <string.h>
 #include <errno.h>
 #include <unistd.h>
-#include "common.h"
+#include "extCommon.h"
 
 
 struct RdbxReaderFileDesc {
