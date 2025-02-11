@@ -5,9 +5,9 @@ LIB_NAME_EXT          = $(LIB_NAME)-ext
 LIB_DIR               = ../../lib
 LIBRDB_SONAME_EXT     = lib$(LIB_NAME_EXT).so.${LIBRDB_VERSION}
 
-TARGET_LIB_STATIC     = $(LIB_DIR)/lib$(LIB_NAME).a
 # Artifacts:
 TARGET_LIB_EXT        = $(LIB_DIR)/$(LIBRDB_SONAME_EXT)
+TARGET_LIB_STATIC     = $(LIB_DIR)/lib$(LIB_NAME).a
 TARGET_LIB_STATIC_EXT = $(LIB_DIR)/lib$(LIB_NAME_EXT).a
 
 #########################################################################################
@@ -32,14 +32,26 @@ LDFLAGS  =
 LIBS     = -L $(LIB_DIR) -l $(LIB_NAME)
 
 ifeq ($(BUILD_TLS),yes)
-CFLAGS+=-DUSE_OPENSSL=1
+	CFLAGS += -DUSE_OPENSSL=1
 endif
+
+# Platform-specific overrides
+uname_S := $(shell sh -c 'uname -s 2>/dev/null || echo not')
+
+ifeq ($(uname_S),Darwin)
+	SONAME_FLAG = -install_name
+	SHARED_FLAG = -dynamiclib
+else
+	SONAME_FLAG = -soname
+	SHARED_FLAG = -shared
+endif
+
 ######################################### RULES #######################################
 all: $(TARGET_LIB_EXT) $(TARGET_LIB_STATIC_EXT)
 	@echo "Done.";
 
 $(TARGET_LIB_EXT): $(OBJECTS) $(REDIS_OBJECTS)
-	$(CC) -o $@ -shared -Wl,-soname,${LIBRDB_SONAME_EXT} ${LDFLAGS} $^  $(LIBS)
+	$(CC) -o $@ $(SHARED_FLAG) -Wl,$(SONAME_FLAG),${LIBRDB_SONAME_EXT} ${LDFLAGS} $^  $(LIBS)
 
 $(TARGET_LIB_STATIC_EXT): $(OBJECTS) $(REDIS_OBJECTS)
 	ar rcs $@ $^
