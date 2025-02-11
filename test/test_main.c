@@ -130,6 +130,24 @@ static void test_checksum(void **state) {
     RDB_deleteParser(parser);
 }
 
+/* Test opcode relevant only to Redis Ent (Does nothing) */
+static void __test_opcode_ram_lru(void **state) {
+    UNUSED(state);
+
+    const char *rdbfile = DUMP_FOLDER("redis_ent_opcode_ram_lru.rdb");
+    //const char *jsonfile = TMP_FOLDER("empty.json");
+
+    RdbStatus  status;
+    RdbParser *parser = RDB_createParserRdb(NULL);
+    RDB_setLogLevel(parser, RDB_LOG_ERR);
+    assert_non_null(RDBX_createReaderFile(parser, rdbfile));
+    
+    while ((status = RDB_parse(parser)) == RDB_STATUS_WAIT_MORE_DATA);
+    assert_int_equal( status, RDB_STATUS_OK);
+
+    RDB_deleteParser(parser);
+}
+
 static void test_examples(void **state) {
     UNUSED(state);
     runSystemCmd("make example > /dev/null ");
@@ -223,6 +241,7 @@ int group_misc(void) {
         cmocka_unit_test(test_empty_rdb),
         cmocka_unit_test(test_mixed_levels_registration),
         cmocka_unit_test(test_checksum),
+        cmocka_unit_test(__test_opcode_ram_lru),
         cmocka_unit_test(test_report_long_error),
         cmocka_unit_test(test_not_support_future_rdb_version),
     };
