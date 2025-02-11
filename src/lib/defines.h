@@ -60,8 +60,9 @@
 
 /* Garantia V1006 (current) opcodes */
 /*#define RDB_OPCODE_GD_DICT        100*/
-#define RDB_OPCODE_GCAS           101
-#define RDB_OPCODE_GFLAGS         102
+#define RDB_OPCODE_GCAS             101
+#define RDB_OPCODE_GFLAGS           102
+#define __RDB_OPCODE_RAM_LRU        107 /* Available only in Redis Enterprise */
 
 /* Defines related to the dump file format. To store 32 bits lengths for short
  * keys requires a lot of space, so we check the most significant 2 bits of

@@ -18,6 +18,7 @@ FILE* logfile = NULL;
 /* common options to all FORMATTERS */
 typedef struct Options {
     const char *logfilePath;
+    int ignoreChecksum;
     int progressMb;  /* print progress every <progressMb> MB. Set to 0 if disabled */
     RdbRes (*formatFunc)(RdbParser *p, int argc, char **argv);
 } Options;
@@ -102,6 +103,7 @@ static void printUsage(int shortUsage) {
     printf("Usage: rdb-cli /path/to/dump.rdb [OPTIONS] {print|json|resp|redis} [FORMAT_OPTIONS]\n");
     printf("OPTIONS:\n");
     printf("\t-l, --log-file <PATH>         Path to the log file or stdout (Default: './rdb-cli.log')\n");
+    printf("\t-i, --ignore-checksum         Ignore RDB file checksum verification\n");
     printf("\t-s, --show-progress <MBytes>  Show progress to STDOUT after every <MBytes> processed\n");
     printf("\t-k, --key <REGEX>             Include only keys that match REGEX\n");
     printf("\t-K  --no-key <REGEX>          Exclude all keys that match REGEX\n");
@@ -355,6 +357,7 @@ int readCommonOptions(RdbParser *p, int argc, char* argv[], Options *options, in
     /* default */
     options->progressMb = 0;
     options->logfilePath = LOG_FILE_PATH_DEF;
+    options->ignoreChecksum = 0;
     options->formatFunc = formatJson;
 
     /* parse common options until FORMAT (json/resp/redis) specified */
@@ -362,6 +365,9 @@ int readCommonOptions(RdbParser *p, int argc, char* argv[], Options *options, in
         char *opt = argv[at];
 
         if (getOptArg(argc, argv, &at, "-l", "--log-file", NULL, &(options->logfilePath)))
+            continue;
+        
+        if (getOptArg(argc, argv, &at, "-i", "--ignore-checksum", &(options->ignoreChecksum), NULL))
             continue;
 
         if (getOptArgVal(argc, argv, &at, "-s", "--show-progress", NULL, &options->progressMb, 0, INT_MAX))
@@ -471,6 +477,9 @@ int main(int argc, char **argv)
     RdbParser *parser = RDB_createParserRdb(NULL);
     RDB_setLogLevel(parser, RDB_LOG_INF);
     RDB_setLogger(parser, logger);
+    
+    if (options.ignoreChecksum) 
+        RDB_IgnoreChecksum(parser);
 
     if (strcmp(input, "-") == 0) {
         if (RDBX_createReaderFileDesc(parser, 0 /*stdin*/, 0) == NULL)
