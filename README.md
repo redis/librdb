@@ -205,6 +205,7 @@ destruction, or when newer block replacing old one.
     Usage: rdb-cli /path/to/dump.rdb [OPTIONS] {print|json|resp|redis} [FORMAT_OPTIONS]
     OPTIONS:
             -l, --log-file <PATH>         Path to the log file or stdout (Default: './rdb-cli.log')
+            -i, --ignore-checksum         Ignore RDB file checksum verification
             -s, --show-progress <MBytes>  Show progress to STDOUT after every <MBytes> processed
             -k, --key <REGEX>             Include only keys that match REGEX
             -K  --no-key <REGEX>          Exclude all keys that match REGEX
@@ -237,6 +238,7 @@ destruction, or when newer block replacing old one.
     FORMAT_OPTIONS ('redis'|'resp'):
             -r, --support-restore         Use the RESTORE command when possible
             -d, --del-before-write        Delete each key before writing. Relevant for non-empty db
+            -f, --func-replace-if-exist   Replace function-library if already exists in the same name rather than aborting
             -t, --target-redis-ver <VER>  Specify the target Redis version. Helps determine which commands can
                                           be applied. Particularly crucial if support-restore being used
                                           as RESTORE is closely tied to specific RDB versions. If versions not
