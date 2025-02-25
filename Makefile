@@ -1,13 +1,13 @@
 
-PREFIX?=/usr/local
+PREFIX? = /usr/local
 
 DESTDIR?=
 INSTALL = /usr/bin/install -c
-BINDIR=$(DESTDIR)$(PREFIX)/bin
-LIBDIR=$(DESTDIR)$(PREFIX)/lib
-INCDIR=$(DESTDIR)$(PREFIX)/include/librdb/
-LIBRDB_INSTALL_SHARED:=yes
-LIBRDB_INSTALL_STATIC:=yes
+BINDIR = $(DESTDIR)$(PREFIX)/bin
+LIBDIR = $(DESTDIR)$(PREFIX)/lib
+INCDIR = $(DESTDIR)$(PREFIX)/include/librdb/
+LIBRDB_INSTALL_SHARED := yes
+LIBRDB_INSTALL_STATIC := yes
 
 UNAME := $(shell uname)
 
@@ -23,19 +23,19 @@ export LIBRDB_VERSION
 # ------------------------- ALL --------------------------------------
 
 all: ./deps/hiredis/hiredis.h
-	$(MAKE) -C deps  all
-	$(MAKE) -C src/lib  all
-	$(MAKE) -C src/ext  all
-	$(MAKE) -C src/cli  all
-	$(MAKE) -C examples  all
+	$(MAKE) -C deps all
+	$(MAKE) -C src/lib all
+	$(MAKE) -C src/ext all
+	$(MAKE) -C src/cli all
+	$(MAKE) -C examples all
 
 clean:
-	$(MAKE) -C deps  clean
-	$(MAKE) -C src/lib  clean
-	$(MAKE) -C src/ext  clean
-	$(MAKE) -C src/cli  clean
-	$(MAKE) -C examples  clean
-	$(MAKE) -C test  clean
+	$(MAKE) -C deps clean
+	$(MAKE) -C src/lib clean
+	$(MAKE) -C src/ext clean
+	$(MAKE) -C src/cli clean
+	$(MAKE) -C examples clean
+	$(MAKE) -C test clean
 	rm -f librdb.pc
 	rm -f librdb-ext.pc
 

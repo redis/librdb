@@ -1,7 +1,7 @@
 default: all
 
-LIB_NAME              = rdb
 LIB_DIR               = ../../lib
+LIB_NAME              = rdb
 LIBRDB_SONAME         = lib$(LIB_NAME).so.${LIBRDB_VERSION}
 
 # Artifacts:
@@ -18,8 +18,8 @@ OBJECTS  = $(patsubst %,%.o,$(SOURCES))
 REDIS_SOURCES = $(notdir $(basename $(wildcard ../../deps/redis/*.c)))
 REDIS_OBJECTS = $(patsubst %,../../deps/redis/%.o,$(REDIS_SOURCES))
 
-OPTIMIZATION?=-O3
-LIBRDB_DEBUG?=0
+OPTIMIZATION ?= -O3
+LIBRDB_DEBUG ?= 0
 
 STD      = -std=c99
 STACK    = -fstack-protector-all -Wstack-protector
@@ -34,12 +34,23 @@ else
 	CFLAGS += -DNDEBUG=1
 endif
 
+# Platform-specific overrides
+uname_S := $(shell sh -c 'uname -s 2>/dev/null || echo not')
+
+ifeq ($(uname_S),Darwin)
+	SONAME_FLAG = -install_name
+	SHARED_FLAG = -dynamiclib
+else
+	SONAME_FLAG = -soname
+	SHARED_FLAG = -shared
+endif
+
 ######################################### RULES #######################################
 all: $(TARGET_LIB) $(TARGET_LIB_STATIC)
 	@echo "Done.";
 
 $(TARGET_LIB): $(OBJECTS) $(REDIS_OBJECTS)
-	$(CC) -o $@ -shared -Wl,-soname,${LIBRDB_SONAME} ${LDFLAGS} $^
+	$(CC) -o $@ $(SHARED_FLAG) -Wl,$(SONAME_FLAG),${LIBRDB_SONAME} ${LDFLAGS} $^
 
 $(TARGET_LIB_STATIC): $(OBJECTS) $(REDIS_OBJECTS)
 	ar rcs $@ $^
