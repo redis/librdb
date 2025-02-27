@@ -43,6 +43,7 @@ struct RdbxRespToRedisLoader {
     RdbParser *p;
     int fd;
     int fdOwner; /* Set to 1 if this entity created the socket, and it is the one to release. */
+    int origSocketFlags;
 };
 
 /* cb to report RESP error. Returns 1 to propagate. 0 to mask. */
@@ -238,6 +239,13 @@ static void redisLoaderDelete(void *context) {
 
     shutdown(ctx->fd, SHUT_WR); /* graceful shutdown */
 
+    /* Restore the original socket flags */
+    if (fcntl(ctx->fd, F_SETFL, ctx->origSocketFlags) == -1) {
+        RDB_reportError(ctx->p, (RdbRes) RDBX_ERR_RESP2REDIS_CONF_SOCKET,
+                        "Failed to restore original socket flags. errno=%d: %s",
+                        errno, strerror(errno));
+    }
+
     if (ctx->fdOwner) close(ctx->fd);
 
     RDB_free(ctx->p, ctx);
@@ -337,10 +345,17 @@ _LIBRDB_API RdbxRespToRedisLoader *RDBX_createRespToRedisFd(RdbParser *p,
                                                             RdbxToResp *rdbToResp,
                                                             RdbxRedisAuth *auth,
                                                             int fd) {
+    /* Save the original socket flags */
+    int origSockFlags = fcntl(fd, F_GETFL, 0);
+    if (origSockFlags == -1) {
+        RDB_reportError(p, (RdbRes) RDBX_ERR_RESP2REDIS_CONF_SOCKET,
+                        "Failed to get original socket flags. errno=%d: %s", errno, strerror(errno));
+        return NULL;
+    }
+    
     /* Ensure the socket is in blocking mode */
-    int flags = fcntl(fd, F_GETFL, 0);
-    if (flags == -1 || fcntl(fd, F_SETFL, flags & ~O_NONBLOCK) == -1) {
-        RDB_reportError(p, (RdbRes) RDBX_ERR_RESP2REDIS_CONF_BLOCK_SOCKET,
+    if (fcntl(fd, F_SETFL, origSockFlags & ~O_NONBLOCK) == -1) {
+        RDB_reportError(p, (RdbRes) RDBX_ERR_RESP2REDIS_CONF_SOCKET,
                         "Failed to configure for blocking mode. errno=%d: %s",
                         errno, strerror(errno));
         return NULL;
@@ -350,20 +365,23 @@ _LIBRDB_API RdbxRespToRedisLoader *RDBX_createRespToRedisFd(RdbParser *p,
     struct timeval timeout = { .tv_sec = RECV_CMD_TIMEOUT_SEC, .tv_usec = 0 };
     if (setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) < 0) {
         RDB_reportError(p, (RdbRes) RDBX_ERR_RESP2REDIS_SET_TIMEOUT,
-                        "Failed to configure for blocking mode. errno=%d: %s",
+                        "Failed to configure timeout for socket. errno=%d: %s",
                         errno, strerror(errno));
+        fcntl(fd, F_SETFL, origSockFlags);
         return NULL;
     }
 
     RdbxRespToRedisLoader *ctx = RDB_alloc(p, sizeof(RdbxRespToRedisLoader));
     if (!ctx) {
         RDB_reportError(p, (RdbRes) RDBX_ERR_RESP_FAILED_ALLOC, "Failed to allocate struct RdbxRespToRedisLoader");
+        fcntl(fd, F_SETFL, origSockFlags);
         return NULL;
     }
 
     memset(ctx, 0, sizeof(RdbxRespToRedisLoader));
     ctx->p = p;
     ctx->fd = fd;
+    ctx->origSocketFlags = origSockFlags;
     ctx->fdOwner = 0;
     ctx->pendingCmds.num = 0;
     ctx->pendingCmds.pipelineDepth = PIPELINE_DEPTH_DEF;
@@ -373,6 +391,7 @@ _LIBRDB_API RdbxRespToRedisLoader *RDBX_createRespToRedisFd(RdbParser *p,
     if (auth && (redisAuth(ctx, auth) != RDB_OK)) {
         RDB_reportError(p, (RdbRes) RDBX_ERR_RESP2REDIS_AUTH_FAILED, "Redis authentication failed.");
         RDB_free(p, ctx);
+        fcntl(fd, F_SETFL, origSockFlags);
         return NULL;
     }
 
