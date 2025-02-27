@@ -2,11 +2,12 @@ default: all
 
 LIB_DIR               = ../../lib
 LIB_NAME              = rdb
-LIB_NAME_EXT          = $(LIB_NAME)-ext
+LIB_FILENAME          = librdb.a
+LIB_NAME_EXT          = rdb-ext
+LIB_FILENAME_EXT      = librdb-ext.a
 
 # Artifacts:
-TARGET_APP            = rdb-cli
-TARGET_LIB_STATIC_EXT = $(LIB_DIR)/lib$(LIB_NAME_EXT).a
+TARGET_APP           = rdb-cli
 
 #########################################################################################
 SOURCES  = $(notdir $(basename $(wildcard *.c)))
@@ -20,10 +21,15 @@ STACK       = -fstack-protector-all -Wstack-protector
 WARNS       = -Wall -Wextra -pedantic -Werror
 CFLAGS      = -fPIC $(OPTIMIZATION) $(STD) $(STACK) $(WARNS)
 DEBUG       = -g3 -DDEBUG=1
-LIBS        = -L /usr/lib -L $(LIB_DIR) -l $(LIB_NAME_EXT) -l $(LIB_NAME)
+
+ifeq ($(shell uname -s),Darwin)
+    LIBS = -L $(LIB_DIR) -l $(LIB_NAME_EXT) -l $(LIB_NAME)
+else
+    LIBS = -L $(LIB_DIR) -l:$(LIB_FILENAME) -l:$(LIB_FILENAME_EXT)
+endif
 
 ifeq ($(BUILD_TLS),yes)
-	CFLAGS += -DUSE_OPENSSL=1
+    CFLAGS+=-DUSE_OPENSSL=1
 	LIBS += -lssl -lcrypto
 endif
 
@@ -36,7 +42,7 @@ all: $(TARGET_APP)
 $(TARGET_APP): %: %.c lib_dependency
 	$(CC) $(CFLAGS) -o $@ $<  $(DEBUG) $(LIBS)
 
-lib_dependency: $(LIB_DIR)/lib$(LIB_NAME_EXT).a
+lib_dependency: $(LIB_DIR)/$(LIB_FILENAME_EXT)
 
 clean:
 	@rm -rvf $(TARGETS) ./*.o ../../bin/$(TARGET_APP)

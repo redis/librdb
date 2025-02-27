@@ -39,8 +39,6 @@ clean:
 	rm -f librdb.pc
 	rm -f librdb-ext.pc
 
-distclean: clean
-
 example: all
 	cd examples && export LD_LIBRARY_PATH=../lib && ./example1
 
@@ -128,11 +126,10 @@ help:
 	@echo "    valgrind   - Run tests with static lib and valgrind"
 	@echo "    example    - Run the example"
 	@echo "    clean      - Clean without deps folders"
-	@echo "    distclean  - Clean including deps folders"
 	@echo "    install    - install to (DESTDIR)/(PREFIX)/bin and (DESTDIR)/(PREFIX)/lib"
 	@echo "                 By default PREFIX=/usr/local"
 	@echo "    uninstall  - Remove from (DESTDIR)\(PREFIX)/bin and (DESTDIR)/(PREFIX)/lib"
 	@echo "    help       - Prints this message"
 
 
-.PHONY: all debug test valgrind example clean distclean install uninstall build_test help
+.PHONY: all debug test valgrind example clean install uninstall build_test help
