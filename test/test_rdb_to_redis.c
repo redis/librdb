@@ -1,9 +1,9 @@
 #include <string.h>
 #include <stdio.h>
-#include <stdlib.h>
 #include <unistd.h>
-#include <sys/types.h>
-#include <sys/wait.h>
+#include <time.h>
+#include <arpa/inet.h>
+#include <assert.h>
 #include "test_common.h"
 
 int serverMajorVer, serverMinorVer;
@@ -303,7 +303,7 @@ static void test_rdb_to_redis_function(void **state) {
 }
 
 /* test relied on rdbtest module within redis repo, if available */
-void test_rdb_to_redis_module(void **state) {
+static void test_rdb_to_redis_module(void **state) {
     UNUSED(state);
 
     /* Skip test if testrdb is not loaded */
@@ -360,7 +360,7 @@ static void test_rdb_to_redis_module_aux_empty(void **state) {
     rdb_to_tcp(DUMP_FOLDER("module_aux_empty.rdb"), 1, 1, NULL);
 }
 
-void test_rdb_to_redis_stream(void **state) {
+static void test_rdb_to_redis_stream(void **state) {
     UNUSED(state);
     test_rdb_to_redis_common(DUMP_FOLDER("stream_v11.rdb"), 1, NULL, NULL);
 }
@@ -523,6 +523,80 @@ static void test_rdb_to_redis_func_lib_replace_if_exist(void **state) {
     }
 }
 
+/* Create dummy TCP server that doesn't respond to the client and verify that
+ * the parser retries after TIMEOUT_SECONDS. Not part of CI since it takes to long */
+int countdownRetries;
+RdbParser *parser;
+void dummyTcpTimeoutLogger(RdbLogLevel l, const char *msg) {
+    UNUSED(l);
+    if (strstr(msg, "No reply from redis-server for") != NULL)
+        if (--countdownRetries == 0)
+            RDB_reportError(parser, (RdbRes)12345678, "Inject error to end the test");
+}
+void test_rdb_tcp_timeout(void **state) {
+    UNUSED(state);
+    const int RECV_TIMEOUT_SECONDS = 10; /* socket retry timeout */
+    int test_retries = 3; /* limit test to finite number of retries */
+    int server_fd, client_fd;
+    struct sockaddr_in server_addr, client_addr;
+    socklen_t client_len = sizeof(client_addr);
+
+    /* expected to retry 3 times before ending the test */
+    countdownRetries = test_retries;
+
+    /* Dummy TCP server that only receives messages but does not respond */
+    server_fd = socket(AF_INET, SOCK_STREAM, 0);
+    assert_true(server_fd >= 0);
+
+    int opt = 1;
+    setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_addr.s_addr = INADDR_ANY;
+    server_addr.sin_port = htons(0);
+    assert_int_equal(bind(server_fd, (struct sockaddr *)&server_addr, sizeof(server_addr)), 0);
+    socklen_t addr_len = sizeof(server_addr);
+    assert_int_equal(getsockname(server_fd, (struct sockaddr *)&server_addr, &addr_len), 0);
+    int assigned_port = ntohs(server_addr.sin_port);
+    assert_int_equal(listen(server_fd, 1), 0);
+    printf("Dummy TCP server started, waiting for client to connect...\n");
+
+    parser = RDB_createParserRdb(NULL);
+    RDB_setLogLevel(parser, RDB_LOG_INF);
+    RDB_setLogger(parser, dummyTcpTimeoutLogger);
+    assert_non_null(RDBX_createReaderFile(parser, DUMP_FOLDER("single_key.rdb")));
+
+    RdbxToRespConf rdb2respConf = {
+            .supportRestore = 1,
+            .dstRedisVersion = getTargetRedisVersion(NULL, NULL),
+            .supportRestoreModuleAux = isSupportRestoreModuleAux()
+    };
+
+    RdbxToResp *rdbToResp;
+    assert_non_null(rdbToResp = RDBX_createHandlersToResp(parser, &rdb2respConf));
+    assert_non_null(RDBX_createRespToRedisTcp(parser, rdbToResp, NULL, "127.0.0.1", assigned_port));
+
+    client_fd = accept(server_fd, (struct sockaddr *)&client_addr, &client_len);
+    assert_true(client_fd >= 0);
+
+    /* Start the timer to measure timeout and run parser */
+    time_t start_time = time(NULL);
+    RdbStatus status;
+    while ((status = RDB_parse(parser)) == RDB_STATUS_WAIT_MORE_DATA);
+
+    /* Verify dummy error code */
+    assert_int_equal(RDB_getErrorCode(parser), 12345678);
+
+    /* Measure elapsed time and verify it's within the expected range */
+    time_t elapsedTime = time(NULL) - start_time;
+    int expectedTime = RECV_TIMEOUT_SECONDS * test_retries;
+    printf("Elapsed time: %ld, expected time: %d\n", elapsedTime, expectedTime);
+    assert_in_range(elapsedTime, expectedTime - 2, expectedTime + 2);
+
+    RDB_deleteParser(parser);
+    close(client_fd);
+    close(server_fd);
+}
+
 /*************************** group_rdb_to_redis *******************************/
 int group_rdb_to_redis(void) {
 
@@ -580,6 +654,7 @@ int group_rdb_to_redis(void) {
             cmocka_unit_test_setup(test_rdb_to_redis_multiple_dbs, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_function, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_func_lib_replace_if_exist, setupTest),
+            //cmocka_unit_test_setup(test_rdb_tcp_timeout, setupTest), /* too long to run */
     };
 
     int res = cmocka_run_group_tests(tests, NULL, NULL);

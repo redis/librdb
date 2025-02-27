@@ -6,6 +6,7 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <errno.h>
+#include <fcntl.h>
 #include "extCommon.h"
 #include "readerResp.h"
 
@@ -14,16 +15,16 @@
 #include <openssl/err.h>
 #endif
 
-#define PIPELINE_DEPTH_DEF        200   /* Default Number of pending cmds before waiting for response(s) */
-#define PIPELINE_DEPTH_MAX        1000  /* limit the max value allowed to configure for pipeline depth */
+#define PIPELINE_DEPTH_DEF          200   /* Default Number of pending cmds before waiting for response(s) */
+#define PIPELINE_DEPTH_MAX          1000  /* limit the max value allowed to configure for pipeline depth */
 
-#define NUM_RECORDED_CMDS         400   /* Number of commands to backlog, in a cyclic array */
-#define RECORDED_KEY_MAX_LEN     40    /* Maximum payload size from any command to record into cyclic array */
+#define NUM_RECORDED_CMDS           400   /* Number of commands to backlog, in a cyclic array */
+#define RECORDED_KEY_MAX_LEN        40    /* Maximum payload size from any command to record into cyclic array */
 
-#define REPLY_BUFF_SIZE           1024  /* reply buffer size */
+#define REPLY_BUFF_SIZE             1024  /* reply buffer size */
 
-#define MAX_EINTR_RETRY           3
-
+#define MAX_EINTR_RETRY             5
+#define RECV_CMD_TIMEOUT_SEC        10    /* recv() command timeout in seconds */
 
 struct RdbxRespToRedisLoader {
 
@@ -42,6 +43,7 @@ struct RdbxRespToRedisLoader {
     RdbParser *p;
     int fd;
     int fdOwner; /* Set to 1 if this entity created the socket, and it is the one to release. */
+    int origSocketFlags;
 };
 
 /* cb to report RESP error. Returns 1 to propagate. 0 to mask. */
@@ -86,22 +88,22 @@ static int onReadRepliesErrorCb(void *context, char *msg) {
  *
  * numToRead - minimum number of replies to read from the socket before
  *                    returning.
- * sendError -        if set, an error occurred while writing to the server. In
+ * sentError -        if set, an error occurred while writing to the server. In
  *                    this case the function will try to read replies from the
  *                    server. Maybe one of the replies will contain an error message
  *                    that explains why write got failed. Whether error message is
  *                    received or not, the function will return to the original issue.
  *
  * Return 0 for success, 1 otherwise. */
-static int readReplies(RdbxRespToRedisLoader *ctx, int numToRead, int sendError) {
-    int noDataEv = 0;
+static int readReplies(RdbxRespToRedisLoader *ctx, int numToRead, int sentError) {
+    int retries = 0;
     char buff[REPLY_BUFF_SIZE];
 
     RespReaderCtx *respReader = &ctx->respReader;
     size_t countRepliesBefore = respReader->countReplies;
     size_t repliesExpected = respReader->countReplies + numToRead;
 
-    while ((respReader->countReplies < repliesExpected) || (sendError)) {
+    while ((respReader->countReplies < repliesExpected) || (sentError)) {
         int bytesReceived = recv(ctx->fd, buff, sizeof(buff), 0);
 
         if (bytesReceived > 0) {
@@ -114,18 +116,25 @@ static int readReplies(RdbxRespToRedisLoader *ctx, int numToRead, int sendError)
 
         /* handle error */
 
-        if (sendError)
-            return 0; /* Failed read error message from dst. Back to original issue. */
+        if (sentError)
+            return 0; /* Done lookup for error message. Return to original issue */
 
         if (bytesReceived == 0) {
             RDB_reportError(ctx->p, (RdbRes) RDBX_ERR_RESP2REDIS_CONN_CLOSE,
                             "Connection closed by the remote side");
             return 1;
         } else {
-            if ((!noDataEv) && (errno == EAGAIN || errno == EWOULDBLOCK)) {
-                noDataEv = 1;
-                RDB_log(ctx->p, RDB_LOG_WRN, "No data available from redis-server");
-                continue; /* Try one more time (Timeout is 60sec) */
+            if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                retries++;
+                RDB_log(ctx->p, RDB_LOG_INF, 
+                        "No reply from redis-server for %d seconds", 
+                        retries * RECV_CMD_TIMEOUT_SEC);
+                
+                /* Parser got external error? Currently Used only for testing */
+                if (RDB_getErrorCode(ctx->p) != RDB_OK)
+                    return 1;
+                
+                continue;
             }
 
             RDB_reportError(ctx->p,
@@ -209,7 +218,7 @@ static int redisLoaderWritev(void *context, struct iovec *iov, int iovCnt,
 
     /* Error occurred. Try to receive error msg from dst, which might explain
        why write got failed */
-    readReplies(ctx, 0, 1/*sendError*/);
+    readReplies(ctx, 0, 1/*sentError*/);
     return 1;
 }
 
@@ -229,6 +238,13 @@ static void redisLoaderDelete(void *context) {
     /* not required to flush on termination */
 
     shutdown(ctx->fd, SHUT_WR); /* graceful shutdown */
+
+    /* Restore the original socket flags */
+    if (fcntl(ctx->fd, F_SETFL, ctx->origSocketFlags) == -1) {
+        RDB_reportError(ctx->p, (RdbRes) RDBX_ERR_RESP2REDIS_CONF_SOCKET,
+                        "Failed to restore original socket flags. errno=%d: %s",
+                        errno, strerror(errno));
+    }
 
     if (ctx->fdOwner) close(ctx->fd);
 
@@ -324,36 +340,68 @@ _LIBRDB_API void RDBX_setPipelineDepth(RdbxRespToRedisLoader *r2r, int depth) {
     r2r->pendingCmds.pipelineDepth = (depth <= 0 || depth>PIPELINE_DEPTH_MAX) ? PIPELINE_DEPTH_DEF : depth;
 }
 
+/* Create a loader from an existing file descriptor */
 _LIBRDB_API RdbxRespToRedisLoader *RDBX_createRespToRedisFd(RdbParser *p,
                                                             RdbxToResp *rdbToResp,
                                                             RdbxRedisAuth *auth,
                                                             int fd) {
-    RdbxRespToRedisLoader *ctx;
-    if ((ctx = RDB_alloc(p, sizeof(RdbxRespToRedisLoader))) == NULL) {
-        RDB_reportError(p, (RdbRes) RDBX_ERR_RESP_FAILED_ALLOC,
-                        "Failed to allocate struct RdbxRespToRedisLoader");
+    /* Save the original socket flags */
+    int origSockFlags = fcntl(fd, F_GETFL, 0);
+    if (origSockFlags == -1) {
+        RDB_reportError(p, (RdbRes) RDBX_ERR_RESP2REDIS_CONF_SOCKET,
+                        "Failed to get original socket flags. errno=%d: %s", errno, strerror(errno));
+        return NULL;
+    }
+    
+    /* Ensure the socket is in blocking mode */
+    if (fcntl(fd, F_SETFL, origSockFlags & ~O_NONBLOCK) == -1) {
+        RDB_reportError(p, (RdbRes) RDBX_ERR_RESP2REDIS_CONF_SOCKET,
+                        "Failed to configure for blocking mode. errno=%d: %s",
+                        errno, strerror(errno));
         return NULL;
     }
 
-    /* init RdbxRespToRedisLoader context */
+    /* Set receive timeout (blocking, but with a limit) */
+    struct timeval timeout = { .tv_sec = RECV_CMD_TIMEOUT_SEC, .tv_usec = 0 };
+    if (setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) < 0) {
+        RDB_reportError(p, (RdbRes) RDBX_ERR_RESP2REDIS_SET_TIMEOUT,
+                        "Failed to configure timeout for socket. errno=%d: %s",
+                        errno, strerror(errno));
+        fcntl(fd, F_SETFL, origSockFlags);
+        return NULL;
+    }
+
+    RdbxRespToRedisLoader *ctx = RDB_alloc(p, sizeof(RdbxRespToRedisLoader));
+    if (!ctx) {
+        RDB_reportError(p, (RdbRes) RDBX_ERR_RESP_FAILED_ALLOC, "Failed to allocate struct RdbxRespToRedisLoader");
+        fcntl(fd, F_SETFL, origSockFlags);
+        return NULL;
+    }
+
     memset(ctx, 0, sizeof(RdbxRespToRedisLoader));
     ctx->p = p;
     ctx->fd = fd;
+    ctx->origSocketFlags = origSockFlags;
     ctx->fdOwner = 0;
     ctx->pendingCmds.num = 0;
     ctx->pendingCmds.pipelineDepth = PIPELINE_DEPTH_DEF;
     readRespInit(&ctx->respReader);
     setErrorCb(&ctx->respReader, ctx, onReadRepliesErrorCb);
 
-    if (auth && (redisAuth(ctx, auth) != RDB_OK))
+    if (auth && (redisAuth(ctx, auth) != RDB_OK)) {
+        RDB_reportError(p, (RdbRes) RDBX_ERR_RESP2REDIS_AUTH_FAILED, "Redis authentication failed.");
+        RDB_free(p, ctx);
+        fcntl(fd, F_SETFL, origSockFlags);
         return NULL;
+    }
 
-    /* Set 'this' writer to rdbToResp */
+    /* Set writer to rdbToResp */
     RdbxRespWriter inst = {ctx, redisLoaderDelete, redisLoaderWritev, redisLoaderFlush};
     RDBX_attachRespWriter(rdbToResp, &inst);
     return ctx;
 }
 
+/* Create a loader and establish a TCP connection */
 _LIBRDB_API RdbxRespToRedisLoader *RDBX_createRespToRedisTcp(RdbParser *p,
                                                              RdbxToResp *rdbToResp,
                                                              RdbxRedisAuth *auth,
@@ -361,7 +409,7 @@ _LIBRDB_API RdbxRespToRedisLoader *RDBX_createRespToRedisTcp(RdbParser *p,
                                                              int port) {
     int sockfd = socket(AF_INET, SOCK_STREAM, 0);
     if (sockfd == -1) {
-        RDB_reportError(p, (RdbRes) RDBX_ERR_RESP2REDIS_CREATE_SOCKET, "Failed to create tcp socket");
+        RDB_reportError(p, (RdbRes) RDBX_ERR_RESP2REDIS_CREATE_SOCKET, "Failed to create TCP socket");
         return NULL;
     }
 
@@ -377,18 +425,9 @@ _LIBRDB_API RdbxRespToRedisLoader *RDBX_createRespToRedisTcp(RdbParser *p,
     }
 
     if (connect(sockfd, (struct sockaddr *) &server_addr, sizeof(server_addr)) == -1) {
-        RDB_reportError(p, (RdbRes) RDBX_ERR_RESP2REDIS_INVALID_ADDRESS,
+        RDB_reportError(p, (RdbRes) RDBX_ERR_RESP2REDIS_FAILED_CONNECT,
                         "Failed to connect(hostname=%s, port=%d) => errno=%d",
                         hostname, port, errno);
-        goto createErr;
-    }
-
-    /* Set the recv() timeout. Avoid blocking forever. */
-    struct timeval timeout = { .tv_sec = 60, .tv_usec = 0 };
-    if (setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) < 0) {
-        RDB_reportError(p, (RdbRes) RDBX_ERR_RESP2REDIS_SET_TIMEOUT,
-                        "Failed to set socket receive timeout. errno=%d: %s",
-                        errno, strerror(errno));
         goto createErr;
     }
 
