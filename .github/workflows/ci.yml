@@ -10,30 +10,31 @@ jobs:
   build:
     strategy:
       matrix:
-        - os: ubuntu-latest
-          compiler: gcc
-          version: "5.0"
-        - os: ubuntu-latest
-          compiler: clang
-          version: "6.0"
-        - os: ubuntu-latest
-          compiler: gcc
-          version: "7.0"
-        - os: ubuntu-latest
-          compiler: clang
-          version: "7.2"
-        - os: ubuntu-latest
-          compiler: gcc
-          version: "7.4"
-        - os: ubuntu-latest
-          compiler: clang
-          version: "unstable"
-        - os: macos-latest
-          compiler: gcc
-          version: "7.4"
-        - os: macos-latest
-          compiler: clang
-          version: "unstable"
+        include: 
+          - os: ubuntu-latest
+            compiler: gcc
+            version: "5.0"
+          - os: ubuntu-latest
+            compiler: clang
+            version: "6.0"
+          - os: ubuntu-latest
+            compiler: gcc
+            version: "7.0"
+          - os: ubuntu-latest
+            compiler: clang
+            version: "7.2"
+          - os: ubuntu-latest
+            compiler: gcc
+            version: "7.4"
+          - os: ubuntu-latest
+            compiler: clang
+            version: "unstable"
+          - os: macos-latest
+            compiler: gcc
+            version: "7.4"
+          - os: macos-latest
+            compiler: clang
+            version: "unstable"
 
     runs-on: ${{ matrix.os }}
 
