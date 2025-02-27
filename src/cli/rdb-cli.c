@@ -77,8 +77,10 @@ static void logger(RdbLogLevel l, const char *msg) {
             [RDB_LOG_DBG]  = "DEBUG :",
     };
 
-    if (logfile != NULL)
+    if (logfile != NULL) {
         fprintf(logfile, "%s %s\n", logLevelStr[l], msg);
+        fflush(logfile);
+    }
 
     if (l == RDB_LOG_ERR)
         printf("%s %s\n", logLevelStr[l], msg);
