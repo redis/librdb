@@ -29,7 +29,7 @@ else
 endif
 
 ifeq ($(BUILD_TLS),yes)
-    CFLAGS+=-DUSE_OPENSSL=1
+	CFLAGS+=-DUSE_OPENSSL=1
 	LIBS += -lssl -lcrypto
 endif
 
