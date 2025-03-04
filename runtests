@@ -20,7 +20,7 @@ while [[ $# -gt 0 ]]; do
       SPECIFIC_TEST_GROUP=" --test-group $2 "
       shift 2 ;;
     *|-h)
-      echo "Usage: $(basename $0) [-v|--valgrind] [-f|--folder REDIS_FOLDER] [-t|--test TEST] [-g|--test-group GROUP]"
+      echo "Usage: $(basename $0) [-v|--valgrind] [-f|--redis-folder REDIS_FOLDER] [-t|--test TEST] [-g|--test-group GROUP]"
       exit 1 ;;
   esac
 done

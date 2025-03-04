@@ -20,7 +20,7 @@ static int setupTest(void **state) {
     return 0;
 }
 
-void rdb_to_tcp(const char *rdbfile, int pipelineDepth, int isRestore, char *respFileName) {
+void rdb_to_tcp(const char *hostname, const char *rdbfile, int pipelineDepth, int isRestore, char *respFileName) {
     RdbxRespToRedisLoader *r2r;
     RdbxToResp *rdbToResp1, *rdbToResp2;
     RdbStatus status;
@@ -35,7 +35,7 @@ void rdb_to_tcp(const char *rdbfile, int pipelineDepth, int isRestore, char *res
     RDB_setLogLevel(parser, RDB_LOG_ERR);
     assert_non_null(RDBX_createReaderFile(parser, rdbfile));
     assert_non_null(rdbToResp1 = RDBX_createHandlersToResp(parser, &rdb2respConf));
-    assert_non_null(r2r = RDBX_createRespToRedisTcp(parser, rdbToResp1, NULL, "127.0.0.1", getRedisPort()));
+    assert_non_null(r2r = RDBX_createRespToRedisTcp(parser, rdbToResp1, NULL, hostname, getRedisPort()));
     if (respFileName) {
         assert_non_null(rdbToResp2 = RDBX_createHandlersToResp(parser, &rdb2respConf));
         assert_non_null(RDBX_createRespToFileWriter(parser, rdbToResp2, respFileName));
@@ -90,7 +90,7 @@ static void rdb_save_librdb_reload_eq(int isRestore, char *serverRdbFile) {
     sendRedisCmd("FLUSHALL", REDIS_REPLY_STATUS, NULL);
 
     /* Reload the RDB file */
-    rdb_to_tcp(rdbfile, 1, isRestore, NULL);
+    rdb_to_tcp("127.0.0.1", rdbfile, 1, isRestore, NULL);
 
     sendRedisCmd("DEBUG DIGEST", REDIS_REPLY_STATUS, expectedSha);
 }
@@ -125,7 +125,7 @@ static void test_rdb_to_redis_common(const char *rdbfile, int ignoreListOrder, c
         rdb_to_json(rdbfile, TMP_FOLDER("out1.json"));
 
         /* 2. Upload RDB against Redis and save DUMP-RDB */
-        rdb_to_tcp(rdbfile, 1, isRestore, TMP_FOLDER("cmd.resp"));
+        rdb_to_tcp("127.0.0.1", rdbfile, 1, isRestore, TMP_FOLDER("cmd.resp"));
         sendRedisCmd("SAVE", REDIS_REPLY_STATUS, NULL);
 
         if (expRespCmd && !isRestore) {
@@ -322,7 +322,7 @@ static void test_rdb_to_redis_module(void **state) {
     sendRedisCmd("FLUSHALL", REDIS_REPLY_STATUS, NULL);
 
     /* Run the parser against Redis and also let it output RESP to a file */
-    rdb_to_tcp(TMP_FOLDER("test_rdb_to_redis_module.rdb"), 1, 1, TMP_FOLDER("rdb_to_tcp.resp"));
+    rdb_to_tcp("127.0.0.1", TMP_FOLDER("test_rdb_to_redis_module.rdb"), 1, 1, TMP_FOLDER("rdb_to_tcp.resp"));
 
     /* Verify resp file contains "RESTOREMODAUX & RESTORE key1" */
     assert_file_payload(TMP_FOLDER("rdb_to_tcp.resp"), STR_AND_SIZE("RESTORE\r\n$4\r\nkey1"), M_SUBSTR, 1);
@@ -357,7 +357,7 @@ static void test_rdb_to_redis_module_aux_empty(void **state) {
     if (!isSupportRestoreModuleAux())
         skip();
 
-    rdb_to_tcp(DUMP_FOLDER("module_aux_empty.rdb"), 1, 1, NULL);
+    rdb_to_tcp("127.0.0.1", DUMP_FOLDER("module_aux_empty.rdb"), 1, 1, NULL);
 }
 
 static void test_rdb_to_redis_stream(void **state) {
@@ -597,6 +597,16 @@ void test_rdb_tcp_timeout(void **state) {
     close(server_fd);
 }
 
+static void test_rdb_to_redis_hostname_connection(void **state) {
+    UNUSED(state);
+    rdb_to_tcp("localhost", DUMP_FOLDER("single_key.rdb"), 1, 1, NULL);
+}
+
+static void test_rdb_to_redis_ipv6_connection(void **state) {
+    UNUSED(state);
+    rdb_to_tcp("::1", DUMP_FOLDER("single_key.rdb"), 1, 1, NULL);
+}
+
 /*************************** group_rdb_to_redis *******************************/
 int group_rdb_to_redis(void) {
 
@@ -654,6 +664,8 @@ int group_rdb_to_redis(void) {
             cmocka_unit_test_setup(test_rdb_to_redis_multiple_dbs, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_function, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_func_lib_replace_if_exist, setupTest),
+            cmocka_unit_test_setup(test_rdb_to_redis_hostname_connection, setupTest),
+            cmocka_unit_test_setup(test_rdb_to_redis_ipv6_connection, setupTest),
             //cmocka_unit_test_setup(test_rdb_tcp_timeout, setupTest), /* too long to run */
     };
 

@@ -7,6 +7,7 @@
 #include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
+#include <netdb.h>
 #include "extCommon.h"
 #include "readerResp.h"
 
@@ -407,27 +408,40 @@ _LIBRDB_API RdbxRespToRedisLoader *RDBX_createRespToRedisTcp(RdbParser *p,
                                                              RdbxRedisAuth *auth,
                                                              const char *hostname,
                                                              int port) {
-    int sockfd = socket(AF_INET, SOCK_STREAM, 0);
-    if (sockfd == -1) {
-        RDB_reportError(p, (RdbRes) RDBX_ERR_RESP2REDIS_CREATE_SOCKET, "Failed to create TCP socket");
+    int sockfd;
+    struct addrinfo hints, *servinfo, *rp;
+    char portStr[6];
+    int rv;
+
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    snprintf(portStr, sizeof(portStr), "%d", port);
+
+    if ((rv = getaddrinfo(hostname, portStr, &hints, &servinfo)) != 0) {
+        RDB_reportError(p, (RdbRes) RDBX_ERR_RESP2REDIS_INVALID_ADDRESS,
+                        "Failed to resolve hostname. getaddrinfo(%s, %s) => %s",
+                        hostname, portStr, gai_strerror(rv));
         return NULL;
     }
 
-    struct sockaddr_in server_addr;
-    memset(&server_addr, 0, sizeof(server_addr));
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_port = htons(port);
-    if (inet_pton(AF_INET, hostname, &(server_addr.sin_addr)) <= 0) {
-        RDB_reportError(p, (RdbRes) RDBX_ERR_RESP2REDIS_INVALID_ADDRESS,
-                        "Failed to convert IP address. inet_pton(hostname=%s, port=%d) => errno=%d",
-                        hostname, port, errno);
-        goto createErr;
+    for (rp = servinfo; rp != NULL; rp = rp->ai_next) {
+        sockfd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
+        if (sockfd == -1) {
+            continue;
+        }
+
+        if (connect(sockfd, rp->ai_addr, rp->ai_addrlen) != -1) {
+            break;
+        }
+
+        close(sockfd);
     }
 
-    if (connect(sockfd, (struct sockaddr *) &server_addr, sizeof(server_addr)) == -1) {
+    if (rp == NULL) {
         RDB_reportError(p, (RdbRes) RDBX_ERR_RESP2REDIS_FAILED_CONNECT,
-                        "Failed to connect(hostname=%s, port=%d) => errno=%d",
-                        hostname, port, errno);
+                        "Failed to connect to any resolved address for hostname=%s, port=%d",
+                        hostname, port);
         goto createErr;
     }
 
@@ -439,6 +453,7 @@ _LIBRDB_API RdbxRespToRedisLoader *RDBX_createRespToRedisTcp(RdbParser *p,
     return res;
 
 createErr:
+    freeaddrinfo(servinfo);
     close(sockfd);
     return NULL;
 }
