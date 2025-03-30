@@ -64,6 +64,7 @@ jobs:
             # Build and install cmocka
             git clone https://git.cryptomilk.org/projects/cmocka.git
             cd cmocka
+            git checkout stable-1.1
             mkdir build
             cd build
             cmake .. -DCMAKE_INSTALL_PREFIX=/usr/local
