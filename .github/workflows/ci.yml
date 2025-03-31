@@ -62,7 +62,7 @@ jobs:
             sudo apt-get install -y cmake clang libssl-dev valgrind git bc
   
             # Build and install cmocka
-            git clone https://git.cryptomilk.org/projects/cmocka.git
+            git clone --depth=1 --branch=stable-1.1 https://git.cryptomilk.org/projects/cmocka.git
             cd cmocka
             mkdir build
             cd build
