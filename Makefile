@@ -1,7 +1,7 @@
 
-PREFIX? = /usr/local
+PREFIX ?= /usr/local
 
-DESTDIR?=
+DESTDIR ?=
 INSTALL = /usr/bin/install -c
 BINDIR = $(DESTDIR)$(PREFIX)/bin
 LIBDIR = $(DESTDIR)$(PREFIX)/lib
