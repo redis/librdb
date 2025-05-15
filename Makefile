@@ -1,6 +1,11 @@
 
 PREFIX ?= /usr/local
 
+# Avoid the need for 'ln -r'.
+ifneq ($(realpath $(PREFIX)),$(PREFIX))
+$(error PREFIX must be a canonical path)
+endif
+
 DESTDIR ?=
 INSTALL = /usr/bin/install -c
 BINDIR = $(DESTDIR)$(PREFIX)/bin
@@ -76,14 +81,14 @@ librdb-ext.pc: librdb-ext.pc.in Makefile
 install: all librdb.pc librdb-ext.pc
 	$(INSTALL) -d $(BINDIR)
 	$(INSTALL) -m 755 bin/rdb-cli $(BINDIR)/rdb-cli-$(LIBRDB_VERSION)
-	ln -fsr $(BINDIR)/rdb-cli-$(LIBRDB_VERSION) $(BINDIR)/rdb-cli
+	ln -fs $(BINDIR)/rdb-cli-$(LIBRDB_VERSION) $(BINDIR)/rdb-cli
 	$(INSTALL) -d $(LIBDIR)
 
 ifeq ($(LIBRDB_INSTALL_SHARED),yes)
 	$(INSTALL) -m 755 lib/librdb.so.$(LIBRDB_VERSION) $(LIBDIR)/librdb.so.$(LIBRDB_VERSION)
-	ln -fsr $(LIBDIR)/librdb.so.$(LIBRDB_VERSION) $(LIBDIR)/librdb.so
+	ln -fs $(LIBDIR)/librdb.so.$(LIBRDB_VERSION) $(LIBDIR)/librdb.so
 	$(INSTALL) -m 755 lib/librdb-ext.so.$(LIBRDB_VERSION) $(LIBDIR)/librdb-ext.so.$(LIBRDB_VERSION)
-	ln -fsr $(LIBDIR)/librdb-ext.so.$(LIBRDB_VERSION) $(LIBDIR)/librdb-ext.so
+	ln -fs $(LIBDIR)/librdb-ext.so.$(LIBRDB_VERSION) $(LIBDIR)/librdb-ext.so
 	$(INSTALL) -d $(PKGCONFIGDIR)
 	$(INSTALL) -m 644 librdb.pc $(PKGCONFIGDIR)
 	$(INSTALL) -m 644 librdb-ext.pc $(PKGCONFIGDIR)
@@ -91,9 +96,9 @@ endif
 
 ifeq ($(LIBRDB_INSTALL_STATIC),yes)
 	$(INSTALL) -m 755 lib/librdb.a $(LIBDIR)/librdb.a.$(LIBRDB_VERSION)
-	ln -fsr $(LIBDIR)/librdb.a.$(LIBRDB_VERSION) $(LIBDIR)/librdb.a
+	ln -fs $(LIBDIR)/librdb.a.$(LIBRDB_VERSION) $(LIBDIR)/librdb.a
 	$(INSTALL) -m 755 lib/librdb-ext.a $(LIBDIR)/librdb-ext.a.$(LIBRDB_VERSION)
-	ln -fsr $(LIBDIR)/librdb-ext.a.$(LIBRDB_VERSION) $(LIBDIR)/librdb-ext.a
+	ln -fs $(LIBDIR)/librdb-ext.a.$(LIBRDB_VERSION) $(LIBDIR)/librdb-ext.a
 endif
 
 	$(INSTALL) -d $(INCDIR)
