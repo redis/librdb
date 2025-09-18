@@ -376,12 +376,16 @@ static RdbxFilter *createHandlersFilterCommon(RdbParser *p,
     ctx->exclude = exclude;
     ctx->cbReturnValue = RDB_OK;
 
+    /* Register destructor only once to avoid double-free */
+    RdbFreeFunc destructor = deleteFilterCtx;
+
     if (RDB_getNumHandlers(p, RDB_LEVEL_DATA)>0) {
         RdbHandlersDataCallbacks dataCb;
         defaultFilterDataCb(&dataCb);
         dataCb.handleNewKey = handleNewKey;
         dataCb.handleNewDb = handleNewDb;
-        RDB_createHandlersData(p, &dataCb, ctx, deleteFilterCtx);
+        RDB_createHandlersData(p, &dataCb, ctx, destructor);
+        destructor = NULL; /* Only register destructor once */
     }
 
     if (RDB_getNumHandlers(p, RDB_LEVEL_STRUCT)>0) {
@@ -389,7 +393,8 @@ static RdbxFilter *createHandlersFilterCommon(RdbParser *p,
         defaultFilterStructCb(&structCb);
         structCb.handleNewKey = handleNewKey;
         structCb.handleNewDb = handleNewDb;
-        RDB_createHandlersStruct(p, &structCb, ctx, deleteFilterCtx);
+        RDB_createHandlersStruct(p, &structCb, ctx, destructor);
+        destructor = NULL; /* Only register destructor once */
     }
 
     if (RDB_getNumHandlers(p, RDB_LEVEL_RAW)>0) {
@@ -397,7 +402,8 @@ static RdbxFilter *createHandlersFilterCommon(RdbParser *p,
         defaultFilterRawCb(&rawCb);
         rawCb.handleNewKey = handleNewKey;
         rawCb.handleNewDb = handleNewDb;
-        RDB_createHandlersRaw(p, &rawCb, ctx, deleteFilterCtx);
+        RDB_createHandlersRaw(p, &rawCb, ctx, destructor);
+        destructor = NULL; /* Only register destructor once */
     }
     return ctx;
 }
