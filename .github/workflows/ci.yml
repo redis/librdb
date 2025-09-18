@@ -31,7 +31,10 @@ jobs:
             version: "unstable"
           - os: macos-latest
             compiler: gcc
-            version: "7.4"
+            version: "8.0"
+          - os: ubuntu-latest
+            compiler: gcc
+            version: "8.2"
           - os: macos-latest
             compiler: clang
             version: "unstable"
