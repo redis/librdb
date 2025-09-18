@@ -220,7 +220,7 @@ static inline RdbRes onWriteNewCmdDbg(RdbxToResp *ctx) {
     /* Write only commands starting from given command number */
     if ((ctx->debug.flags & RFLAG_WRITE_FROM_CMD_ID) &&
         (currCmdNum < ctx->debug.writeFromCmdNum))
-        return RDB_OK;
+        return RDB_OK_DONT_PROPAGATE;
 
     /* enumerate and trace cmd-id by preceding each cmd with "SET _RDB_CLI_CMD_ID_ <CMD-ID>" */
     if (ctx->debug.flags & RFLAG_ENUM_CMD_ID) {
@@ -256,8 +256,10 @@ static inline RdbRes writevWrap(RdbxToResp *ctx, struct iovec *iov, int cnt,
     RdbxRespWriter *writer = &ctx->respWriter;
 
     if (unlikely(ctx->debug.flags && startCmd)) {
-        if ((res = onWriteNewCmdDbg(ctx)) != RDB_OK)
+        if ((res = onWriteNewCmdDbg(ctx)) != RDB_OK) {
+            if (res == RDB_OK_DONT_PROPAGATE) return RDB_OK;
             return RDB_getErrorCode(ctx->parser);
+        }
     }
 
     if (unlikely(writer->writev(writer->ctx, iov, cnt, startCmd, endCmd))) {
