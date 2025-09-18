@@ -4,6 +4,7 @@
 #include <ctype.h>
 #include "extCommon.h"
 #include "../../deps/redis/util.h"
+#include "../../deps/redis/sha256.h"
 
 struct RdbxToPrint;
 
@@ -88,7 +89,20 @@ static void outputPlainEscaping(RdbxToPrint *ctx, char *p, size_t len) {
     }
 }
 
+/* Print first 4 bytes of sha256 of key, like __RDB_key() */
+static char *printsha256(char *key, int len, char buf[9]) {
+    BYTE hash[SHA256_BLOCK_SIZE];
+    SHA256_CTX ctx;
+    sha256_init(&ctx);
+    sha256_update(&ctx, (unsigned char*) key, len);
+    sha256_final(&ctx, hash);
+    for (int i = 0; i < 4; i++) snprintf(buf + (i * 2), 3, "%02x", hash[i]);
+    buf[8] = '\0';
+    return buf;
+}
+
 static void printKeyFmt(RdbxToPrint *ctx, RdbBulk string) {
+    char buf[9];
     const char *p = ctx->keyFmt;
 
     if (ctx->keyFmt[0] == '\0') return; /* if not FMT for keys */
@@ -99,6 +113,11 @@ static void printKeyFmt(RdbxToPrint *ctx, RdbBulk string) {
             switch (*p) {
                 case 'd':
                     fprintf(ctx->outfile, "%d", ctx->dbnum);
+                    break;
+                case 'h':  // print sha256 of key
+                    fprintf(ctx->outfile, "%s", printsha256(ctx->keyCtx.key,
+                                                            ctx->keyCtx.keyLen,
+                                                            buf));
                     break;
                 case 'k':
                     outputPlainEscaping(ctx, ctx->keyCtx.key, ctx->keyCtx.keyLen);
@@ -130,6 +149,12 @@ static void printKeyFmt(RdbxToPrint *ctx, RdbBulk string) {
                             break;
                         case RDB_DATA_TYPE_STREAM:
                             fprintf(ctx->outfile, "stream");
+                            break;
+                        case RDB_DATA_TYPE_MODULE:
+                            fprintf(ctx->outfile, "module");
+                            break;
+                        case RDB_DATA_TYPE_FUNCTION:
+                            fprintf(ctx->outfile, "function");
                             break;
                         default:
                             fprintf(ctx->outfile, "unknown");

@@ -225,6 +225,14 @@ static void test_rdb_cli_print(void **state) {
         "redis-ver=255.255.255\nredis-bits=64\nctime=1683103535\nused-mem=967040\naof-base=0\n");
 }
 
+static void test_rdb_cli_print_sha256(void **state) {
+    UNUSED(state);
+    sendRedisCmd("SET mylist27 STAM", REDIS_REPLY_STATUS, NULL);
+    sendRedisCmd("SAVE", REDIS_REPLY_STATUS, NULL);
+    assert_string_equal(
+        runSystemCmd("$RDB_CLI_CMD %s print -k \"%%h\"", TMP_FOLDER("dump.rdb")), "0bdab52c\n");
+}
+
 /*************************** group_test_rdb_cli *******************************/
 int group_test_rdb_cli(void) {
 
@@ -245,6 +253,7 @@ int group_test_rdb_cli(void) {
             cmocka_unit_test_setup(test_rdb_cli_input_fd_reader, setupTest),
             cmocka_unit_test_setup(test_rdb_cli_redis_auth, setupTest),
             cmocka_unit_test_setup(test_rdb_cli_print, setupTest),
+            cmocka_unit_test_setup(test_rdb_cli_print_sha256, setupTest),
     };
 
     int res = cmocka_run_group_tests(tests, NULL, NULL);

@@ -146,7 +146,7 @@ static void printUsage(int shortUsage) {
     printf("\t                              aligned the parser will generate higher-level commands instead.\n");
     printf("\t-o, --output <FILE>           Specify the output file (For 'resp' only: if not specified, output to stdout)\n");
     printf("\t-1, --single-db               Avoid SELECT command. DBs in RDB will be stored to db 0. Watchout for conflicts\n");
-    printf("\t-s, --start-cmd-num <NUM>     Start writing redis from command number\n");
+    printf("\t-n, --start-cmd-num <NUM>     Start writing redis from command number\n");
     printf("\t-e, --enum-commands           Command enumeration and tracing by preceding each generated RESP command\n");
     printf("\t                              with debug command of type: `SET _RDB_CLI_CMD_ID_ <CMD-ID>`\n");
 
