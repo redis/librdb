@@ -313,7 +313,7 @@ static RdbRes formatResp(RdbParser *parser, int argc, char **argv) {
         if (getOptArg(argc, argv, &at, "-1", "--single-db", &(conf.singleDb), NULL)) continue;
         if (getOptArg(argc, argv, &at, "-t", "--target-redis-ver", NULL, &(conf.dstRedisVersion))) continue;
         if (getOptArg(argc, argv, &at, "-e", "--enum-commands", &commandEnum, NULL)) continue;
-        if (getOptArgVal(argc, argv, &at, "-n", "--start-cmd-num", NULL, &startCmdNum, 1, INT_MAX)) continue;
+        if (getOptArgVal(argc, argv, &at, "-s", "--start-cmd-num", NULL, &startCmdNum, 1, INT_MAX)) continue;
 
         loggerWrap(RDB_LOG_ERR, "Invalid 'resp' [FORMAT_OPTIONS] argument: %s\n", opt);
         printUsage(1);
