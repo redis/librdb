@@ -846,15 +846,24 @@ static void resolveMultipleLevelsRegistration(RdbParser *p) {
 }
 
 static void attachDebugHandlers(RdbParser *p) {
+    int registered = 0;
     RDB_setLogLevel(p, RDB_LOG_DBG);
-    /* find the lowest level that handlers are registered and register DBG handlers accordingly */
+
+    /* Register debug handlers at all levels where there are existing handlers */
     if (p->numHandlers[RDB_LEVEL_RAW]) {
+        registered = 1;
         RdbHandlersRawCallbacks cb = {.handleNewKey = handleNewKeyPrintDbg, .handleEndKey = handleEndKeyPrintDbg};
         RDB_createHandlersRaw(p, &cb, NULL, NULL);
-    } else if (p->numHandlers[RDB_LEVEL_STRUCT]) {
+    }
+
+    if (p->numHandlers[RDB_LEVEL_STRUCT]) {
+        registered = 1;
         RdbHandlersStructCallbacks cb = {.handleNewKey = handleNewKeyPrintDbg, .handleEndKey = handleEndKeyPrintDbg};
         RDB_createHandlersStruct(p, &cb, NULL, NULL);
-    } else {
+    }
+    
+    /* If registerd at DATA level or if no handlers are registered at any level */
+    if ((p->numHandlers[RDB_LEVEL_DATA]) || (!registered)) {
         RdbHandlersDataCallbacks cb = {.handleNewKey = handleNewKeyPrintDbg, .handleEndKey = handleEndKeyPrintDbg};
         RDB_createHandlersData(p, &cb, NULL, NULL);
     }
