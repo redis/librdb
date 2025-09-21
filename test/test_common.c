@@ -14,6 +14,7 @@
 #include <sys/wait.h>
 #include <dirent.h>
 #include "../deps/hiredis/hiredis.h"
+#include "../src/redisver.h"
 #include "test_common.h"
 
 /* Live Redis server for some of the tests (Optional) */
@@ -438,14 +439,12 @@ void setupRedisServer(const char *extraArgs) {
             get_redis_version(redisConnContext, &redisVerMajor, &redisVerMinor);
             snprintf(redisVer, sizeof(redisVer), "%d.%d", redisVerMajor, redisVerMinor);
             if ((redisVerMajor == 255) && (redisVerMinor == 255)) {/* unstable version? */
-                snprintf(redisVer, sizeof(redisVer),
-                         MAX_SUPPORTED_REDIS_VERSION);
+                strncpy(redisVer, redisToRdbVersion[0].redisStr, sizeof(redisVer));
                 prefixVer = "Unresolved Version. Assumed ";
-                assert_int_equal(sscanf(MAX_SUPPORTED_REDIS_VERSION, "%d.%d",
-                           &redisVerMajor, &redisVerMinor), 2);
+                redisVerMajor = VAL_MAJOR(redisToRdbVersion[0].redis);
+                redisVerMinor = VAL_MINOR(redisToRdbVersion[0].redis);
             }
             redisVersionInit = 1;
-
         }
         printf(">> Redis Server(%d) started on port %d with PID %d (%sVersion=%s)\n",
                currRedisInst, port, pid, prefixVer, redisVer);

@@ -8,6 +8,7 @@
 #include "../../deps/redis/util.h"
 #include "../../deps/redis/endianconv.h"
 #include "../../deps/redis/rax.h"
+#include "../redisver.h"
 
 /* RDB opcode defines */
 #define _RDB_TYPE_MODULE_2 7
@@ -15,26 +16,7 @@
 #define _RDB_TYPE_STREAM_LISTPACKS_2 19
 #define _REDISMODULE_AUX_BEFORE_RDB (1<<0)
 
-#define VER_VAL(major,minor) (((unsigned int)(major)<<8) | (unsigned int)(minor))
-
 #define KEY_CMD_ID_DBG  "_RDB_CLI_CMD_ID_"
-
-typedef struct RedisToRdbVersion {
-    const char *redisStr;
-    unsigned int redis;
-    unsigned char rdb;
-} RedisToRdbVersion;
-
-const RedisToRdbVersion redisToRdbVersion[] = {
-        {"7.4", VER_VAL(7,4), 12},
-        {"7.2", VER_VAL(7,2), 11},
-        {"7.0", VER_VAL(7,0), 10},
-        {"5.0", VER_VAL(5,0), 9}, //6 and 6.2 had v9 too
-        {"4.0", VER_VAL(4,0), 8},
-        {"3.2", VER_VAL(3,2), 7},
-        {"2.6", VER_VAL(2,6), 6}, //2.8 had v6 too
-        {"2.4", VER_VAL(2,4), 5},
-};
 
 typedef enum DelKeyBeforeWrite {
     DEL_KEY_BEFORE_NONE,
@@ -160,7 +142,7 @@ static int setRdbVerFromDestRedisVer(RdbxToResp *ctx) {
 
         ctx->targetRedisVerVal = VER_VAL(mjr, mnr);
         unsigned int i;
-        for (i = 0; i < sizeof(redisToRdbVersion) / sizeof(redisToRdbVersion[0]); i++)
+        for (i = 0; i < REDIS_TO_RDB_VERSION_COUNT ; i++)
             if (ctx->targetRedisVerVal >= redisToRdbVersion[i].redis) {
                 return redisToRdbVersion[i].rdb;
             }
@@ -1004,9 +986,6 @@ _LIBRDB_API RdbxToResp *RDBX_createHandlersToResp(RdbParser *p, RdbxToRespConf *
     RdbxToResp *ctx;
 
     crc64_init_thread_safe();
-
-    /* Verify table is aligned with LIBRDB_SUPPORT_MAX_RDB_VER */
-    assert(redisToRdbVersion[0].rdb == RDB_getMaxSuppportRdbVersion());
 
     if ((ctx = RDB_alloc(p, sizeof(RdbxToResp))) == NULL)
         return NULL;
