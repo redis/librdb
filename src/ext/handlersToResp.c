@@ -220,7 +220,7 @@ static inline RdbRes onWriteNewCmdDbg(RdbxToResp *ctx) {
     /* Write only commands starting from given command number */
     if ((ctx->debug.flags & RFLAG_WRITE_FROM_CMD_ID) &&
         (currCmdNum < ctx->debug.writeFromCmdNum))
-        return RDB_OK;
+        return RDB_OK_DONT_PROPAGATE;
 
     /* enumerate and trace cmd-id by preceding each cmd with "SET _RDB_CLI_CMD_ID_ <CMD-ID>" */
     if (ctx->debug.flags & RFLAG_ENUM_CMD_ID) {
@@ -256,8 +256,10 @@ static inline RdbRes writevWrap(RdbxToResp *ctx, struct iovec *iov, int cnt,
     RdbxRespWriter *writer = &ctx->respWriter;
 
     if (unlikely(ctx->debug.flags && startCmd)) {
-        if ((res = onWriteNewCmdDbg(ctx)) != RDB_OK)
+        if ((res = onWriteNewCmdDbg(ctx)) != RDB_OK) {
+            if (res == RDB_OK_DONT_PROPAGATE) return RDB_OK;
             return RDB_getErrorCode(ctx->parser);
+        }
     }
 
     if (unlikely(writer->writev(writer->ctx, iov, cnt, startCmd, endCmd))) {
@@ -790,7 +792,7 @@ static RdbRes toRespStreamNewConsumer(RdbParser *p, void *userData, RdbBulk cons
     UNUSED(meta);
     RdbxToResp *ctx = userData;
 
-    /* (re)allocate mem to keep consumer name */
+    /* (re)allocate mem to keep consumer name for potential XCLAIM commands */
     RDB_bulkCopyFree(p, ctx->streamCtx.consName);
 
     ctx->streamCtx.consNameLen = RDB_bulkLen(p, consName);
@@ -800,7 +802,14 @@ static RdbRes toRespStreamNewConsumer(RdbParser *p, void *userData, RdbBulk cons
     return RDB_OK;
 }
 
-/* Callback to handle a pending entry within a consumer */
+/* Callback to handle a pending entry within a consumer 
+ * 
+ * Note that for a given consumer, if it doesn't have any pending entries, then 
+ * this callback will not be called at all and the consumer will not be created.
+ * This is intentional since consumers without pending entries are not needed.
+ * This behavior is different from the `supportRestore` flow, which preserves ALL 
+ * consumers blindly, including those without pending entries.
+ */
 static RdbRes toRespStreamConsumerPendingEntry(RdbParser *p, void *userData, RdbStreamID *streamId) {
     RdbStreamPendingEntry *pe;
     char cmdTrailer[256], idStr[100], keyLenStr[32], gNameLenStr[32], cNameLenStr[32], sentTime[32], sentCount[32];
@@ -1011,27 +1020,27 @@ _LIBRDB_API RdbxToResp *RDBX_createHandlersToResp(RdbParser *p, RdbxToRespConf *
     ctx->streamCtx.groupPel = NULL;
 
     static RdbHandlersDataCallbacks dataCb = {
-            toRespStartRdb,
-            toRespEndRdb,
-            toRespNewDb,
-            NULL, /*db-size*/
-            NULL, /*slot-info*/
-            NULL, /*aux-field*/
-            toRespNewKey,
-            toRespEndKey,
-            toRespString,
-            toRespList,
-            toRespHash,
-            toRespSet,
-            toRespZset,
-            toRespFunction,
-            NULL, /*module*/
-            toRespStreamMetaData,
-            toRespStreamItem,
-            toRespStreamNewCGroup,
-            toRespStreamCGroupPendingEntry,
-            toRespStreamNewConsumer,
-            toRespStreamConsumerPendingEntry
+            toRespStartRdb,                    /*handleStartRdb*/
+            toRespEndRdb,                      /*handleEndRdb*/
+            toRespNewDb,                       /*handleNewDb*/
+            NULL,                              /*handleDbSize*/
+            NULL,                              /*handleSlotInfo*/
+            NULL,                              /*handleAuxField*/
+            toRespNewKey,                      /*handleNewKey*/
+            toRespEndKey,                      /*handleEndKey*/
+            toRespString,                      /*handleStringValue*/
+            toRespList,                        /*handleListItem*/
+            toRespHash,                        /*handleHashField*/
+            toRespSet,                         /*handleSetMember*/
+            toRespZset,                        /*handleZsetMember*/
+            toRespFunction,                    /*handleFunction*/
+            NULL,                              /*handleModule*/
+            toRespStreamMetaData,              /*handleStreamMetadata*/
+            toRespStreamItem,                  /*handleStreamItem*/
+            toRespStreamNewCGroup,             /*handleStreamNewCGroup*/
+            toRespStreamCGroupPendingEntry,    /*handleStreamCGroupPendingEntry*/
+            toRespStreamNewConsumer,           /*handleStreamNewConsumer*/
+            toRespStreamConsumerPendingEntry   /*handleStreamConsumerPendingEntry*/
     };
     RDB_createHandlersData(p, &dataCb, ctx, deleteRdbToRespCtx);
 
