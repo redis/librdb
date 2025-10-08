@@ -1,7 +1,9 @@
+/* Verify that the version string matches the individual version components */
+
 #include <stddef.h>
 #include <assert.h>
 
-#include "version.h"
+#include "../version.h"
 
 #define STATIC_ASSERT(COND,MSG) typedef char static_assertion[(COND)?1:-1]
 

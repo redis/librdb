@@ -9,8 +9,6 @@
 #include "../api/librdb-api.h"  /* RDB library header */
 #include "../api/librdb-ext-api.h" /* RDB library extension header */
 
-#define MAX_SUPPORTED_REDIS_VERSION "7.4"
-
 #define UNUSED(...) unused( (void *) NULL, __VA_ARGS__);
 static inline void unused(void *dummy, ...) { (void)(dummy);}
 
