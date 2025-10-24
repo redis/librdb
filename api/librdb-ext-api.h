@@ -185,6 +185,11 @@ typedef struct RdbxToRespConf {
      * Be cautious of potential key conflicts in such case. */
      int singleDb;
 
+    /* Option to load Lua scripts from RDB auxiliary fields. If aux-field is "lua" 
+     * then its aux-value is being SCRIPT LOAD (Compatible with Redis Ent. RDB 
+     * files that can store scripts in the auxiliary section). */
+     int scriptsInAux;
+
 } RdbxToRespConf;
 
 _LIBRDB_API RdbxToResp *RDBX_createHandlersToResp(RdbParser *, RdbxToRespConf *);

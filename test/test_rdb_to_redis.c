@@ -302,6 +302,56 @@ static void test_rdb_to_redis_function(void **state) {
     sendRedisCmd("FUNCTION LIST", REDIS_REPLY_ARRAY, "myfunc");
 }
 
+/* Test optional flag "scriptsInAux" to SCRIPT LOAD from aux field. 
+ * It verifies the script is truly loaded with EVALSHA afterwards. */
+static void test_rdb_to_redis_script_common(char *rdbfile) {
+
+    /* Parse RDB file and play it against the server with scriptsInAux enabled */
+    RdbxRespToRedisLoader *r2r;
+    RdbxToResp *rdbToResp;
+    RdbStatus status;
+
+    RdbxToRespConf rdb2respConf = {
+            .supportRestore = 0,
+            .dstRedisVersion = getTargetRedisVersion(NULL, NULL),
+            .supportRestoreModuleAux = isSupportRestoreModuleAux(),
+            .scriptsInAux = 1  /* Enable processing of scripts in auxiliary fields */
+    };
+
+    sendRedisCmd("FLUSHALL", REDIS_REPLY_STATUS, NULL);
+
+    RdbParser *parser = RDB_createParserRdb(NULL);
+    RDB_setLogLevel(parser, RDB_LOG_ERR);
+    assert_non_null(RDBX_createReaderFile(parser, rdbfile));
+    assert_non_null(rdbToResp = RDBX_createHandlersToResp(parser, &rdb2respConf));
+    assert_non_null(r2r = RDBX_createRespToRedisTcp(parser, rdbToResp, NULL, "127.0.0.1", getRedisPort()));
+    RDBX_setPipelineDepth(r2r, 1);
+
+    while ((status = RDB_parse(parser)) == RDB_STATUS_WAIT_MORE_DATA);
+    assert_int_equal(status, RDB_STATUS_OK);
+    RDB_deleteParser(parser);
+
+    /* Execute the script using EVALSHA - it should return "Hello from Lua!" */
+    /* SHA1 of "return 'Hello from Lua!'" */
+    const char *sha = "48c949b7bad3ffd14e1059100eb202831fc1b16c";
+
+    char cmd[256];
+    snprintf(cmd, sizeof(cmd), "EVALSHA %s 0", sha);
+    char *result = sendRedisCmd(cmd, REDIS_REPLY_STRING, NULL);
+    assert_non_null(result);
+    assert_string_equal(result, "Hello from Lua!");
+}
+
+static void test_rdb_to_redis_script(void **state) {
+    UNUSED(state);
+    test_rdb_to_redis_script_common(DUMP_FOLDER("script.rdb"));
+}
+
+static void test_rdb_to_redis_script_legacy(void **state) {
+    UNUSED(state);
+    test_rdb_to_redis_script_common(DUMP_FOLDER("script_legacy.rdb"));
+}
+
 /* test relied on rdbtest module within redis repo, if available */
 static void test_rdb_to_redis_module(void **state) {
     UNUSED(state);
@@ -654,6 +704,8 @@ int group_rdb_to_redis(void) {
             cmocka_unit_test_setup(test_rdb_to_redis_multiple_dbs, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_function, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_func_lib_replace_if_exist, setupTest),
+            cmocka_unit_test_setup(test_rdb_to_redis_script, setupTest),
+            cmocka_unit_test_setup(test_rdb_to_redis_script_legacy, setupTest),
             //cmocka_unit_test_setup(test_rdb_tcp_timeout, setupTest), /* too long to run */
     };
 

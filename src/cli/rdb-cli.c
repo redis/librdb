@@ -29,8 +29,10 @@ void loggerWrap(RdbLogLevel l, const char *msg, ...);
  * abbreviation. If a match is found and an argument is expected, it retrieves the
  * argument and stores it. It also sets a `flag` or read `extraArg` if provided.
  */
-static int getOptArg(int argc, char* argv[], int *at, char *abbrvOpt, char *opt,
+static int getOptArg(int argc, char* argv[], int *at, const char *abbrvOpt, char *opt,
                      int *flag, const char **extraArg) {
+    /* arg cannot be empty string */
+    if (abbrvOpt == NULL) abbrvOpt = "";
     if ((strcmp(argv[*at], abbrvOpt) == 0) || (strcmp(argv[*at], opt) == 0)) {
         if (extraArg) {
             if ((*at) + 1 == argc) {
@@ -149,7 +151,7 @@ static void printUsage(int shortUsage) {
     printf("\t-n, --start-cmd-num <NUM>     Start writing redis from command number\n");
     printf("\t-e, --enum-commands           Command enumeration and tracing by preceding each generated RESP command\n");
     printf("\t                              with debug command of type: `SET _RDB_CLI_CMD_ID_ <CMD-ID>`\n");
-
+    printf("\t    --scripts-in-aux          For auxiliary field \"lua\", Apply `SCRIPT LOAD <aux-val>` (For RedisEnt.)\n");
 }
 
 static RdbRes formatJson(RdbParser *parser, int argc, char **argv) {
@@ -242,6 +244,7 @@ static RdbRes formatRedis(RdbParser *parser, int argc, char **argv) {
         if (getOptArg(argc, argv, &at, "-u", "--user", NULL, &auth.user)) continue;
         if (getOptArg(argc, argv, &at, "-P", "--password", NULL, &auth.pwd)) continue;
         if (getOptArg(argc, argv, &at, "-e", "--enum-commands", &commandEnum, NULL)) continue;
+        if (getOptArg(argc, argv, &at, NULL, "--scripts-in-aux", &(conf.scriptsInAux), NULL)) continue;
         if (getOptArgVal(argc, argv, &at, "-a", "--auth", NULL, &(auth.cmd.argc), 1, INT_MAX)) {
             auth.cmd.argv = argv + at + 1;
             if ((1 + at + auth.cmd.argc) >= argc) {
@@ -314,6 +317,7 @@ static RdbRes formatResp(RdbParser *parser, int argc, char **argv) {
         if (getOptArg(argc, argv, &at, "-t", "--target-redis-ver", NULL, &(conf.dstRedisVersion))) continue;
         if (getOptArg(argc, argv, &at, "-e", "--enum-commands", &commandEnum, NULL)) continue;
         if (getOptArgVal(argc, argv, &at, "-s", "--start-cmd-num", NULL, &startCmdNum, 1, INT_MAX)) continue;
+        if (getOptArg(argc, argv, &at, NULL, "--scripts-in-aux", &(conf.scriptsInAux), NULL)) continue;
 
         loggerWrap(RDB_LOG_ERR, "Invalid 'resp' [FORMAT_OPTIONS] argument: %s\n", opt);
         printUsage(1);

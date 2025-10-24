@@ -248,6 +248,7 @@ destruction, or when newer block replacing old one.
             -s, --start-cmd-num <NUM>     Start writing redis from command number
             -e, --enum-commands           Command enumeration and tracing by preceding each generated RESP command
                                           with debug command of type: `SET _RDB_CLI_CMD_ID_ <CMD-ID>`
+                --scripts-in-aux          For auxiliary field "lua", apply `SCRIPT LOAD <aux-val>` (For Redis Enterprise)
 
 
 <a name="Advanced"></a>

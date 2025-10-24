@@ -591,6 +591,58 @@ static RdbRes toRespFunction(RdbParser *p, void *userData, RdbBulk func) {
     return writevWrap( (RdbxToResp *) userData, iov, 4, &startCmd, 1);
 }
 
+static RdbRes toRespAuxScript(RdbParser *p, void *userData, RdbBulk script) {
+    char scriptLenStr[32];
+    struct iovec iov[4];
+    RdbxToResp *ctx = userData;
+
+    int scriptLen = RDB_bulkLen(p, script);
+
+    RdbxRespWriterStartCmd startCmd = {"SCRIPT", "", 0};
+
+    /* SCRIPT LOAD command format: *3\r\n$6\r\nSCRIPT\r\n$4\r\nLOAD\r\n */
+    IOV_CONST(&iov[0], "*3\r\n$6\r\nSCRIPT\r\n$4\r\nLOAD");
+
+    /* write script */
+    IOV_LENGTH(&iov[1], scriptLen, scriptLenStr);
+    IOV_STRING(&iov[2], script, scriptLen);
+    IOV_CONST(&iov[3], "\r\n");
+    return writevWrap(ctx, iov, 4, &startCmd, 1);
+}
+
+static RdbRes toRespAux(RdbParser *p, void *userData, RdbBulk auxkey, RdbBulk auxval) {
+    RdbxToResp *ctx = userData;
+    size_t keyLen = RDB_bulkLen(p, auxkey);
+
+    /* Skip script processing unless scriptsInAux is enabled */
+    if (!ctx->conf.scriptsInAux)
+        return RDB_OK;
+
+    /* Check if this is a lua script aux field */
+    if (keyLen == 3 && memcmp(auxkey, "lua", 3) == 0) {
+        return toRespAuxScript(p, userData, auxval);
+    }
+
+    /* Legacy: Check for RedisEnt pre-4.0.3 / RP 5.2 prefix/suffix format */
+    static const char scriptKeyPrefix[] = "\xDB__lua_script__";
+    static const char scriptKeySuffix[] = "__\xDB";
+    
+    const size_t prefixLen = sizeof(scriptKeyPrefix) - 1;
+    const size_t suffixLen = sizeof(scriptKeySuffix) - 1;
+    const size_t sha1Len = 40;  /* SHA1 hash length in hex */
+    const size_t scriptKeyLen = prefixLen + sha1Len + suffixLen;
+
+    if (keyLen == scriptKeyLen &&
+        memcmp(auxkey, scriptKeyPrefix, prefixLen) == 0 &&
+        memcmp((const char*)auxkey + (keyLen - suffixLen), scriptKeySuffix, suffixLen) == 0)
+    {
+        return toRespAuxScript(p, userData, auxval);
+    }
+
+    /* Not a script, ignore other aux fields */
+    return RDB_OK;
+}
+
 static RdbRes toRespStreamMetaData(RdbParser *p, void *userData, RdbStreamMeta *meta) {
 
     UNUSED(p);
@@ -1004,7 +1056,7 @@ _LIBRDB_API RdbxToResp *RDBX_createHandlersToResp(RdbParser *p, RdbxToRespConf *
             toRespNewDb,                       /*handleNewDb*/
             NULL,                              /*handleDbSize*/
             NULL,                              /*handleSlotInfo*/
-            NULL,                              /*handleAuxField*/
+            toRespAux,                              /*handleAuxField*/
             toRespNewKey,                      /*handleNewKey*/
             toRespEndKey,                      /*handleEndKey*/
             toRespString,                      /*handleStringValue*/
