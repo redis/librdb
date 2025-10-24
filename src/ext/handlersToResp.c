@@ -612,9 +612,9 @@ static RdbRes toRespAuxScript(RdbParser *p, void *userData, RdbBulk script) {
 
 static RdbRes toRespAux(RdbParser *p, void *userData, RdbBulk auxkey, RdbBulk auxval) {
     RdbxToResp *ctx = userData;
-    int keyLen = RDB_bulkLen(p, auxkey);
+    size_t keyLen = RDB_bulkLen(p, auxkey);
 
-    /* Only process script aux fields if scriptsInAux flag is set */
+    /* Skip script processing unless scriptsInAux is enabled */
     if (!ctx->conf.scriptsInAux)
         return RDB_OK;
 
@@ -623,16 +623,20 @@ static RdbRes toRespAux(RdbParser *p, void *userData, RdbBulk auxkey, RdbBulk au
         return toRespAuxScript(p, userData, auxval);
     }
 
-    /* Check for RedisEnt pre-4.0.3 / RP 5.2 format with special prefix/suffix */
-    #define RDB_SCRIPT_KEY_PREFIX "\xDB__lua_script__"
-    #define RDB_SCRIPT_KEY_SUFFIX "__\xDB"
-    const int SCRIPT_KEY_LEN = sizeof(RDB_SCRIPT_KEY_PREFIX) - 1 + 40 + sizeof(RDB_SCRIPT_KEY_SUFFIX) - 1; 
-    if (keyLen == SCRIPT_KEY_LEN &&
-        memcmp(auxkey, RDB_SCRIPT_KEY_PREFIX, sizeof(RDB_SCRIPT_KEY_PREFIX) - 1) == 0 &&
-        memcmp((const char*)auxkey + (keyLen - sizeof(RDB_SCRIPT_KEY_SUFFIX) + 1), 
-               RDB_SCRIPT_KEY_SUFFIX, sizeof(RDB_SCRIPT_KEY_SUFFIX) - 1) == 0)
+    /* Legacy: Check for RedisEnt pre-4.0.3 / RP 5.2 prefix/suffix format */
+    static const char scriptKeyPrefix[] = "\xDB__lua_script__";
+    static const char scriptKeySuffix[] = "__\xDB";
+    
+    const size_t prefixLen = sizeof(scriptKeyPrefix) - 1;
+    const size_t suffixLen = sizeof(scriptKeySuffix) - 1;
+    const size_t sha1Len = 40;  /* SHA1 hash length in hex */
+    const size_t scriptKeyLen = prefixLen + sha1Len + suffixLen;
+
+    if (keyLen == scriptKeyLen &&
+        memcmp(auxkey, scriptKeyPrefix, prefixLen) == 0 &&
+        memcmp((const char*)auxkey + (keyLen - suffixLen), scriptKeySuffix, suffixLen) == 0)
     {
-            return toRespAuxScript(p, userData, auxval);
+        return toRespAuxScript(p, userData, auxval);
     }
 
     /* Not a script, ignore other aux fields */
