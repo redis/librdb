@@ -185,10 +185,9 @@ typedef struct RdbxToRespConf {
      * Be cautious of potential key conflicts in such case. */
      int singleDb;
 
-    /* For auxiliary field "lua", apply `SCRIPT LOAD <aux-val>` command.
-     * This is useful for RedisEnt which supports loading scripts from auxiliary 
-     * fields (It also looks for pre-4.0.3 / RP 5.2 format with special
-     * prefix/suffix of the form: \xdb__script:<sha1>__\xdb). */
+    /* Option to load Lua scripts from RDB auxiliary fields. If aux-field is "lua" 
+     * then its aux-value is being SCRIPT LOAD (Compatible with Redis Ent. RDB 
+     * files that can store scripts in the auxiliary section). */
      int scriptsInAux;
 
 } RdbxToRespConf;
