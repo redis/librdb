@@ -118,8 +118,8 @@ static void deleteRdbToRespCtx(RdbParser *p, void *context) {
     RDB_bulkCopyFree(p, ctx->streamCtx.consName);
 
     /* delete respWriter */
-    if (ctx->respWriter.delete)
-        ctx->respWriter.delete(ctx->respWriter.ctx);
+    if (ctx->respWriter.close)
+        ctx->respWriter.close(ctx->respWriter.ctx);
 
     RDB_free(p, ctx);
 }

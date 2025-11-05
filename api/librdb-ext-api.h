@@ -224,7 +224,7 @@ typedef struct RdbxRespWriterStartCmd {
 
 typedef struct RdbxRespWriter {
     void *ctx;
-    void (*delete)(void *ctx);
+    void (*close)(void *ctx);
 
     /* return 0 on success. Otherwise 1 */
     int (*writev) (void *ctx,
