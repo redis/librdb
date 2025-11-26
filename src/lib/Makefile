@@ -64,6 +64,6 @@ $(TARGET_LIB_STATIC): $(OBJECTS) $(REDIS_OBJECTS)
 	$(CC) -MM $(CFLAGS) $*.c > $*.d
 
 clean:
-	@rm -rvf $(TARGET_LIB) $(TARGET_LIB_STATIC) ./*.o ./*.d;
+	@rm -rvf $(LIB_DIR)/lib$(LIB_NAME).so.* $(TARGET_LIB_STATIC) ./*.o ./*.d;
 
 .PHONY: all clean
