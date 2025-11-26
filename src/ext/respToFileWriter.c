@@ -34,7 +34,7 @@ static int respFileFlush(void *context) {
     return (EOF == fflush(ctx->filePtr)) ? 1 : 0;
 }
 
-static void respFileWriteDelete(void *context) {
+static void respFileWriteDestroy(void *context) {
     struct RdbxRespToFileWriter *ctx = context;
     if (ctx != NULL) {
         fflush(ctx->filePtr);
@@ -71,7 +71,7 @@ RdbxRespToFileWriter *RDBX_createRespToFileWriter(RdbParser *p, RdbxToResp *rdbT
     ctx->p = p;
 
     /* Attach this writer to rdbToResp */
-    RdbxRespWriter writer = {ctx, respFileWriteDelete, respFileWritev, respFileFlush};
+    RdbxRespWriter writer = {ctx, respFileWriteDestroy, respFileWritev, respFileFlush};
     RDBX_attachRespWriter(rdbToResp, &writer);
     return ctx;
 }
