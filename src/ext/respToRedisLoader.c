@@ -232,7 +232,7 @@ static int redisLoaderFlush(void *context) {
 }
 
 /* Delete the context and perform cleanup. */
-static void redisLoaderDelete(void *context) {
+static void redisLoaderDestroy(void *context) {
     struct RdbxRespToRedisLoader *ctx = context;
 
     /* not required to flush on termination */
@@ -396,7 +396,7 @@ _LIBRDB_API RdbxRespToRedisLoader *RDBX_createRespToRedisFd(RdbParser *p,
     }
 
     /* Set writer to rdbToResp */
-    RdbxRespWriter inst = {ctx, redisLoaderDelete, redisLoaderWritev, redisLoaderFlush};
+    RdbxRespWriter inst = {ctx, redisLoaderDestroy, redisLoaderWritev, redisLoaderFlush};
     RDBX_attachRespWriter(rdbToResp, &inst);
     return ctx;
 }
