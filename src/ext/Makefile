@@ -63,4 +63,4 @@ $(TARGET_LIB_STATIC_EXT): $(OBJECTS) $(REDIS_OBJECTS)
 	$(CC) -MM $(CFLAGS) $*.c > $*.d
 
 clean:
-	@rm -rvf $(LIB_DIR)/lib$(LIB_NAME).so.* $(TARGET_LIB_STATIC) ./*.o ./*.d;
+	@rm -rvf $(LIB_DIR)/lib$(LIB_NAME_EXT).so.* $(TARGET_LIB_STATIC_EXT) ./*.o ./*.d;
