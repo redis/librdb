@@ -14,10 +14,10 @@ jobs:
           - os: ubuntu-latest
             compiler: gcc
             version: "5.0"
-            tls: true
           - os: ubuntu-latest
             compiler: clang
             version: "6.0"
+            tls: true
           - os: ubuntu-latest
             compiler: gcc
             version: "7.0"
