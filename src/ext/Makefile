@@ -33,6 +33,26 @@ LIBS     = -L $(LIB_DIR) -l $(LIB_NAME)
 ifeq ($(BUILD_TLS),yes)
 	CFLAGS += -DUSE_OPENSSL=1
 	LIBS += -lssl -lcrypto
+
+	# On macOS, OpenSSL from Homebrew is in a non-standard location
+	ifeq ($(shell uname -s),Darwin)
+		ifndef OPENSSL_PREFIX
+			# Try common Homebrew OpenSSL locations (Apple Silicon and Intel)
+			SEARCH_PATH1=/opt/homebrew/opt/openssl
+			SEARCH_PATH2=/usr/local/opt/openssl
+
+			ifneq ($(wildcard $(SEARCH_PATH1)),)
+				OPENSSL_PREFIX=$(SEARCH_PATH1)
+			else ifneq ($(wildcard $(SEARCH_PATH2)),)
+				OPENSSL_PREFIX=$(SEARCH_PATH2)
+			endif
+		endif
+
+		ifdef OPENSSL_PREFIX
+			CFLAGS += -I$(OPENSSL_PREFIX)/include
+			LDFLAGS += -L$(OPENSSL_PREFIX)/lib
+		endif
+	endif
 endif
 
 # Platform-specific overrides
