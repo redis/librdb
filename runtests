@@ -5,6 +5,17 @@ REDIS_FOLDER=""
 SPECIFIC_TEST=""
 SPECIFIC_TEST_GROUP=""
 
+# Function to colorize test output
+colorize_output() {
+  sed -e 's/\[==========\]/\x1b[1;36m&\x1b[0m/g' \
+      -e 's/\[ RUN      \]/\x1b[1;37m&\x1b[0m/g' \
+      -e 's/\[       OK \]/\x1b[1;32m&\x1b[0m/g' \
+      -e 's/\[  FAILED  \]/\x1b[1;31m&\x1b[0m/g' \
+      -e 's/\[  PASSED  \]/\x1b[1;32m&\x1b[0m/g' \
+      -e 's/\[  SKIPPED \]/\x1b[1;33m&\x1b[0m/g' \
+      -e 's/\[ ERROR    \]/\x1b[1;31m&\x1b[0m/g'
+}
+
 while [[ $# -gt 0 ]]; do
   case $1 in
     -v|--valgrind)
@@ -34,12 +45,15 @@ if [[ ${VALGRIND} -ne 0 ]]; then
   		--leak-resolution=high \
   		--error-exitcode=1 \
   		--log-file=test/log/valgrind.log \
-  		./test/test_static_lib -v $REDIS_FOLDER $SPECIFIC_TEST $SPECIFIC_TEST_GROUP && exit 0
+  		./test/test_static_lib -v $REDIS_FOLDER $SPECIFIC_TEST $SPECIFIC_TEST_GROUP 2>&1 | colorize_output
 
-      sed -n -e '/SUMMARY:/,$p' ./test/log/valgrind.log | tail -n 20
-  		echo  -en "\n(Entire log available at: ./test/log/valgrind.log)\n"
-  		exit 1
+  if [ ${PIPESTATUS[0]} -ne 0 ]; then
+    sed -n -e '/SUMMARY:/,$p' ./test/log/valgrind.log | tail -n 20
+    echo -en "\n(Entire log available at: ./test/log/valgrind.log)\n"
+    exit 1
+  fi
 
 else
-  ./test/test_lib $REDIS_FOLDER $SPECIFIC_TEST $SPECIFIC_TEST_GROUP
+  ./test/test_lib $REDIS_FOLDER $SPECIFIC_TEST $SPECIFIC_TEST_GROUP 2>&1 | colorize_output
+  exit ${PIPESTATUS[0]}
 fi

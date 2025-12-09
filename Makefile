@@ -26,6 +26,7 @@ endif
 
 LIBRDB_VERSION = $(shell sed -n 's|^\#define LIBRDB_VERSION_STRING "\([0-9]\{1,\}\.[0-9]\{1,\}\.[0-9]\{1,\}\)"|\1|p' ./src/version.h)
 export LIBRDB_VERSION
+export BUILD_TLS
 
 # ------------------------- ALL --------------------------------------
 
@@ -137,6 +138,10 @@ help:
 	@echo "                 By default PREFIX=/usr/local"
 	@echo "    uninstall  - Remove from (DESTDIR)\(PREFIX)/bin and (DESTDIR)/(PREFIX)/lib"
 	@echo "    help       - Prints this message"
+	@echo ""
+	@echo "Build options:"
+	@echo "    BUILD_TLS=yes  - Build with TLS/SSL support (requires OpenSSL)"
+	@echo "                     Example: make BUILD_TLS=yes"
 
 
 .PHONY: all debug test valgrind example clean install uninstall build_test help

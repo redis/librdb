@@ -6,6 +6,10 @@
 #include <limits.h>
 #include <sys/stat.h>
 
+#ifdef USE_OPENSSL
+#include <openssl/ssl.h>
+#endif
+
 /* Rely only on API (and not internal parser headers) */
 #include "../../api/librdb-api.h"
 #include "../../api/librdb-ext-api.h"
@@ -136,7 +140,27 @@ static void printUsage(int shortUsage) {
     printf("\t-l, --pipeline-depth <VALUE>  Number of pending commands before blocking for responses\n");
     printf("\t-u, --user <USER>             Redis username for authentication\n");
     printf("\t-P, --password <PWD>          Redis password for authentication\n");
-    printf("\t-a, --auth N [ARG1 ... ARGN]  An alternative authentication command. Given as vector of arguments\n\n");
+    printf("\t-a, --auth N [ARG1 ... ARGN]  An alternative authentication command. Given as vector of arguments\n");
+#ifdef USE_OPENSSL
+    printf("\t    --tls                     Enable TLS/SSL connection\n");
+    printf("\t    --sni <HOSTNAME>          Server Name Indication for TLS handshake\n");
+    printf("\t    --cacert <FILE>           Path to CA certificate file for server verification\n");
+    printf("\t    --cacertdir <DIR>         Path to directory containing CA certificates\n");
+    printf("\t                              If neither cacert nor cacertdir are specified, the default\n");
+    printf("\t                              system-wide trusted root certs configuration will apply.\n");
+    printf("\t    --insecure                Skip server certificate verification (not recommended)\n");
+    printf("\t    --cert <FILE>             Path to client certificate file (for mutual TLS)\n");
+    printf("\t    --key <FILE>              Path to client private key file (for mutual TLS)\n");
+    printf("\t    --tls-ciphers <LIST>      Sets the list of preferred ciphers (TLSv1.2 and below)\n");
+    printf("\t                              in order of preference from highest to lowest separated by colon (\":\")\n");
+    printf("\t                              See the ciphers(1ssl) manpage for more information about the syntax.\n");
+#ifdef TLS1_3_VERSION
+    printf("\t    --tls-ciphersuites <LIST> Sets the list of preferred ciphersuites (TLSv1.3)\n");
+    printf("\t                              in order of preference from highest to lowest separated by colon (\":\")\n");
+    printf("\t                              See the ciphers(1ssl) manpage for TLSv1.3 ciphersuites syntax.\n");
+#endif
+#endif
+    printf("\n");
 
     printf("FORMAT_OPTIONS ('redis'|'resp'):\n");
     printf("\t-r, --support-restore         Use the RESTORE command when possible\n");
@@ -228,6 +252,19 @@ static RdbRes formatRedis(RdbParser *parser, int argc, char **argv) {
     RdbxToResp *rdbToResp, *rdbToResp2;
     const char *hostname = "127.0.0.1";
 
+#ifdef USE_OPENSSL
+    /* TLS/SSL configuration */
+    int useTls = 0, tlsInsecure = 0;
+    const char *tlsCacert = NULL, *tlsCacertdir = NULL;
+    const char *tlsCert = NULL, *tlsKey = NULL, *tlsSni = NULL;
+    const char *tlsCiphers = NULL;
+#ifdef TLS1_3_VERSION
+    const char *tlsCiphersuites = NULL;
+#endif
+    RdbxSSLConfig sslConfig = {0};
+#endif
+    RdbxSSLConfig *sslConfigPtr = NULL;
+
     /* parse specific command options */
     for (int at = 1; at < argc; ++at) {
         char *opt = argv[at];
@@ -245,6 +282,19 @@ static RdbRes formatRedis(RdbParser *parser, int argc, char **argv) {
         if (getOptArg(argc, argv, &at, "-P", "--password", NULL, &auth.pwd)) continue;
         if (getOptArg(argc, argv, &at, "-e", "--enum-commands", &commandEnum, NULL)) continue;
         if (getOptArg(argc, argv, &at, NULL, "--scripts-in-aux", &(conf.scriptsInAux), NULL)) continue;
+#ifdef USE_OPENSSL
+        if (getOptArg(argc, argv, &at, NULL, "--tls", &useTls, NULL)) continue;
+        if (getOptArg(argc, argv, &at, NULL, "--cacert", NULL, &tlsCacert)) continue;
+        if (getOptArg(argc, argv, &at, NULL, "--cacertdir", NULL, &tlsCacertdir)) continue;
+        if (getOptArg(argc, argv, &at, NULL, "--cert", NULL, &tlsCert)) continue;
+        if (getOptArg(argc, argv, &at, NULL, "--key", NULL, &tlsKey)) continue;
+        if (getOptArg(argc, argv, &at, NULL, "--sni", NULL, &tlsSni)) continue;
+        if (getOptArg(argc, argv, &at, NULL, "--insecure", &tlsInsecure, NULL)) continue;
+        if (getOptArg(argc, argv, &at, NULL, "--tls-ciphers", NULL, &tlsCiphers)) continue;
+#ifdef TLS1_3_VERSION
+        if (getOptArg(argc, argv, &at, NULL, "--tls-ciphersuites", NULL, &tlsCiphersuites)) continue;
+#endif
+#endif
         if (getOptArgVal(argc, argv, &at, "-a", "--auth", NULL, &(auth.cmd.argc), 1, INT_MAX)) {
             auth.cmd.argv = argv + at + 1;
             if ((1 + at + auth.cmd.argc) >= argc) {
@@ -266,6 +316,47 @@ static RdbRes formatRedis(RdbParser *parser, int argc, char **argv) {
         return RDB_ERR_GENERAL;
     }
 
+#ifdef USE_OPENSSL
+    /* Build SSL configuration if TLS is enabled */
+    if (useTls) {
+        sslConfig.cacert_filename = tlsCacert;
+        sslConfig.capath = tlsCacertdir;
+        sslConfig.cert_filename = tlsCert;
+        sslConfig.private_key_filename = tlsKey;
+        sslConfig.server_name = tlsSni;
+        sslConfig.ciphers = tlsCiphers;
+#ifdef TLS1_3_VERSION
+        sslConfig.ciphersuites = tlsCiphersuites;
+#endif
+        sslConfig.verify_mode = tlsInsecure ? RDBX_SSL_VERIFY_NONE : RDBX_SSL_VERIFY_PEER;
+        sslConfigPtr = &sslConfig;
+
+        /* Validate TLS options */
+        if (tlsCert && !tlsKey) {
+            loggerWrap(RDB_LOG_ERR, "Client certificate (--cert) requires private key (--key)\n");
+            return RDB_ERR_GENERAL;
+        }
+        if (tlsKey && !tlsCert) {
+            loggerWrap(RDB_LOG_ERR, "Private key (--key) requires client certificate (--cert)\n");
+            return RDB_ERR_GENERAL;
+        }
+
+        loggerWrap(RDB_LOG_INF, "TLS enabled. Verify mode: %s",
+                   tlsInsecure ? "NONE (insecure)" : "PEER");
+    } else {
+        /* Check if any TLS options were specified without --tls */
+        if (tlsCacert || tlsCacertdir || tlsCert || tlsKey || tlsSni || tlsInsecure ||
+            tlsCiphers
+#ifdef TLS1_3_VERSION
+            || tlsCiphersuites
+#endif
+            ) {
+            loggerWrap(RDB_LOG_ERR, "TLS options require --tls flag\n");
+            return RDB_ERR_GENERAL;
+        }
+    }
+#endif
+
     if ((rdbToResp = RDBX_createHandlersToResp(parser, &conf)) == NULL)
         return RDB_ERR_GENERAL;
 
@@ -275,7 +366,8 @@ static RdbRes formatRedis(RdbParser *parser, int argc, char **argv) {
     if (commandEnum)
         RDBX_enumerateCmds(rdbToResp);
 
-    if ((respToRedis = RDBX_createRespToRedisTcp(parser, rdbToResp, &auth, hostname, port)) == NULL)
+    /* Create connection to Redis (with optional TLS) */
+    if ((respToRedis = RDBX_createRespToRedisTcp(parser, rdbToResp, &auth, hostname, port, sslConfigPtr)) == NULL)
         return RDB_ERR_GENERAL;
 
     /* if in addition requested to generate a dump to a file (of RESP protocol) */

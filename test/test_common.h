@@ -42,8 +42,9 @@ void assert_json_equal(const char *f1, const char *f2, int ignoreListOrder);
 /* Test against Redis Server */
 void setRedisInstallFolder(const char *path);
 int getRedisPort(void);
+int getRedisTlsPort(void); /* Get TLS port (only valid after setupRedisServerTls) */
 void setValgrind(void);
-void setupRedisServer(const char *extraArgs);
+int setupRedisServer(const char *extraArgs, int useTls); /* Returns 1 on success, 0 on failure */
 const char *getTargetRedisVersion(int *major, int *minor); /* call only after setupRedisServer() */
 void teardownRedisServer(void);
 void cleanup_json_sign_service(void);
@@ -51,8 +52,12 @@ int isSetRedisServer(void);
 char *sendRedisCmd(const char *cmd, int expRetType, char *expRsp);
 int isSupportRestoreModuleAux(void);
 
+/* TLS Support */
+int setupRedisServerTls(const char *extraArgs); /* Setup Redis with TLS enabled - returns 1 on success, 0 on failure */
+
 /* test groups */
 int group_rdb_to_redis(void);
+int group_rdb_to_redis_tls(void);
 int group_test_rdb_cli(void);
 int group_rdb_to_resp(void);
 int group_examples(void);

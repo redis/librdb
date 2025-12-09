@@ -32,6 +32,7 @@ LIBS     = -L $(LIB_DIR) -l $(LIB_NAME)
 
 ifeq ($(BUILD_TLS),yes)
 	CFLAGS += -DUSE_OPENSSL=1
+	LIBS += -lssl -lcrypto
 endif
 
 # Platform-specific overrides

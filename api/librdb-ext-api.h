@@ -52,6 +52,15 @@ typedef enum {
     RDBX_ERR_RESP2REDIS_MAX_RETRIES,
     RDBX_ERR_RESP2REDIS_SET_TIMEOUT,
     RDBX_ERR_RESP2REDIS_AUTH_FAILED,
+
+    /* SSL/TLS errors */
+    RDBX_ERR_SSL_INIT_FAILED,
+    RDBX_ERR_SSL_CTX_CREATE_FAILED,
+    RDBX_ERR_SSL_CERT_LOAD_FAILED,
+    RDBX_ERR_SSL_KEY_LOAD_FAILED,
+    RDBX_ERR_SSL_CA_LOAD_FAILED,
+    RDBX_ERR_SSL_HANDSHAKE_FAILED,
+    RDBX_ERR_SSL_CONNECTION_FAILED,    
 } RdbxRes;
 
 /****************************************************************
@@ -266,11 +275,63 @@ typedef struct RdbxRedisAuth {
     } cmd;
 } RdbxRedisAuth;
 
+/****************************************************************
+ * SSL/TLS Configuration for Redis connections
+ ****************************************************************/
+
+/**
+ * SSL/TLS Configuration structure
+ *
+ * Used to configure SSL/TLS connections to Redis instances.
+ * All fields are optional and can be NULL/0 for default behavior.
+ */
+typedef struct RdbxSSLConfig {
+    /* Path to CA certificate file or bundle for server verification.
+     * If NULL, system default CA certificates will be used. */
+    const char *cacert_filename;
+
+    /* Path to directory containing CA certificates.
+     * Alternative to cacert_filename for systems using CA directories. */
+    const char *capath;
+
+    /* Path to client certificate file (for mutual TLS authentication).
+     * Required only if Redis server requires client certificates. */
+    const char *cert_filename;
+
+    /* Path to client private key file (for mutual TLS authentication).
+     * Required if cert_filename is provided. */
+    const char *private_key_filename;
+
+    /* Server Name Indication (SNI) - hostname for TLS handshake.
+     * If NULL, the hostname parameter from RDBX_createRespToRedisTcp will be used.
+     * Set this if connecting via IP but need specific hostname for certificate validation. */
+    const char *server_name;
+
+    /* List of preferred ciphers (TLSv1.2 and below) in order of preference.
+     * Format: colon-separated list (e.g., "ECDHE-RSA-AES256-GCM-SHA384:ECDHE-RSA-AES128-GCM-SHA256")
+     * If NULL, OpenSSL default cipher list will be used.
+     * See ciphers(1ssl) manpage for syntax details. */
+    const char *ciphers;
+
+    /* List of preferred ciphersuites (TLSv1.3) in order of preference.
+     * Format: colon-separated list (e.g., "TLS_AES_256_GCM_SHA384:TLS_AES_128_GCM_SHA256")
+     * If NULL, OpenSSL default ciphersuites will be used.
+     * Only available when compiled with TLSv1.3 support.
+     * See ciphers(1ssl) manpage for TLSv1.3 ciphersuite syntax. */
+    const char *ciphersuites;
+
+/* SSL verification modes for client connections */
+#define RDBX_SSL_VERIFY_NONE    0x00  /* Don't verify server certificate (insecure) */
+#define RDBX_SSL_VERIFY_PEER    0x01  /* Verify server certificate (recommended) */
+    int verify_mode;
+} RdbxSSLConfig;
+
 _LIBRDB_API RdbxRespToRedisLoader *RDBX_createRespToRedisTcp(RdbParser *p,
                                                              RdbxToResp *rdbToResp,
                                                              RdbxRedisAuth *auth, /*opt*/
                                                              const char *hostname,
-                                                             int port);
+                                                             int port,
+                                                             RdbxSSLConfig *sslConfig /*opt*/);
 
 _LIBRDB_API RdbxRespToRedisLoader *RDBX_createRespToRedisFd(RdbParser *p,
                                                             RdbxToResp *rdbToResp,
