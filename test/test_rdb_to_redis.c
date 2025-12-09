@@ -650,6 +650,36 @@ void test_rdb_tcp_timeout(void **state) {
     close(server_fd);
 }
 
+/* Test IPv6 connectivity using ::1 (localhost) */
+static void test_rdb_to_redis_ipv6_localhost(void **state) {
+    UNUSED(state);
+
+    RdbxRespToRedisLoader *r2r;
+    RdbxToResp *rdbToResp;
+    RdbStatus status;
+
+    RdbxToRespConf rdb2respConf = {
+        .supportRestore = 0,
+        .dstRedisVersion = getTargetRedisVersion(NULL, NULL),
+        .supportRestoreModuleAux = isSupportRestoreModuleAux()
+    };
+
+    RdbParser *parser = RDB_createParserRdb(NULL);
+    RDB_setLogLevel(parser, RDB_LOG_ERR);
+    assert_non_null(RDBX_createReaderFile(parser, DUMP_FOLDER("single_key.rdb")));
+    assert_non_null(rdbToResp = RDBX_createHandlersToResp(parser, &rdb2respConf));
+
+    /* Connect using IPv6 localhost address ::1 */
+    assert_non_null(r2r = RDBX_createRespToRedisTcp(parser, rdbToResp, NULL, "::1", getRedisPort(), NULL));
+
+    while ((status = RDB_parse(parser)) == RDB_STATUS_WAIT_MORE_DATA);
+    assert_int_equal(status, RDB_STATUS_OK);
+    RDB_deleteParser(parser);
+
+    /* Verify data was written - the RDB file contains key "xxx" with value "111" */
+    sendRedisCmd("GET xxx", REDIS_REPLY_STRING, "111");
+}
+
 /*************************** group_rdb_to_redis *******************************/
 int group_rdb_to_redis(void) {
 
@@ -709,6 +739,7 @@ int group_rdb_to_redis(void) {
             cmocka_unit_test_setup(test_rdb_to_redis_func_lib_replace_if_exist, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_script, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_script_legacy, setupTest),
+            cmocka_unit_test_setup(test_rdb_to_redis_ipv6_localhost, setupTest),
             //cmocka_unit_test_setup(test_rdb_tcp_timeout, setupTest), /* too long to run */
     };
 
