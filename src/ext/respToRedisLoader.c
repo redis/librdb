@@ -21,6 +21,11 @@
 #include <openssl/err.h>
 #endif
 
+/* MSG_NOSIGNAL is Linux-specific. On other platforms, we use 0 and handle SIGPIPE differently */
+#ifndef MSG_NOSIGNAL
+#define MSG_NOSIGNAL 0
+#endif
+
 #define PIPELINE_DEPTH_DEF          200   /* Default Number of pending cmds before waiting for response(s) */
 #define PIPELINE_DEPTH_MAX          1000  /* limit the max value allowed to configure for pipeline depth */
 
@@ -546,6 +551,16 @@ static int configureSocket(RdbParser *p, int sockfd, int *origSockFlags) {
                         "Failed to set socket timeout. errno=%d: %s", errno, strerror(errno));
         return -1;
     }
+
+#ifdef SO_NOSIGPIPE
+    /* On macOS/BSD, use SO_NOSIGPIPE to prevent SIGPIPE on socket writes */
+    int set = 1;
+    if (setsockopt(sockfd, SOL_SOCKET, SO_NOSIGPIPE, &set, sizeof(set)) < 0) {
+        RDB_reportError(p, (RdbRes) RDBX_ERR_RESP2REDIS_CONF_SOCKET,
+                        "Failed to set SO_NOSIGPIPE. errno=%d: %s", errno, strerror(errno));
+        return -1;
+    }
+#endif
 
     return 0;
 }
