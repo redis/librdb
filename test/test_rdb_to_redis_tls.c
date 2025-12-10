@@ -211,7 +211,7 @@ static void test_tls_custom_ciphers(void **state) {
 
     RDB_deleteParser(parser);
 
-    /* Verify data was written - the RDB file contains string "string1" with value "blaa" */
+    /* Verify data was written - the RDB file contains string "string1" with value "111" */
     sendRedisCmd("GET xxx", REDIS_REPLY_STRING, "111");
 }
 

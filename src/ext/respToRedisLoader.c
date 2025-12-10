@@ -503,6 +503,7 @@ static int createTcpConnection(RdbParser *p, const char *hostname, int port) {
     }
 
     /* Try each address until we successfully connect */
+    int last_errno = 0;
     for (rp = result; rp != NULL; rp = rp->ai_next) {
         sockfd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
         if (sockfd == -1)
@@ -511,6 +512,7 @@ static int createTcpConnection(RdbParser *p, const char *hostname, int port) {
         if (connect(sockfd, rp->ai_addr, rp->ai_addrlen) == 0)
             break;  /* Success */
 
+        last_errno = errno;  /* Save errno from last attempt before close() clobbers it */
         close(sockfd);
         sockfd = -1;
     }
@@ -519,8 +521,8 @@ static int createTcpConnection(RdbParser *p, const char *hostname, int port) {
 
     if (sockfd == -1) {
         RDB_reportError(p, (RdbRes) RDBX_ERR_RESP2REDIS_FAILED_CONNECT,
-                        "Failed to connect to %s:%d - %s",
-                        hostname, port, strerror(errno));
+                        "Failed to connect to %s:%d (last attempt errno: %s)",
+                        hostname, port, strerror(last_errno));
         return -1;
     }
 
