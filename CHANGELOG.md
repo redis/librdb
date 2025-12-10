@@ -1,5 +1,4 @@
 ## [2.1.0] - TBD
-<!-- TODO: Update date when PR #88 is merged and v2.1.0 is released -->
 
 ### New Features
 - **TLS/SSL Support**: Add comprehensive TLS/SSL connection support (#88, closes #39, #59)
