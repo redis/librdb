@@ -177,7 +177,7 @@ static void test_rdb_cli_input_fd_reader(void **state) {
 static void test_rdb_cli_redis_auth(void **state) {
     UNUSED(state);
     /* check password authentication */
-    setupRedisServer("--requirepass abc");
+    setupRedisServer("--requirepass abc", 0);
 
     /* auth custom command */
     runSystemCmd(" $RDB_CLI_CMD ./test/dumps/single_key.rdb redis -a 2 auth abc -p %d  > /dev/null ", getRedisPort());

@@ -1,3 +1,25 @@
+## [2.1.0] - TBD
+
+### New Features
+- **TLS/SSL Support**: Add comprehensive TLS/SSL connection support (#88, closes #39, #59)
+  - Server certificate verification with CA certificates
+  - Mutual TLS authentication with client certificates
+  - Flexible configuration: custom ciphers, SNI support
+  - New API: `RdbxSSLConfig` structure for TLS configuration
+  - Extended `RDBX_createRespToRedisTcp()` with optional SSL config parameter
+  - SSL wrapper around socket I/O operations
+  - New error codes for TLS-specific failures
+- **Enhanced Networking**: Improved hostname resolution with IPv4/IPv6 support (#88)
+  - Better compatibility across different network configurations
+- **CLI Enhancements**: Add TLS-related command-line flags (#88)
+  - `--tls`: Enable TLS/SSL connection
+  - `--cacert`: Specify CA certificate file
+  - `--cert`: Specify client certificate file
+  - `--key`: Specify client private key file
+  - Additional TLS configuration options
+
+---
+
 ## [2.0.0] - 2025-12-02
 
 ### Breaking Changes

@@ -1,10 +1,16 @@
+#ifndef _POSIX_C_SOURCE
+#define _POSIX_C_SOURCE 200112L
+#endif
+
 #include <stdio.h>
 #include <string.h>
 #include <unistd.h>
 #include <stddef.h>
+#include <sys/types.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
+#include <netdb.h>
 #include <errno.h>
 #include <fcntl.h>
 #include "extCommon.h"
@@ -13,6 +19,11 @@
 #ifdef USE_OPENSSL
 #include <openssl/ssl.h>
 #include <openssl/err.h>
+#endif
+
+/* MSG_NOSIGNAL is Linux-specific. On other platforms, we use 0 and handle SIGPIPE differently */
+#ifndef MSG_NOSIGNAL
+#define MSG_NOSIGNAL 0
 #endif
 
 #define PIPELINE_DEPTH_DEF          200   /* Default Number of pending cmds before waiting for response(s) */
@@ -44,6 +55,10 @@ struct RdbxRespToRedisLoader {
     int fd;
     int fdOwner; /* Set to 1 if this entity created the socket, and it is the one to release. */
     int origSocketFlags;
+#ifdef USE_OPENSSL
+    SSL *ssl;           /* OpenSSL connection object (NULL if plain TCP) */
+    SSL_CTX *ssl_ctx;   /* OpenSSL context (NULL if plain TCP) */
+#endif
 };
 
 /* cb to report RESP error. Returns 1 to propagate. 0 to mask. */
@@ -104,7 +119,28 @@ static int readReplies(RdbxRespToRedisLoader *ctx, int numToRead, int sentError)
     size_t repliesExpected = respReader->countReplies + numToRead;
 
     while ((respReader->countReplies < repliesExpected) || (sentError)) {
-        int bytesReceived = recv(ctx->fd, buff, sizeof(buff), 0);
+        int bytesReceived;
+
+#ifdef USE_OPENSSL
+        if (ctx->ssl) {
+            bytesReceived = SSL_read(ctx->ssl, buff, sizeof(buff));
+            if (bytesReceived <= 0) {
+                int ssl_err = SSL_get_error(ctx->ssl, bytesReceived);
+                if (ssl_err == SSL_ERROR_WANT_READ || ssl_err == SSL_ERROR_WANT_WRITE) {
+                    errno = EAGAIN;
+                    bytesReceived = -1;
+                } else if (ssl_err == SSL_ERROR_ZERO_RETURN) {
+                    bytesReceived = 0;  /* Clean shutdown */
+                } else {
+                    errno = EIO;
+                    bytesReceived = -1;
+                }
+            }
+        } else
+#endif
+        {
+            bytesReceived = recv(ctx->fd, buff, sizeof(buff), 0);
+        }
 
         if (bytesReceived > 0) {
             /* Data was received, process it */
@@ -160,6 +196,29 @@ static inline void recordCommandSent(RdbxRespToRedisLoader *ctx,RdbxRespWriterSt
     ctx->pendingCmds.restoreSize[recordCmdEntry] = cmd->restoreSize;
 }
 
+#ifdef USE_OPENSSL
+/* SSL doesn't support writev, so we need to send each iovec separately */
+static ssize_t writevSSL(SSL *ssl, struct iovec *iov, int iovCnt) {
+    ssize_t totalWritten = 0;
+    // TODO: aggregate small iov entries into one SSL_write()
+    for (int i = 0; i < iovCnt; i++) {
+        int sent = SSL_write(ssl, iov[i].iov_base, iov[i].iov_len);
+        if (sent <= 0) {
+            int ssl_err = SSL_get_error(ssl, sent);
+            if (ssl_err == SSL_ERROR_WANT_WRITE || ssl_err == SSL_ERROR_WANT_READ) {
+                errno = EAGAIN;
+            } else {
+                errno = EIO;
+            }
+            return -1;
+        }
+        totalWritten += sent;
+    }
+
+    return totalWritten;
+}
+#endif
+
 /* Write the vector of data to the socket with writev() sys-call.
  * Return 0 for success, 1 otherwise. */
 static int redisLoaderWritev(void *context, struct iovec *iov, int iovCnt,
@@ -179,8 +238,15 @@ static int redisLoaderWritev(void *context, struct iovec *iov, int iovCnt,
 
     while (1)
     {
-        struct msghdr msg = { .msg_iov = iov, .msg_iovlen = iovCnt };
-        writeResult = sendmsg(ctx->fd, &msg, MSG_NOSIGNAL /*Ignore SIGPIPE signal*/);
+#ifdef USE_OPENSSL
+        if (ctx->ssl) {
+            writeResult = writevSSL(ctx->ssl, iov, iovCnt);
+        } else
+#endif
+        {
+            struct msghdr msg = { .msg_iov = iov, .msg_iovlen = iovCnt };
+            writeResult = sendmsg(ctx->fd, &msg, MSG_NOSIGNAL /*Ignore SIGPIPE signal*/);
+        }
 
         /* check for error */
         if (unlikely(writeResult == -1)) {
@@ -236,6 +302,17 @@ static void redisLoaderDestroy(void *context) {
     struct RdbxRespToRedisLoader *ctx = context;
 
     /* not required to flush on termination */
+
+#ifdef USE_OPENSSL
+    /* Clean up SSL if used */
+    if (ctx->ssl) {
+        SSL_shutdown(ctx->ssl);
+        SSL_free(ctx->ssl);
+    }
+    if (ctx->ssl_ctx) {
+        SSL_CTX_free(ctx->ssl_ctx);
+    }
+#endif
 
     shutdown(ctx->fd, SHUT_WR); /* graceful shutdown */
 
@@ -400,45 +477,331 @@ _LIBRDB_API RdbxRespToRedisLoader *RDBX_createRespToRedisFd(RdbParser *p,
     RDBX_attachRespWriter(rdbToResp, &inst);
     return ctx;
 }
+/* Helper: Create and connect TCP socket to hostname:port */
+static int createTcpConnection(RdbParser *p, const char *hostname, int port) {
+    struct addrinfo hints, *result, *rp;
+    char port_str[6];
+    int sockfd = -1;
+
+    /* Convert port to string for getaddrinfo */
+    snprintf(port_str, sizeof(port_str), "%d", port);
+
+    /* Setup hints for getaddrinfo */
+    memset(&hints, 0, sizeof(hints));
+    hints.ai_family = AF_UNSPEC;      /* Allow IPv4 or IPv6 */
+    hints.ai_socktype = SOCK_STREAM;  /* TCP socket */
+    hints.ai_flags = 0;
+    hints.ai_protocol = 0;
+
+    /* Resolve hostname (supports both IP addresses and FQDNs) */
+    int gai_err = getaddrinfo(hostname, port_str, &hints, &result);
+    if (gai_err != 0) {
+        RDB_reportError(p, (RdbRes) RDBX_ERR_RESP2REDIS_FAILED_CONNECT,
+                        "Failed to resolve hostname %s: %s",
+                        hostname, gai_strerror(gai_err));
+        return -1;
+    }
+
+    /* Try each address until we successfully connect */
+    int last_errno = 0;
+    for (rp = result; rp != NULL; rp = rp->ai_next) {
+        sockfd = socket(rp->ai_family, rp->ai_socktype, rp->ai_protocol);
+        if (sockfd == -1)
+            continue;
+
+        if (connect(sockfd, rp->ai_addr, rp->ai_addrlen) == 0)
+            break;  /* Success */
+
+        last_errno = errno;  /* Save errno from last attempt before close() clobbers it */
+        close(sockfd);
+        sockfd = -1;
+    }
+
+    freeaddrinfo(result);
+
+    if (sockfd == -1) {
+        RDB_reportError(p, (RdbRes) RDBX_ERR_RESP2REDIS_FAILED_CONNECT,
+                        "Failed to connect to %s:%d (last attempt errno: %s)",
+                        hostname, port, strerror(last_errno));
+        return -1;
+    }
+
+    return sockfd;
+}
+
+/* Helper: Configure socket options (blocking mode, timeout) */
+static int configureSocket(RdbParser *p, int sockfd, int *origSockFlags) {
+    /* Save original socket flags */
+    *origSockFlags = fcntl(sockfd, F_GETFL, 0);
+    if (*origSockFlags == -1) {
+        RDB_reportError(p, (RdbRes) RDBX_ERR_RESP2REDIS_CONF_SOCKET,
+                        "Failed to get socket flags. errno=%d: %s", errno, strerror(errno));
+        return -1;
+    }
+
+    /* Ensure socket is in blocking mode */
+    if (fcntl(sockfd, F_SETFL, *origSockFlags & ~O_NONBLOCK) == -1) {
+        RDB_reportError(p, (RdbRes) RDBX_ERR_RESP2REDIS_CONF_SOCKET,
+                        "Failed to set blocking mode. errno=%d: %s", errno, strerror(errno));
+        return -1;
+    }
+
+    /* Set receive timeout */
+    struct timeval timeout = { .tv_sec = RECV_CMD_TIMEOUT_SEC, .tv_usec = 0 };
+    if (setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) < 0) {
+        RDB_reportError(p, (RdbRes) RDBX_ERR_RESP2REDIS_SET_TIMEOUT,
+                        "Failed to set socket timeout. errno=%d: %s", errno, strerror(errno));
+        return -1;
+    }
+
+#ifdef SO_NOSIGPIPE
+    /* On macOS/BSD, use SO_NOSIGPIPE to prevent SIGPIPE on socket writes */
+    int set = 1;
+    if (setsockopt(sockfd, SOL_SOCKET, SO_NOSIGPIPE, &set, sizeof(set)) < 0) {
+        RDB_reportError(p, (RdbRes) RDBX_ERR_RESP2REDIS_CONF_SOCKET,
+                        "Failed to set SO_NOSIGPIPE. errno=%d: %s", errno, strerror(errno));
+        return -1;
+    }
+#endif
+
+    return 0;
+}
+
+/* Helper: Initialize loader context structure */
+static void initLoaderContext(RdbxRespToRedisLoader *ctx, RdbParser *p, int sockfd, int origSockFlags) {
+    memset(ctx, 0, sizeof(RdbxRespToRedisLoader));
+    ctx->p = p;
+    ctx->fd = sockfd;
+    ctx->origSocketFlags = origSockFlags;
+    ctx->fdOwner = 1;
+    ctx->pendingCmds.num = 0;
+    ctx->pendingCmds.pipelineDepth = PIPELINE_DEPTH_DEF;
+    readRespInit(&ctx->respReader);
+    setErrorCb(&ctx->respReader, ctx, onReadRepliesErrorCb);
+}
+
+#ifdef USE_OPENSSL
+/* Helper: Create and configure SSL context from config */
+static int createSslContext(RdbParser *p, RdbxRespToRedisLoader *ctx, RdbxSSLConfig *sslConfig) {
+    /* Initialize OpenSSL library */
+    SSL_library_init();
+    SSL_load_error_strings();
+    OpenSSL_add_all_algorithms();
+
+    /* Create SSL context */
+    ctx->ssl_ctx = SSL_CTX_new(TLS_client_method());
+    if (!ctx->ssl_ctx) {
+        RDB_reportError(p, (RdbRes) RDBX_ERR_SSL_CTX_CREATE_FAILED,
+                        "Failed to create SSL context");
+        return -1;
+    }
+
+    /* Load CA certificate for server verification */
+    if (sslConfig->cacert_filename || sslConfig->capath) {
+        if (!SSL_CTX_load_verify_locations(ctx->ssl_ctx,
+                                            sslConfig->cacert_filename,
+                                            sslConfig->capath)) {
+            RDB_reportError(p, (RdbRes) RDBX_ERR_SSL_CA_LOAD_FAILED,
+                            "Failed to load CA certificate: %s",
+                            ERR_error_string(ERR_get_error(), NULL));
+            return -1;
+        }
+    }
+
+    /* Load client certificate (for mutual TLS) */
+    if (sslConfig->cert_filename) {
+        if (!SSL_CTX_use_certificate_file(ctx->ssl_ctx,
+                                           sslConfig->cert_filename,
+                                           SSL_FILETYPE_PEM)) {
+            RDB_reportError(p, (RdbRes) RDBX_ERR_SSL_CERT_LOAD_FAILED,
+                            "Failed to load client certificate: %s",
+                            ERR_error_string(ERR_get_error(), NULL));
+            return -1;
+        }
+    }
+
+    /* Load private key (for mutual TLS) */
+    if (sslConfig->private_key_filename) {
+        if (!SSL_CTX_use_PrivateKey_file(ctx->ssl_ctx,
+                                          sslConfig->private_key_filename,
+                                          SSL_FILETYPE_PEM))
+        {
+            RDB_reportError(p, (RdbRes) RDBX_ERR_SSL_KEY_LOAD_FAILED,
+                            "Failed to load private key: %s",
+                            ERR_error_string(ERR_get_error(), NULL));
+            return -1;
+        }
+
+        /* Verify private key matches certificate */
+        if (!SSL_CTX_check_private_key(ctx->ssl_ctx)) {
+            RDB_reportError(p, (RdbRes) RDBX_ERR_SSL_KEY_LOAD_FAILED,
+                            "Private key does not match certificate");
+            return -1;
+        }
+    }
+
+    /* Set cipher list (TLSv1.2 and below) */
+    if (sslConfig->ciphers) {
+        if (!SSL_CTX_set_cipher_list(ctx->ssl_ctx, sslConfig->ciphers)) {
+            RDB_reportError(p, (RdbRes) RDBX_ERR_SSL_INIT_FAILED,
+                            "Failed to set cipher list: %s",
+                            ERR_error_string(ERR_get_error(), NULL));
+            return -1;
+        }
+    }
+
+#ifdef TLS1_3_VERSION
+    /* Set ciphersuites (TLSv1.3) */
+    if (sslConfig->ciphersuites) {
+        if (!SSL_CTX_set_ciphersuites(ctx->ssl_ctx, sslConfig->ciphersuites)) {
+            RDB_reportError(p, (RdbRes) RDBX_ERR_SSL_INIT_FAILED,
+                            "Failed to set TLSv1.3 ciphersuites: %s",
+                            ERR_error_string(ERR_get_error(), NULL));
+            return -1;
+        }
+    }
+#endif
+
+    /* Set verification mode */
+    int verify_mode = (sslConfig->verify_mode == RDBX_SSL_VERIFY_PEER)
+                      ? SSL_VERIFY_PEER
+                      : SSL_VERIFY_NONE;
+    SSL_CTX_set_verify(ctx->ssl_ctx, verify_mode, NULL);
+
+    return 0;
+}
+
+/* Helper: Perform SSL handshake and verify certificate */
+static int performSslHandshake(RdbParser *p, RdbxRespToRedisLoader *ctx,
+                               RdbxSSLConfig *sslConfig, int sockfd)
+{
+    /* Create SSL object */
+    ctx->ssl = SSL_new(ctx->ssl_ctx);
+    if (!ctx->ssl) {
+        RDB_reportError(p, (RdbRes) RDBX_ERR_SSL_CTX_CREATE_FAILED,
+                        "Failed to create SSL object");
+        return -1;
+    }
+
+    /* Set SNI (Server Name Indication) */
+    if (sslConfig->server_name) {
+        if (!SSL_set_tlsext_host_name(ctx->ssl, sslConfig->server_name)) {
+            RDB_reportError(p, (RdbRes) RDBX_ERR_SSL_HANDSHAKE_FAILED,
+                            "Failed to set SNI");
+            return -1;
+        }
+    }
+
+    /* Attach SSL to socket */
+    if (!SSL_set_fd(ctx->ssl, sockfd)) {
+        RDB_reportError(p, (RdbRes) RDBX_ERR_SSL_HANDSHAKE_FAILED,
+                        "Failed to attach SSL to socket");
+        return -1;
+    }
+
+    /* Perform SSL handshake */
+    if (SSL_connect(ctx->ssl) <= 0) {
+        RDB_reportError(p, (RdbRes) RDBX_ERR_SSL_HANDSHAKE_FAILED,
+                        "SSL handshake failed: %s",
+                        ERR_error_string(ERR_get_error(), NULL));
+        return -1;
+    }
+
+    /* Verify certificate if required */
+    if (sslConfig->verify_mode == RDBX_SSL_VERIFY_PEER) {
+        long verify_result = SSL_get_verify_result(ctx->ssl);
+        if (verify_result != X509_V_OK) {
+            RDB_reportError(p, (RdbRes) RDBX_ERR_SSL_HANDSHAKE_FAILED,
+                            "Certificate verification failed: %s",
+                            X509_verify_cert_error_string(verify_result));
+            return -1;
+        }
+    }
+
+    return 0;
+}
+
+/* Helper: Cleanup SSL resources */
+static void cleanupSsl(RdbxRespToRedisLoader *ctx) {
+    if (ctx->ssl) {
+        SSL_free(ctx->ssl);
+        ctx->ssl = NULL;
+    }
+    if (ctx->ssl_ctx) {
+        SSL_CTX_free(ctx->ssl_ctx);
+        ctx->ssl_ctx = NULL;
+    }
+}
+#endif /* USE_OPENSSL */
 
 /* Create a loader and establish a TCP connection */
 _LIBRDB_API RdbxRespToRedisLoader *RDBX_createRespToRedisTcp(RdbParser *p,
                                                              RdbxToResp *rdbToResp,
                                                              RdbxRedisAuth *auth,
                                                              const char *hostname,
-                                                             int port) {
-    int sockfd = socket(AF_INET, SOCK_STREAM, 0);
-    if (sockfd == -1) {
-        RDB_reportError(p, (RdbRes) RDBX_ERR_RESP2REDIS_CREATE_SOCKET, "Failed to create TCP socket");
+                                                             int port,
+                                                             RdbxSSLConfig *sslConfig) {
+    int sockfd = -1;
+    int origSockFlags = 0;
+    RdbxRespToRedisLoader *ctx = NULL;
+
+    /* Step 1: Create TCP connection */
+    sockfd = createTcpConnection(p, hostname, port);
+    if (sockfd == -1)
+        return NULL;
+
+    /* Step 2: Configure socket options */
+    if (configureSocket(p, sockfd, &origSockFlags) != 0) {
+        close(sockfd);
         return NULL;
     }
 
-    struct sockaddr_in server_addr;
-    memset(&server_addr, 0, sizeof(server_addr));
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_port = htons(port);
-    if (inet_pton(AF_INET, hostname, &(server_addr.sin_addr)) <= 0) {
-        RDB_reportError(p, (RdbRes) RDBX_ERR_RESP2REDIS_INVALID_ADDRESS,
-                        "Failed to convert IP address. inet_pton(hostname=%s, port=%d) => errno=%d",
-                        hostname, port, errno);
-        goto createErr;
+    /* Step 3: Allocate and initialize loader context */
+    ctx = RDB_alloc(p, sizeof(RdbxRespToRedisLoader));
+    if (!ctx) {
+        RDB_reportError(p, (RdbRes) RDBX_ERR_RESP_FAILED_ALLOC,
+                        "Failed to allocate struct RdbxRespToRedisLoader");
+        close(sockfd);
+        return NULL;
     }
 
-    if (connect(sockfd, (struct sockaddr *) &server_addr, sizeof(server_addr)) == -1) {
-        RDB_reportError(p, (RdbRes) RDBX_ERR_RESP2REDIS_FAILED_CONNECT,
-                        "Failed to connect(hostname=%s, port=%d) => errno=%d",
-                        hostname, port, errno);
-        goto createErr;
+    initLoaderContext(ctx, p, sockfd, origSockFlags);
+
+#ifdef USE_OPENSSL
+    /* Step 4: Setup SSL/TLS if requested */
+    if (sslConfig != NULL) {
+        if (createSslContext(p, ctx, sslConfig) != 0)
+            goto error_cleanup;
+
+        if (performSslHandshake(p, ctx, sslConfig, sockfd) != 0)
+            goto error_cleanup;
+    }
+#else
+    /* SSL not compiled in */
+    if (sslConfig != NULL) {
+        RDB_reportError(p, (RdbRes) RDBX_ERR_SSL_INIT_FAILED,
+                        "SSL/TLS support not compiled in. Rebuild with BUILD_TLS=yes");
+        goto error_cleanup;
+    }
+#endif
+
+    /* Step 5: Authenticate if needed */
+    if (auth && (redisAuth(ctx, auth) != RDB_OK)) {
+        RDB_reportError(p, (RdbRes) RDBX_ERR_RESP2REDIS_AUTH_FAILED,
+                        "Redis authentication failed.");
+        goto error_cleanup;
     }
 
-    RdbxRespToRedisLoader *res = RDBX_createRespToRedisFd(p, rdbToResp, auth, sockfd);
+    /* Step 6: Attach writer and return */
+    RdbxRespWriter inst = {ctx, redisLoaderDestroy, redisLoaderWritev, redisLoaderFlush};
+    RDBX_attachRespWriter(rdbToResp, &inst);
+    return ctx;
 
-    if (!res) goto createErr;
-
-    res->fdOwner = 1;
-    return res;
-
-createErr:
+error_cleanup:
+#ifdef USE_OPENSSL
+    cleanupSsl(ctx);
+#endif
+    RDB_free(p, ctx);
     close(sockfd);
     return NULL;
 }

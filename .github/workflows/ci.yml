@@ -10,13 +10,14 @@ jobs:
   build:
     strategy:
       matrix:
-        include: 
+        include:
           - os: ubuntu-latest
             compiler: gcc
             version: "5.0"
           - os: ubuntu-latest
             compiler: clang
             version: "6.0"
+            tls: true
           - os: ubuntu-latest
             compiler: gcc
             version: "7.0"
@@ -27,16 +28,23 @@ jobs:
             compiler: gcc
             version: "7.4"
           - os: ubuntu-latest
+            compiler: gcc
+            version: "7.4"
+          - os: ubuntu-latest
             compiler: clang
             version: "unstable"
           - os: macos-latest
             compiler: gcc
             version: "8.0"
+            tls: true
           - os: ubuntu-latest
             compiler: gcc
             version: "8.2"
           - os: macos-latest
             compiler: clang
+            version: "unstable"
+          - os: ubuntu-latest
+            compiler: gcc
             version: "unstable"
 
     runs-on: ${{ matrix.os }}
@@ -63,7 +71,7 @@ jobs:
           if [ "${RUNNER_OS}" = "Linux" ]; then
             sudo apt-get update
             sudo apt-get install -y cmake clang libssl-dev valgrind git bc
-  
+
             # Build and install cmocka
             git clone --depth=1 --branch=stable-1.1 https://git.cryptomilk.org/projects/cmocka.git
             cd cmocka
@@ -75,21 +83,43 @@ jobs:
           elif [ "${RUNNER_OS}" = "macOS" ]; then
             brew install cmocka bc llvm grep
             echo "PATH=$(brew --prefix)/opt/grep/libexec/gnubin:${PATH}" >> "${GITHUB_ENV}"
+
+            # Install OpenSSL if TLS is enabled
+            if [ "${{ matrix.tls }}" = "true" ]; then
+              brew install openssl
+            fi
           fi
 
       - name: Build Redis ${{ matrix.version }}
         run: |
-          make -j -C redis
+          if [ "${{ matrix.tls }}" = "true" ]; then
+            make BUILD_TLS=yes -j -C redis
+          else
+            make -j -C redis
+          fi
 
           if [ $(bc -l <<< "${{ matrix.version }} >= 6.2") -eq 1 ] || [ "${{ matrix.version }}" = "unstable" ]; then
             make -j -C redis/tests/modules
           fi
 
-      - name: Run tests with shared lib
+      - name: Prepare to test with TLS
+        if: matrix.tls == true
         run: |
-          LIBRDB_REDIS_FOLDER="$(pwd)/redis/src" make clean debug test
+          ./utils/gen-test-certs.sh
 
-      - name: Run tests with static lib and valgrind
+      - name: Run librdb tests
+        run: |
+          if [ "${{ matrix.tls }}" = "true" ]; then
+            LIBRDB_REDIS_FOLDER="$(pwd)/redis/src" BUILD_TLS=yes make clean debug test
+          else
+            LIBRDB_REDIS_FOLDER="$(pwd)/redis/src" make clean debug test
+          fi
+
+      - name: Run librdb tests with valgrind
         if: runner.os == 'Linux'
         run: |
-          LIBRDB_REDIS_FOLDER="$(pwd)/redis/src" make clean all valgrind
+          if [ "${{ matrix.tls }}" = "true" ]; then
+            LIBRDB_REDIS_FOLDER="$(pwd)/redis/src" BUILD_TLS=yes make clean valgrind
+          else
+            LIBRDB_REDIS_FOLDER="$(pwd)/redis/src" make clean valgrind
+          fi

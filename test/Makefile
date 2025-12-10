@@ -27,6 +27,7 @@ LIBS_STATIC = -l cmocka -L $(LIB_DIR) $(LIB_DIR)/lib$(LIB_NAME).a $(LIB_DIR)/lib
 ifeq ($(BUILD_TLS),yes)
 	CFLAGS += -DUSE_OPENSSL=1
 	LIBS += -lssl -lcrypto
+	LIBS_STATIC += -lssl -lcrypto
 endif
 
 # Platform-specific overrides

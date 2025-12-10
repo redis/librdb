@@ -35,7 +35,7 @@ void rdb_to_tcp(const char *rdbfile, int pipelineDepth, int isRestore, char *res
     RDB_setLogLevel(parser, RDB_LOG_ERR);
     assert_non_null(RDBX_createReaderFile(parser, rdbfile));
     assert_non_null(rdbToResp1 = RDBX_createHandlersToResp(parser, &rdb2respConf));
-    assert_non_null(r2r = RDBX_createRespToRedisTcp(parser, rdbToResp1, NULL, "127.0.0.1", getRedisPort()));
+    assert_non_null(r2r = RDBX_createRespToRedisTcp(parser, rdbToResp1, NULL, "127.0.0.1", getRedisPort(), NULL));
     if (respFileName) {
         assert_non_null(rdbToResp2 = RDBX_createHandlersToResp(parser, &rdb2respConf));
         assert_non_null(RDBX_createRespToFileWriter(parser, rdbToResp2, respFileName));
@@ -198,7 +198,7 @@ static void test_rdb_to_redis_hash_with_expire(void **state) {
     if ((serverMajorVer<7) || ((serverMajorVer==7) && (serverMinorVer<4)))
         skip();
 
-    setupRedisServer("--enable-debug-command yes --dbfilename expire.rdb");
+    setupRedisServer("--enable-debug-command yes --dbfilename expire.rdb", 0);
     for (int i = 0; i < 2; i++) {
         sendRedisCmd("FLUSHALL", REDIS_REPLY_STATUS, NULL);
         sendRedisCmd(configs[i], REDIS_REPLY_STATUS, NULL);
@@ -324,7 +324,7 @@ static void test_rdb_to_redis_script_common(char *rdbfile) {
     RDB_setLogLevel(parser, RDB_LOG_ERR);
     assert_non_null(RDBX_createReaderFile(parser, rdbfile));
     assert_non_null(rdbToResp = RDBX_createHandlersToResp(parser, &rdb2respConf));
-    assert_non_null(r2r = RDBX_createRespToRedisTcp(parser, rdbToResp, NULL, "127.0.0.1", getRedisPort()));
+    assert_non_null(r2r = RDBX_createRespToRedisTcp(parser, rdbToResp, NULL, "127.0.0.1", getRedisPort(), NULL));
     RDBX_setPipelineDepth(r2r, 1);
 
     while ((status = RDB_parse(parser)) == RDB_STATUS_WAIT_MORE_DATA);
@@ -447,7 +447,8 @@ static void test_rdb_to_redis_del_before_write(void **state) {
                                                   rdbToResp,
                                                   NULL,
                                                   "127.0.0.1",
-                                                  getRedisPort()));
+                                                  getRedisPort(),
+                                                  NULL));
 
         while ((status = RDB_parse(parser)) == RDB_STATUS_WAIT_MORE_DATA);
 
@@ -500,7 +501,8 @@ static void test_rdb_to_redis_hide_keys_in_log(void **state) {
                                               rdbToResp,
                                               NULL,
                                               "127.0.0.1",
-                                              getRedisPort()));
+                                              getRedisPort(),
+                                              NULL));
 
     while ((status = RDB_parse(p)) == RDB_STATUS_WAIT_MORE_DATA);
     
@@ -553,7 +555,8 @@ static void test_rdb_to_redis_func_lib_replace_if_exist(void **state) {
                                                   rdbToResp,
                                                   NULL,
                                                   "127.0.0.1",
-                                                  getRedisPort()));
+                                                  getRedisPort(),
+                                                  NULL));
 
         while ((status = RDB_parse(parser)) == RDB_STATUS_WAIT_MORE_DATA);
 
@@ -623,7 +626,7 @@ void test_rdb_tcp_timeout(void **state) {
 
     RdbxToResp *rdbToResp;
     assert_non_null(rdbToResp = RDBX_createHandlersToResp(parser, &rdb2respConf));
-    assert_non_null(RDBX_createRespToRedisTcp(parser, rdbToResp, NULL, "127.0.0.1", assigned_port));
+    assert_non_null(RDBX_createRespToRedisTcp(parser, rdbToResp, NULL, "127.0.0.1", assigned_port, NULL));
 
     client_fd = accept(server_fd, (struct sockaddr *)&client_addr, &client_len);
     assert_true(client_fd >= 0);
@@ -645,6 +648,36 @@ void test_rdb_tcp_timeout(void **state) {
     RDB_deleteParser(parser);
     close(client_fd);
     close(server_fd);
+}
+
+/* Test IPv6 connectivity using ::1 (localhost) */
+static void test_rdb_to_redis_ipv6_localhost(void **state) {
+    UNUSED(state);
+
+    RdbxRespToRedisLoader *r2r;
+    RdbxToResp *rdbToResp;
+    RdbStatus status;
+
+    RdbxToRespConf rdb2respConf = {
+        .supportRestore = 0,
+        .dstRedisVersion = getTargetRedisVersion(NULL, NULL),
+        .supportRestoreModuleAux = isSupportRestoreModuleAux()
+    };
+
+    RdbParser *parser = RDB_createParserRdb(NULL);
+    RDB_setLogLevel(parser, RDB_LOG_ERR);
+    assert_non_null(RDBX_createReaderFile(parser, DUMP_FOLDER("single_key.rdb")));
+    assert_non_null(rdbToResp = RDBX_createHandlersToResp(parser, &rdb2respConf));
+
+    /* Connect using IPv6 localhost address ::1 */
+    assert_non_null(r2r = RDBX_createRespToRedisTcp(parser, rdbToResp, NULL, "::1", getRedisPort(), NULL));
+
+    while ((status = RDB_parse(parser)) == RDB_STATUS_WAIT_MORE_DATA);
+    assert_int_equal(status, RDB_STATUS_OK);
+    RDB_deleteParser(parser);
+
+    /* Verify data was written - the RDB file contains key "xxx" with value "111" */
+    sendRedisCmd("GET xxx", REDIS_REPLY_STRING, "111");
 }
 
 /*************************** group_rdb_to_redis *******************************/
@@ -706,6 +739,7 @@ int group_rdb_to_redis(void) {
             cmocka_unit_test_setup(test_rdb_to_redis_func_lib_replace_if_exist, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_script, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_script_legacy, setupTest),
+            cmocka_unit_test_setup(test_rdb_to_redis_ipv6_localhost, setupTest),
             //cmocka_unit_test_setup(test_rdb_tcp_timeout, setupTest), /* too long to run */
     };
 

@@ -18,7 +18,7 @@
 #include "test_common.h"
 
 /* Live Redis server for some of the tests (Optional) */
-#define MAX_NUM_REDIS_INST         2
+#define MAX_NUM_REDIS_INST         3
 
 #define RDB_CLI_VALGRIND_LOG_FILE  "test/log/rdb-cli-valgrind.log"
 #define RDB_CLI_CMD                "./bin/rdb-cli"
@@ -28,6 +28,7 @@ int          useValgrind = 0;
 int          currRedisInst = -1;
 redisContext *redisServersStack[MAX_NUM_REDIS_INST] = {0};
 int          redisPort[MAX_NUM_REDIS_INST]= {0};
+int          redisTlsPort[MAX_NUM_REDIS_INST] = {0};  /* TLS ports for TLS tests */
 pid_t        redisPID[MAX_NUM_REDIS_INST] = {0};
 const char   *redisInstallFolder  = NULL;
 char         redisVer[10];
@@ -359,18 +360,28 @@ void get_redis_version(redisContext *c, int *majorptr, int *minorptr) {
 }
 
 #define MAX_ARGS 50
-void setupRedisServer(const char *extraArgs) {
-    if (!redisInstallFolder) return;
+int setupRedisServer(const char *extraArgs, int useTls) {
+    if (!redisInstallFolder) return 0;
 
     const char *_extraArgs = (extraArgs) ? extraArgs : "--loglevel verbose";
+
+    int port = findFreePort(6500, 6600);
+    int tlsPort = 0;  /* TLS port if TLS is enabled */
+
+    /* If TLS is requested, find a second port for TLS (different from the regular port) */
+    if (useTls) {
+        tlsPort = findFreePort(port + 1, 6600);
+        if (tlsPort == -1) {
+            /* If no port found after 'port', try before it */
+            tlsPort = findFreePort(6500, port - 1);
+        }
+    }
 
     pid_t pid = fork();
     assert(pid != -1);
 
-    int port = findFreePort(6500, 6600);
-
     if (pid == 0) { /* child */
-        char redisPortStr[10], fullpath[256], testrdbModulePath[256];
+        char redisPortStr[10], tlsPortStr[10], fullpath[256], testrdbModulePath[256];
 
         snprintf(fullpath, sizeof(fullpath), "%s/redis-server", redisInstallFolder);
         snprintf(testrdbModulePath, sizeof(testrdbModulePath), "%s/../tests/modules/testrdb.so", redisInstallFolder);
@@ -383,6 +394,23 @@ void setupRedisServer(const char *extraArgs) {
         args[argIndex++] = fullpath;
         args[argIndex++] = "--port";
         args[argIndex++] = redisPortStr;
+
+        /* If TLS is requested, add TLS port and configuration */
+        if (useTls) {
+            /* For TLS mode: enable both regular port (for test framework) and TLS port (for TLS tests) */
+            snprintf(tlsPortStr, sizeof(tlsPortStr), "%d", tlsPort);
+            args[argIndex++] = "--tls-port";
+            args[argIndex++] = tlsPortStr;    /* TLS port for TLS tests */
+            args[argIndex++] = "--tls-cert-file";
+            args[argIndex++] = "../tls/server.crt";
+            args[argIndex++] = "--tls-key-file";
+            args[argIndex++] = "../tls/server.key";
+            args[argIndex++] = "--tls-ca-cert-file";
+            args[argIndex++] = "../tls/ca.crt";
+            args[argIndex++] = "--tls-auth-clients";
+            args[argIndex++] = "no";
+        }
+
         args[argIndex++] = "--dir";
         args[argIndex++] = "./test/tmp/";
         args[argIndex++] = "--logfile";
@@ -419,8 +447,10 @@ void setupRedisServer(const char *extraArgs) {
             if (redisConnContext) redisFree(redisConnContext);
 
             if (--retryCount == 0) {
-                perror("Failed to run Redis Server");
-                exit(1);
+                /* Failed to connect - kill the child process and return failure */
+                kill(pid, SIGTERM);
+                waitpid(pid, NULL, 0);
+                return 0;
             }
 
             /* Sleep 500msec */
@@ -432,6 +462,7 @@ void setupRedisServer(const char *extraArgs) {
 
         assert_true(++currRedisInst<MAX_NUM_REDIS_INST);
         redisPort[currRedisInst] = port;
+        redisTlsPort[currRedisInst] = tlsPort;  /* Store TLS port (0 if TLS not enabled) */
         redisServersStack[currRedisInst] = redisConnContext;
         redisPID[currRedisInst]  = pid;
 
@@ -446,11 +477,18 @@ void setupRedisServer(const char *extraArgs) {
             }
             redisVersionInit = 1;
         }
-        printf(">> Redis Server(%d) started on port %d with PID %d (%sVersion=%s)\n",
-               currRedisInst, port, pid, prefixVer, redisVer);
+
+        if (useTls) {
+            printf(">> Redis Server(%d) started on port %d (TLS port %d) with PID %d (%sVersion=%s)\n",
+                   currRedisInst, port, tlsPort, pid, prefixVer, redisVer);
+        } else {
+            printf(">> Redis Server(%d) started on port %d with PID %d (%sVersion=%s)\n",
+                   currRedisInst, port, pid, prefixVer, redisVer);
+        }
 
         /* Close any subprocess in case of exit due to error flow */
         atexit(cleanupRedisServer);
+        return 1;
     }
 }
 
@@ -474,8 +512,33 @@ int getRedisPort(void) {
     return redisPort[currRedisInst];
 }
 
+int getRedisTlsPort(void) {
+    assert_true(currRedisInst>=0);
+    return redisTlsPort[currRedisInst];
+}
+
 void setValgrind(void) {
     useValgrind = 1;
+}
+
+/* Setup Redis server with TLS enabled - returns 1 on success, 0 on failure
+ * Redis will listen on both regular port (for test framework) and TLS port (for TLS tests) */
+int setupRedisServerTls(const char *extraArgs) {
+    if (!redisInstallFolder) {
+        fprintf(stderr, "Warning: LIBRDB_REDIS_FOLDER not set. Skipping TLS tests.\n");
+        return 0;
+    }
+
+    /* Try to start Redis with TLS enabled - will return 0 if it fails */
+    int result = setupRedisServer(extraArgs, 1);  /* 1 = enable TLS */
+
+    if (!result) {
+        fprintf(stderr, "Warning: Redis did not start successfully with TLS. "
+                        "This likely means Redis was not compiled with TLS support (BUILD_TLS=yes). "
+                        "Skipping TLS tests.\n");
+    }
+
+    return result;
 }
 
 void checkValgrindLog(const char *filename) {

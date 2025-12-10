@@ -24,6 +24,10 @@ To build and run tests, you need to have cmocka unit testing and python3 install
 
     % make test
 
+To build with TLS/SSL support (requires OpenSSL):
+
+    % BUILD_TLS=yes make
+
 To install into /usr/local/:
 
     % make install
@@ -438,3 +442,33 @@ triggers the next parsing element through the `parserMainLoop` function. This
 approach not only adds an extra layer of control to the parser along execution steps, but
 also enables parsing of customized RDB files or even specific parts of the file. This
 functionality can be further enhanced as needed.
+
+### Running Tests
+
+#### Basic Tests
+
+To run the basic unit tests (requires cmocka):
+
+    % make test
+
+#### Tests with Redis Server
+
+For integration tests with a live Redis server, you need to provide the path to a compiled Redis repo:
+
+    % LIBRDB_REDIS_FOLDER=/path/to/redis/src make test
+
+#### Tests with TLS Support
+
+To run tests with TLS/SSL support, you need:
+1. Build librdb with TLS support
+2. Compile Redis with TLS support
+3. Run tests with both flags:
+
+```bash
+% cd /path/to/redis
+% BUILD_TLS=yes make
+
+% cd /path/to/librdb
+% BUILD_TLS=yes LIBRDB_REDIS_FOLDER=/path/to/redis/src make test
+```
+

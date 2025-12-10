@@ -150,7 +150,11 @@ static void __test_opcode_ram_lru(void **state) {
 
 static void test_examples(void **state) {
     UNUSED(state);
+#ifdef USE_OPENSSL
+    runSystemCmd("BUILD_TLS=yes make example > /dev/null ");
+#else
     runSystemCmd("make example > /dev/null ");
+#endif
 }
 
 RdbRes handle_start_rdb_report_long_errors(RdbParser *p, void *userData, int rdbVersion) {
@@ -198,25 +202,49 @@ static void test_report_long_error(void **state) {
     RDB_deleteParser(parser);
 }
 
-static void printResPicture(int result) {
-    if (result)
+/* Track failed test groups */
+#define MAX_FAILED_GROUPS 50
+static char *failedGroups[MAX_FAILED_GROUPS];
+static int failedGroupCount = 0;
+
+static void recordFailedGroup(const char *groupName) {
+    if (failedGroupCount < MAX_FAILED_GROUPS) {
+        failedGroups[failedGroupCount++] = strdup(groupName);
+    }
+}
+
+static void printTestSummary(int result) {
+    if (result) {
         printf("    x_x\n"
                "    /|\\\n"
                "    / \\\n"
                "Tests got failed!\n\n");
-    else
+
+        if (failedGroupCount > 0) {
+            printf("Failed test groups:\n");
+            for (int i = 0; i < failedGroupCount; i++) {
+                printf("  - %s\n", failedGroups[i]);
+                free(failedGroups[i]);
+            }
+            printf("\n");
+        }
+    } else {
         printf("    \\o/\n"
                "     |\n"
                "    / \\\n"
                "All tests passed!!!\n\n");
-
+    }
 }
 
 
 #define RUN_TEST_GROUP(grp) \
     if ((runGroupPrefix == NULL) || (strncmp(runGroupPrefix, #grp, strlen(runGroupPrefix)) == 0)) { \
         printf ("\n--- Test Group: %s ---\n", #grp); \
-        result |= grp(); \
+        int grp_result = grp(); \
+        if (grp_result != 0) { \
+            recordFailedGroup(#grp); \
+        } \
+        result |= grp_result; \
     }
 
 /*************************** group_examples ***************************
@@ -293,7 +321,7 @@ int main(int argc, char *argv[]) {
 
     /* Setup redis if configured */
     setRedisInstallFolder(redisInstallFolder);
-    setupRedisServer(NULL);
+    setupRedisServer(NULL, 0);
 
     //setenv("LIBRDB_DEBUG_DATA", "1", 1); /* << to see parser states printouts */
 
@@ -308,6 +336,7 @@ int main(int argc, char *argv[]) {
     RUN_TEST_GROUP(group_bulk_ops);
     RUN_TEST_GROUP(group_pause);
     RUN_TEST_GROUP(group_rdb_to_redis); /*external*/
+    RUN_TEST_GROUP(group_rdb_to_redis_tls); /*external - TLS tests*/
     RUN_TEST_GROUP(group_test_rdb_cli); /*external*/
 
     printf("\n*************** SIMULATING WAIT_MORE_DATA *******************\n");
@@ -332,7 +361,7 @@ int main(int argc, char *argv[]) {
 
     cleanup_json_sign_service();
 
-    printResPicture(result);
+    printTestSummary(result);
 
     return result;
 }
