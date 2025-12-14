@@ -1,4 +1,4 @@
-## [2.1.0] - TBD
+## [2.1.0] - 2025-12-11
 
 ### New Features
 - **TLS/SSL Support**: Add comprehensive TLS/SSL connection support (#88, closes #39, #59)
