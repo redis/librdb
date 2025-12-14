@@ -1,3 +1,20 @@
+/*
+ * RESP Protocol Reader Implementation
+ *
+ * This reader implements RESP2 protocol parsing with support for:
+ * - Simple Strings (+), Simple Errors (-), Integers (:)
+ * - Bulk Strings ($), Arrays (*)
+ * - Null Bulk Strings ($-1) and Null Arrays (*-1)
+ *
+ * Note: Null bulk strings and null arrays are included for RESP2 protocol
+ * completeness, even though librdb's current command set (SET, RESTORE, DEL,
+ * RPUSH, SADD, ZADD, HSET, etc.) does not receive these responses from Redis.
+ * They are kept for defensive programming and potential future use cases.
+ *
+ * RESP3-specific features are intentionally NOT supported as they provide no 
+ * benefit for librdb's use case.
+ */
+
 #include <stdio.h>
 #include <string.h>
 #include <ctype.h>
@@ -146,10 +163,12 @@ RespRes readRespReplyBulk(RespReaderCtx *ctx, RespReplyBuff *buffInfo) {
     char ch;
     UNUSED(buffInfo);
 
-    /* Parsing : $<length>\r\n<data>\r\n */
+    /* Parsing : $<length>\r\n<data>\r\n
+     * Special case: $-1\r\n represents null bulk string (RESP2 completeness) */
     enum ProcessBulkReadStates {
         PROC_BULK_READ_INIT = 0,
         PROC_BULK_READ_LEN,    /* Read bulk length */
+        PROC_BULK_READ_NULL_1, /* Read '1' after '-' for null bulk string */
         PROC_BULK_READ_LEN_CR, /* Read CR */
         PROC_BULK_READ_LEN_NL, /* Read NL */
         PROC_BULK_READ,        /* Read data */
@@ -170,6 +189,14 @@ RespRes readRespReplyBulk(RespReaderCtx *ctx, RespReplyBuff *buffInfo) {
 
             case PROC_BULK_READ_LEN:
                 ch = buffInfo->buff[(buffInfo->at)];
+
+                /* Handle negative length for null bulk string ($-1\r\n) */
+                if (ch == '-') {
+                    buffInfo->at++;
+                    ctx->typeState = PROC_BULK_READ_NULL_1;
+                    break;
+                }
+
                 while ((ch >= '0') && (ch <= '9')) {
                     ctx->bulkLen = ctx->bulkLen * 10 + (ch - '0');
 
@@ -188,6 +215,19 @@ RespRes readRespReplyBulk(RespReaderCtx *ctx, RespReplyBuff *buffInfo) {
                 ctx->typeState = PROC_BULK_READ_LEN_CR;
                 break;
 
+            case PROC_BULK_READ_NULL_1:
+                ch = buffInfo->buff[buffInfo->at];
+                if (ch != '1') {
+                    snprintf(ctx->errorMsg, sizeof(ctx->errorMsg),
+                             "Invalid null bulk string length");
+                    return RESP_REPLY_ERR;
+                }
+                buffInfo->at++;
+                /* Mark as null bulk (use special value) */
+                ctx->bulkLen = (unsigned int)-1;
+                ctx->typeState = PROC_BULK_READ_LEN_CR;
+                break;
+
             case PROC_BULK_READ_LEN_CR:
                 if (buffInfo->buff[buffInfo->at++] != '\r') {
                     snprintf(ctx->errorMsg, sizeof(ctx->errorMsg), "Invalid Bulk response. Failed to read bulk length");
@@ -203,8 +243,8 @@ RespRes readRespReplyBulk(RespReaderCtx *ctx, RespReplyBuff *buffInfo) {
                     return RESP_REPLY_ERR;
                 }
 
-                /* If empty bulk */
-                if (ctx->bulkLen == 0) {
+                /* If null bulk string or empty bulk */
+                if (ctx->bulkLen == 0 || ctx->bulkLen == (unsigned int)-1) {
                     ctx->typeState = PROC_BULK_READ_END;
                     break;
                 }
@@ -254,9 +294,12 @@ static RespRes readRespReplyBulkArray(RespReaderCtx *ctx, RespReplyBuff *buffInf
     RespRes res;
     UNUSED(buffInfo);
 
+    /* Parsing: *<count>\r\n...
+     * Special case: *-1\r\n represents null array (RESP2 completeness) */
     enum ProcessBulkArrayReadStates {
         READ_INIT = 0,
         READ_NUM_BULKS,
+        READ_NULL_1,       /* Read '1' after '-' for null array */
         READ_NUM_BULKS_CR,
         READ_NUM_BULKS_NL,
         READ_NEXT_BULK_HDR,
@@ -276,6 +319,14 @@ static RespRes readRespReplyBulkArray(RespReaderCtx *ctx, RespReplyBuff *buffInf
 
             case READ_NUM_BULKS:
                 ch = buffInfo->buff[(buffInfo->at)];
+
+                /* Handle negative count for null array (*-1\r\n) */
+                if (ch == '-') {
+                    buffInfo->at++;
+                    ctx->typeArrayState = READ_NULL_1;
+                    break;
+                }
+
                 while ((ch >= '0') && (ch <= '9')) {
                     ctx->numBulksArray = ctx->numBulksArray * 10 + (ch - '0');
 
@@ -289,6 +340,19 @@ static RespRes readRespReplyBulkArray(RespReaderCtx *ctx, RespReplyBuff *buffInf
                         return RESP_REPLY_PARTIAL;
                 }
 
+                ctx->typeArrayState = READ_NUM_BULKS_CR;
+                break;
+
+            case READ_NULL_1:
+                ch = buffInfo->buff[buffInfo->at];
+                if (ch != '1') {
+                    snprintf(ctx->errorMsg, sizeof(ctx->errorMsg),
+                             "Invalid null array count");
+                    return RESP_REPLY_ERR;
+                }
+                buffInfo->at++;
+                /* Mark as null array */
+                ctx->numBulksArray = -1;
                 ctx->typeArrayState = READ_NUM_BULKS_CR;
                 break;
 
@@ -308,8 +372,8 @@ static RespRes readRespReplyBulkArray(RespReaderCtx *ctx, RespReplyBuff *buffInf
                     return RESP_REPLY_ERR;
                 }
 
-                /* if empty array then jump to READ_END of array */
-                if (ctx->numBulksArray == 0) {
+                /* if null array or empty array then jump to READ_END of array */
+                if (ctx->numBulksArray == 0 || ctx->numBulksArray == -1) {
                     ctx->typeArrayState = READ_END;
                     break;
                 }
