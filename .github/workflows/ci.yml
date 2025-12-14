@@ -68,21 +68,24 @@ jobs:
 
       - name: Install prerequisites
         run: |
+          # Build and install cmocka 1.1 from source (common for all platforms)
+          git clone --depth=1 --branch=stable-1.1 https://git.cryptomilk.org/projects/cmocka.git
+          cd cmocka
+          mkdir build
+          cd build
+          cmake .. -DCMAKE_INSTALL_PREFIX=/usr/local
+          make
+          sudo make install
+          cd ../..
+
           if [ "${RUNNER_OS}" = "Linux" ]; then
             sudo apt-get update
             sudo apt-get install -y cmake clang libssl-dev valgrind git bc
-
-            # Build and install cmocka
-            git clone --depth=1 --branch=stable-1.1 https://git.cryptomilk.org/projects/cmocka.git
-            cd cmocka
-            mkdir build
-            cd build
-            cmake .. -DCMAKE_INSTALL_PREFIX=/usr/local
-            make
-            sudo make install
           elif [ "${RUNNER_OS}" = "macOS" ]; then
-            brew install cmocka bc llvm grep
+            brew install bc llvm grep
             echo "PATH=$(brew --prefix)/opt/grep/libexec/gnubin:${PATH}" >> "${GITHUB_ENV}"
+            # Ensure cmocka's shared library is found at runtime on macOS
+            echo "DYLD_LIBRARY_PATH=/usr/local/lib:${DYLD_LIBRARY_PATH}" >> "${GITHUB_ENV}"
 
             # Install OpenSSL if TLS is enabled
             if [ "${{ matrix.tls }}" = "true" ]; then
