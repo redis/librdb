@@ -1,3 +1,6 @@
+#ifndef READER_RESP_H
+#define READER_RESP_H
+
 #include <stdio.h>
 
 #define MAX_RESP_REPLY_ERR_MSG 256
@@ -48,3 +51,5 @@ void readRespInit(RespReaderCtx *ctx);
 void setErrorCb(RespReaderCtx *respReaderCtx, void *errorCbCtx, OnRespErrorCb cb);
 
 RespRes readRespReplies(RespReaderCtx *ctx, const char *buff, int buffLen);
+
+#endif /* READER_RESP_H */

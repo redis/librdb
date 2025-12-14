@@ -182,6 +182,28 @@ static void test_masked_errors (void **state) {
     assert_string_equal(ctx.errorMsg, "ERR reported error");
 }
 
+/* Test null bulk string ($-1\r\n) - RESP2 feature
+ * Note: Included for RESP2 only for completeness. */
+static void test_null_bulk_string(void **state) {
+    UNUSED(state);
+    test_resp_reader_common(NULL, STR_AND_SIZE("$-1\r\n"),
+                            1, RESP_REPLY_OK, 1);
+
+	/* fragmented */
+    RespReaderCtx ctx;
+    test_resp_reader_common(&ctx, STR_AND_SIZE("$-"), 1, RESP_REPLY_PARTIAL, 0);
+    test_resp_reader_common(&ctx, STR_AND_SIZE("1\r"), 0, RESP_REPLY_PARTIAL, 0);
+    test_resp_reader_common(&ctx, STR_AND_SIZE("\n"), 0, RESP_REPLY_OK, 1);
+}
+
+/* Test null array (*-1\r\n) - RESP2 feature
+ * Note: Included for RESP2 only for completeness. */
+static void test_null_array(void **state) {
+    UNUSED(state);
+    test_resp_reader_common(NULL, STR_AND_SIZE("*-1\r\n"),
+                            1, RESP_REPLY_OK, 1);
+}
+
 /*************************** group_test_resp_reader *******************************/
 int group_test_resp_reader(void) {
     const struct CMUnitTest tests[] = {
@@ -201,6 +223,8 @@ int group_test_resp_reader(void) {
             cmocka_unit_test(test_mixture_and_fragmented),
             cmocka_unit_test(test_reply_array_misc_data_types),
             cmocka_unit_test(test_masked_errors),
+            cmocka_unit_test(test_null_bulk_string),
+            cmocka_unit_test(test_null_array),
     };
 
     return cmocka_run_group_tests(tests, NULL, NULL);
