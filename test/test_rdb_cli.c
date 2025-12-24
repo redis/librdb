@@ -187,6 +187,26 @@ static void test_rdb_cli_redis_auth(void **state) {
     sendRedisCmd("AUTH abc", REDIS_REPLY_STATUS, NULL); /* now expected to succeed */
     runSystemCmd(" $RDB_CLI_CMD ./test/dumps/single_key.rdb redis --password abc -p %d  > /dev/null ", getRedisPort());
 
+    /* auth via LIBRDB_AUTH env var */
+    sendRedisCmd("FLUSHALL", REDIS_REPLY_STATUS, NULL);
+    runSystemCmd("LIBRDB_AUTH=abc $RDB_CLI_CMD ./test/dumps/single_key.rdb redis -p %d  > /dev/null ", getRedisPort());
+    sendRedisCmd("GET xxx", REDIS_REPLY_STRING, "111");
+
+    /* CLI --password takes precedence over LIBRDB_AUTH env var */
+    sendRedisCmd("FLUSHALL", REDIS_REPLY_STATUS, NULL);
+    runSystemCmd("LIBRDB_AUTH=wrongpwd $RDB_CLI_CMD ./test/dumps/single_key.rdb redis --password abc -p %d  > /dev/null ", getRedisPort());
+    sendRedisCmd("GET xxx", REDIS_REPLY_STRING, "111");
+
+    /* verify LIBRDB_AUTH=wrongpwd alone fails */
+    sendRedisCmd("FLUSHALL", REDIS_REPLY_STATUS, NULL);
+    runSystemCmd("LIBRDB_AUTH=wrongpwd $RDB_CLI_CMD ./test/dumps/single_key.rdb redis -p %d  > /dev/null 2>&1 || true", getRedisPort());
+    sendRedisCmd("GET xxx", REDIS_REPLY_NIL, NULL);
+
+    /* empty LIBRDB_AUTH should be treated as not set (use CLI password) */
+    sendRedisCmd("FLUSHALL", REDIS_REPLY_STATUS, NULL);
+    runSystemCmd("LIBRDB_AUTH= $RDB_CLI_CMD ./test/dumps/single_key.rdb redis --password abc -p %d  > /dev/null ", getRedisPort());
+    sendRedisCmd("GET xxx", REDIS_REPLY_STRING, "111");
+
     /* auth user */
     int major;
     getTargetRedisVersion(&major, NULL);

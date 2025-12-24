@@ -139,7 +139,7 @@ static void printUsage(int shortUsage) {
     printf("\t-p, --port <PORT>             Specify the server port (default: 6379)\n");
     printf("\t-l, --pipeline-depth <VALUE>  Number of pending commands before blocking for responses\n");
     printf("\t-u, --user <USER>             Redis username for authentication\n");
-    printf("\t-P, --password <PWD>          Redis password for authentication\n");
+    printf("\t-P, --password <PWD>          Redis password for authentication (or use LIBRDB_AUTH env var)\n");
     printf("\t-a, --auth N [ARG1 ... ARGN]  An alternative authentication command. Given as vector of arguments\n");
 #ifdef USE_OPENSSL
     printf("\t    --tls                     Enable TLS/SSL connection\n");
@@ -309,6 +309,11 @@ static RdbRes formatRedis(RdbParser *parser, int argc, char **argv) {
         loggerWrap(RDB_LOG_ERR, "Invalid 'redis' [FORMAT_OPTIONS] argument: %s\n", opt);
         printUsage(1);
         return RDB_ERR_GENERAL;
+    }
+
+    /* If password not provided via command line, check LIBRDB_AUTH env var */
+    if (auth.pwd == NULL) {
+        auth.pwd = getenv("LIBRDB_AUTH");
     }
 
     if (((auth.user) || (auth.pwd)) && (auth.cmd.argc > 0)) {
