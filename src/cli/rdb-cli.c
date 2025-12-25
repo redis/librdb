@@ -313,7 +313,10 @@ static RdbRes formatRedis(RdbParser *parser, int argc, char **argv) {
 
     /* If password not provided via command line, check LIBRDB_AUTH env var */
     if (auth.pwd == NULL) {
-        auth.pwd = getenv("LIBRDB_AUTH");
+        char *envPwd = getenv("LIBRDB_AUTH");
+        if (envPwd && envPwd[0] != '\0') {
+            auth.pwd = envPwd;
+        }
     }
 
     if (((auth.user) || (auth.pwd)) && (auth.cmd.argc > 0)) {
@@ -578,18 +581,24 @@ int main(int argc, char **argv)
 
     /* create the parser and attach it a file reader */
     RdbParser *parser = RDB_createParserRdb(NULL);
+    int retval = 0;
+
     RDB_setLogLevel(parser, RDB_LOG_INF);
     RDB_setLogger(parser, logger);
-    
-    if (options.ignoreChecksum) 
+
+    if (options.ignoreChecksum)
         RDB_IgnoreChecksum(parser);
 
     if (strcmp(input, "-") == 0) {
-        if (RDBX_createReaderFileDesc(parser, 0 /*stdin*/, 0) == NULL)
-            return RDB_ERR_GENERAL;
+        if (RDBX_createReaderFileDesc(parser, 0 /*stdin*/, 0) == NULL) {
+            retval = RDB_ERR_GENERAL;
+            goto cleanup;
+        }
     } else {
-        if (RDBX_createReaderFile(parser, input /*file*/) == NULL)
-            return RDB_ERR_GENERAL;
+        if (RDBX_createReaderFile(parser, input /*file*/) == NULL) {
+            retval = RDB_ERR_GENERAL;
+            goto cleanup;
+        }
 
         /* If input is a file, then get its size */
         struct stat st;
@@ -597,15 +606,20 @@ int main(int argc, char **argv)
             fileSize = st.st_size;
         } else {
             printf("Error getting file size: %s\n", strerror(errno));
-            return RDB_ERR_GENERAL;
+            retval = RDB_ERR_GENERAL;
+            goto cleanup;
         }
     }
 
-    if (RDB_OK != (res = options.formatFunc(parser, argc - at, argv + at)))
-        return res;
+    if (RDB_OK != (res = options.formatFunc(parser, argc - at, argv + at))) {
+        retval = res;
+        goto cleanup;
+    }
 
-    if (RDB_OK != RDB_getErrorCode(parser))
-        return RDB_getErrorCode(parser);
+    if (RDB_OK != RDB_getErrorCode(parser)) {
+        retval = RDB_getErrorCode(parser);
+        goto cleanup;
+    }
 
     /* now that the formatter got registered, attach filters */
     readCommonOptions(parser, argc, argv, &options, 1);
@@ -635,9 +649,9 @@ int main(int argc, char **argv)
     }
 
     if (status != RDB_STATUS_OK)
-        return RDB_getErrorCode(parser);
+        retval = RDB_getErrorCode(parser);
 
+cleanup:
     RDB_deleteParser(parser);
-
-    return 0;
+    return retval;
 }
