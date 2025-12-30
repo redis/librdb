@@ -49,7 +49,6 @@ struct ParsingElementInfo peInfo[PE_MAX] = {
         [PE_EXPIRETIMEMSEC]   = {elementExpireTimeMsec, "elementExpireTimeMsec", "Parsing expire-time-msec"},
         [PE_FREQ]             = {elementFreq, "elementFreq", "Parsing LFU frequency"},
         [PE_IDLE]             = {elementIdle, "elementIdle", "Parsing LRU idle time"},
-        [__PE_RAM_LRU]        = {__elementRamLru, "elementRamLru", "Parsing RAM LRU Opcode. Relevant only for Redis Ent."},
 
         [PE_NEW_KEY]          = {elementNewKey, "elementNewKey", "Parsing new key-value"},
         [PE_END_KEY]          = {elementEndKey, "elementEndKey", "Parsing end key"},
@@ -119,6 +118,11 @@ struct ParsingElementInfo peInfo[PE_MAX] = {
         [PE_RAW_MODULE_AUX]   = {elementRawModule, "elementRawModule(aux)", "Parsing Module Auxiliary data"},
         /* stream */
         [PE_RAW_STREAM_LP]    = {elementRawStreamLP, "elementRawStreamLP", "Parsing raw stream Listpack"},
+    
+        /* Redis Enterprise only */
+        [__PE_SLOT_NUM]         = {__elementSlotNum, "elementSlotNum", "Parse cluster slot number (Redis Ent.)"},
+        [__PE_RAM_LRU]        = {__elementRamLru, "elementRamLru", "Parsing RAM LRU Opcode. Relevant only for Redis Ent."},
+
 };
 
 /* Strings in ziplist/listpacks are embedded without '\0' termination. To avoid
@@ -1539,7 +1543,10 @@ RdbStatus elementNextRdbType(RdbParser *p) {
         case RDB_OPCODE_RESIZEDB:           return nextParsingElement(p, PE_RESIZE_DB);
         case RDB_OPCODE_FREQ:               return nextParsingElement(p, PE_FREQ);
         case RDB_OPCODE_IDLE:               return nextParsingElement(p, PE_IDLE);
+            
+        /* Redis Enterprise only */
         case __RDB_OPCODE_RAM_LRU:          return nextParsingElement(p, __PE_RAM_LRU);
+        case __RDB_OPCODE_SLOT_NUM:         return nextParsingElement(p, __PE_SLOT_NUM);
 
         /* string */
         case RDB_TYPE_STRING:               return nextParsingElementKeyValue(p, PE_RAW_STRING, PE_STRING);
@@ -1617,6 +1624,17 @@ RdbStatus elementIdle(RdbParser *p) {
     IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &lruIdle, NULL, NULL));
     /*** ENTER SAFE STATE ***/
     p->elmCtx.key.info.lruIdle = lruIdle;
+    return nextParsingElement(p, PE_NEXT_RDB_TYPE);
+}
+
+RdbStatus __elementSlotNum(RdbParser *p) {
+    uint64_t slot;
+    IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &slot, NULL, NULL));
+
+    /*** ENTER SAFE STATE ***/
+
+    /* Do nothing. Relevant only for Redis Ent. */
+    
     return nextParsingElement(p, PE_NEXT_RDB_TYPE);
 }
 

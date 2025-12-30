@@ -130,6 +130,7 @@ typedef enum ParsingElementType {
     PE_EXPIRETIMEMSEC,
     PE_FREQ,
     PE_IDLE,
+    __PE_SLOT_NUM,
     __PE_RAM_LRU,  /* Redis Enterprise specific */
 
     PE_NEW_KEY,
@@ -530,6 +531,7 @@ RdbStatus elementExpireTime(RdbParser *p);
 RdbStatus elementExpireTimeMsec(RdbParser *p);
 RdbStatus elementFreq(RdbParser *p);
 RdbStatus elementIdle(RdbParser *p);
+RdbStatus __elementSlotNum(RdbParser *p);
 RdbStatus __elementRamLru(RdbParser *p);
 
 /*** Struct/Data Parsing Elements ***/
