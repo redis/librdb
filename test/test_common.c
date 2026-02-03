@@ -420,7 +420,7 @@ int setupRedisServer(const char *extraArgs, int useTls) {
         if (access(testrdbModulePath, F_OK) != -1) {
             args[argIndex++] = "--loadmodule";
             args[argIndex++] = testrdbModulePath;
-            args[argIndex++] = "4";
+            args[argIndex++] = "6"; /* 6 = CONF_AUX_OPTION_BEFORE_KEYSPACE | CONF_AUX_OPTION_AFTER_KEYSPACE */
         }
 
         /* Tokenize extraArgs and add to the arguments list */

@@ -410,6 +410,18 @@ static void test_rdb_to_redis_module_aux_empty(void **state) {
     rdb_to_tcp(DUMP_FOLDER("module_aux_empty.rdb"), 1, 1, NULL);
 }
 
+/* Test restoring module auxiliary data (Redis Ent. only) 
+ * - Implicitly verify that downgrade of module aux data works as expected if 
+ *   target Redis version is older than module aux data version. 
+ */
+static void test_rdb_to_redis_module_aux(void **state) {
+    UNUSED(state);
+    if (!isSupportRestoreModuleAux())
+        skip();
+
+    rdb_to_tcp(DUMP_FOLDER("module_aux_v12.rdb"), 1, 1, NULL);
+}
+
 static void test_rdb_to_redis_stream(void **state) {
     UNUSED(state);
     test_rdb_to_redis_common(DUMP_FOLDER("stream_v11.rdb"), 1, NULL, NULL);
@@ -717,6 +729,7 @@ int group_rdb_to_redis(void) {
             /* module */
             cmocka_unit_test_setup(test_rdb_to_redis_module, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_module_aux_empty, setupTest),
+            cmocka_unit_test_setup(test_rdb_to_redis_module_aux, setupTest),
 
             /* stream */
             cmocka_unit_test_setup(test_rdb_to_redis_stream, setupTest),

@@ -974,7 +974,7 @@ static RdbRes toRespRestoreFragEnd(RdbParser *p, void *userData) {
 
     /* Add RDB version 2 bytes. If it is module  */
 
-    if (unlikely(ctx->keyCtx.info.opcode == _RDB_TYPE_MODULE_2)) {
+    if (ctx->restoreCtx.isModuleAux || unlikely(ctx->keyCtx.info.opcode == _RDB_TYPE_MODULE_2)) {
         /* Module object cannot forwarded to destination as a set of Redis commands.
          * (Function resolveSupportRestore() enforced the parser to use RESTORE in case
          * of modules) In order to avoid failure on downgrade when using RESTORE

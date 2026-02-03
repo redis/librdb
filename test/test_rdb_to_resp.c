@@ -283,22 +283,6 @@ static void test_r2r_module(void **state) {
     testRdbToRespCommon("module.rdb", &r2rConf, (char *) expRespData, sizeof(expRespData), M_ENTIRE, 1);
 }
 
-static void test_r2r_module_aux(void **state) {
-    UNUSED(state);
-    unsigned char expRespData[] = {
-            0x2a, 0x34, 0x0d, 0x0a, 0x24, 0x37, 0x0d, 0x0a,    0x52, 0x45, 0x53, 0x54, 0x4f, 0x52, 0x45, 0x0d,  //  *4..$7..  RESTORE.
-            0x0a, 0x24, 0x31, 0x0d, 0x0a, 0x78, 0x0d, 0x0a,    0x24, 0x31, 0x0d, 0x0a, 0x30, 0x0d, 0x0a, 0x24,  //  .$1..x..  $1..0..$
-            0x31, 0x33, 0x0d, 0x0a, 0x00, 0xc0, 0x01, 0x0b,    0x00, 0x4f, 0xa7, 0x5a, 0xc5, 0x2c, 0x9e, 0xf8,  //  13......  .O.Z.,..
-            0x75, 0x0d, 0x0a, 0x00, 0x0b, 0x00, 0xa6, 0xe6,    0xfb, 0x24, 0xce, 0x1a, 0x8c, 0x25, 0x0d, 0x0a,  //  u.......  .$...%..
-    };
-
-    RdbxToRespConf r2rConf;
-    memset(&r2rConf, 0, sizeof(r2rConf));
-    r2rConf.supportRestore = 1;
-    r2rConf.dstRedisVersion = "7.2";   /* resolved to rdb version 11 */
-    testRdbToRespCommon("module_aux.rdb", &r2rConf, (char *) expRespData, sizeof(expRespData), M_ENTIRE, 1);
-}
-
 static void test_r2r_stream_with_target_62_and_72(void **state) {
     size_t fileLen;
     UNUSED(state);
@@ -350,7 +334,6 @@ int group_rdb_to_resp(void) {
             cmocka_unit_test(test_r2r_policy_lru),
             /* module*/
             cmocka_unit_test(test_r2r_module),
-            cmocka_unit_test(test_r2r_module_aux),
             /* stream */
             cmocka_unit_test(test_r2r_stream),
             cmocka_unit_test(test_r2r_stream_with_target_62_and_72),
