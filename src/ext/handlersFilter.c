@@ -141,6 +141,21 @@ static RdbRes filterStreamConsumerPendingEntry(RdbParser *p, void *userData, Rdb
     return ((RdbxFilter *) userData)->cbReturnValue;
 }
 
+static RdbRes filterStreamIdmpMeta(RdbParser *p, void *userData, RdbStreamIdmpMeta *meta) {
+    UNUSED(p, meta);
+    return ((RdbxFilter *) userData)->cbReturnValue;
+}
+
+static RdbRes filterStreamIdmpProducer(RdbParser *p, void *userData, RdbStreamIdmpProducer *producer) {
+    UNUSED(p, producer);
+    return ((RdbxFilter *) userData)->cbReturnValue;
+}
+
+static RdbRes filterStreamIdmpEntry(RdbParser *p, void *userData, RdbStreamIdmpEntry *entry) {
+    UNUSED(p, entry);
+    return ((RdbxFilter *) userData)->cbReturnValue;
+}
+
 /*** Handling struct ***/
 
 static RdbRes filterListLP(RdbParser *p, void *userData, RdbBulk listpack) {
@@ -274,12 +289,17 @@ static void defaultFilterDataCb(RdbHandlersDataCallbacks *dataCb) {
         filterZsetMember,                   /*handleZsetMember*/
         filterFunction,                     /*handleFunction*/
         filterModule,                       /*handleModule*/
-        filterStreamMetadata,               /*handleStreamMetadata*/
-        filterStreamItem,                   /*handleStreamItem*/
-        filterStreamNewCGroup,              /*handleStreamNewCGroup*/
+
+        /*stream:*/
+        filterStreamMetadata,                                         /*handleStreamMetadata*/
+        filterStreamItem,                              /*handleStreamItem*/
+        filterStreamNewCGroup,                    /*handleStreamNewCGroup*/
         filterStreamCGroupPendingEntry,     /*handleStreamCGroupPendingEntry*/
-        filterStreamNewConsumer,            /*handleStreamNewConsumer*/
-        filterStreamConsumerPendingEntry,   /*handleStreamConsumerPendingEntry*/
+        filterStreamNewConsumer,                /*handleStreamNewConsumer*/
+        filterStreamConsumerPendingEntry, /*handleStreamConsumerPendingEntry*/
+        filterStreamIdmpMeta,                                         /*handleStreamIdmpMeta*/
+        filterStreamIdmpProducer,                                     /*handleStreamIdmpProducer*/
+        filterStreamIdmpEntry,                     /*handleStreamIdmpEntry*/
     };
     *dataCb = defDataCb;
 }

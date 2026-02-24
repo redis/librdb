@@ -9,6 +9,7 @@
 #include <signal.h>
 #include <time.h>
 #include <unistd.h>
+#include <limits.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <sys/wait.h>
@@ -381,10 +382,10 @@ int setupRedisServer(const char *extraArgs, int useTls) {
     assert(pid != -1);
 
     if (pid == 0) { /* child */
-        char redisPortStr[10], tlsPortStr[10], fullpath[256], testrdbModulePath[256];
+        char redisPortStr[10], tlsPortStr[10];
+        char fullpath[PATH_MAX], testrdbModulePath[PATH_MAX], testKeyMetaModulePath[PATH_MAX];
 
         snprintf(fullpath, sizeof(fullpath), "%s/redis-server", redisInstallFolder);
-        snprintf(testrdbModulePath, sizeof(testrdbModulePath), "%s/../tests/modules/testrdb.so", redisInstallFolder);
         snprintf(redisPortStr, sizeof(redisPortStr), "%d", port);
 
         // Tokenize extraArgs and build the arguments list
@@ -416,11 +417,25 @@ int setupRedisServer(const char *extraArgs, int useTls) {
         args[argIndex++] = "--logfile";
         args[argIndex++] = "./redis.log";
 
-        // Add module loading arguments if the module exists
+        /* Load testrdb module if exists */
+        snprintf(testrdbModulePath, 
+            sizeof(testrdbModulePath), 
+            "%s/../tests/modules/testrdb.so", 
+            redisInstallFolder);
         if (access(testrdbModulePath, F_OK) != -1) {
             args[argIndex++] = "--loadmodule";
             args[argIndex++] = testrdbModulePath;
             args[argIndex++] = "6"; /* 6 = CONF_AUX_OPTION_BEFORE_KEYSPACE | CONF_AUX_OPTION_AFTER_KEYSPACE */
+        }
+        
+        /* Load test_keymeta module if exists */
+        snprintf(testKeyMetaModulePath,
+            sizeof(testKeyMetaModulePath),
+            "%s/../tests/modules/test_keymeta.so",
+            redisInstallFolder);
+        if (access(testKeyMetaModulePath, F_OK) != -1) {
+            args[argIndex++] = "--loadmodule";
+            args[argIndex++] = testKeyMetaModulePath;
         }
 
         /* Tokenize extraArgs and add to the arguments list */

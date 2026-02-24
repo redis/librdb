@@ -109,22 +109,30 @@ void subElementCallEnd(RdbParser *p, RdbBulk *bulkResult, size_t *len) {
     p->callSubElm.callerElm = PE_MAX; /* mark as done */
 }
 
-/*** Parsing Elements ***/
-
-RdbStatus elementRawNewKey(RdbParser *p) {
-
-    /* call base implementation of new-key handling. Read key. */
-    IF_NOT_OK_RETURN(elementNewKey(p));
-
-    /*** ENTER SAFE STATE ***/
-
-    aggReset(p);
-
-    /* write type of 1 byte. No need to call aggMakeRoom(). First bulk is empty. */
-    p->rawCtx.at[0] = p->currOpcode;
-
-    return aggUpdateWritten(p, 1);
+RdbStatus newRawKey(RdbParser *p) {
+    if (p->elmCtx.key.info.numMeta > 0) {
+        /* Layout: [<KEY-METADATA>,]<TYPE>,<KEY>,<VALUE> 
+         * <KEY-METADATA> already aggregated; append here <TYPE> byte only.
+         * aggType stays AGG_TYPE_ENTIRE_DATA so cbHandleBegin is skipped
+         * and total size (with metadata) is reported at cbHandleEnd. */
+        IF_NOT_OK_RETURN(aggMakeRoom(p, 1));
+        p->rawCtx.at[0] = p->currOpcode;
+        IF_NOT_OK_RETURN(aggUpdateWritten(p, 1));
+    } else {
+        /* write type of 1 byte. No need to call aggMakeRoom(). First bulk is empty. */
+        aggReset(p);
+        p->rawCtx.at[0] = p->currOpcode;
+        IF_NOT_OK_RETURN(aggUpdateWritten(p, 1));
+    }
+    return RDB_STATUS_OK;
 }
+
+/* Only used by elementNewKey() when Key metadata already in agg to silently discard it */
+void clearKeyMetaFromAgg(RdbParser *p) {
+    aggReset(p);
+}
+
+/*** Parsing Elements ***/
 
 RdbStatus elementRawEndKey(RdbParser *p) {
     /*** ENTER SAFE STATE (no rdb read) ***/
@@ -833,6 +841,13 @@ RdbStatus elementRawStreamLP(RdbParser *p) {
         ST_LOAD_NUM_CONSUMERS,             /*   Load number of consumers of current CG                                 */
         ST_LOAD_NEXT_CONSUMER,             /*     Load next consumer                                                   */
         ST_LOAD_NEXT_CONSUMER_STR_RETURN,  /*     Complete loading consumer name. Load consumer PEL.                   */
+        /* IDMP states for RDB_TYPE_STREAM_LISTPACKS_4 */
+        ST_LOAD_IDMP_CONFIG,               /* Load IDMP config (duration, max_entries, num_producers)                  */
+        ST_LOAD_IDMP_NEXT_PRODUCER,        /*   Load next producer PID                                          */
+        ST_LOAD_IDMP_PRODUCER_RETURN,      /*   Complete loading producer PID                                            */
+        ST_LOAD_IDMP_NEXT_ENTRY,           /*     Load next IDMP entry                                                     */
+        ST_LOAD_IDMP_ENTRY_IID_RETURN,     /*   Complete loading entry IID                                               */
+        ST_LOAD_IDMP_STATS,                /* Load IDMP stats (iids_added, iids_duplicates)                            */
     } ;
 
     ElementRawStreamCtx *streamCtx = &p->elmCtx.rawStream;
@@ -922,7 +937,11 @@ RdbStatus elementRawStreamLP(RdbParser *p) {
         case ST_LOAD_NEXT_CG_IS_MORE:
             /*** ENTER SAFE STATE (no rdb read)***/
             if (unlikely(!(streamCtx->cgroupsLeft))) {
-                /* if no more consumer-groups to load, then reached end of key */
+                /* if no more consumer-groups to load, check for IDMP data */
+                if (p->currOpcode == RDB_TYPE_STREAM_LISTPACKS_4)
+                    return updateElementState(p, ST_LOAD_IDMP_CONFIG, 1);
+
+                /* Legacy stream format */
                 return nextParsingElement(p, PE_RAW_END_KEY); /* done */
             }
             streamCtx->cgroupsLeft--;
@@ -1039,10 +1058,249 @@ RdbStatus elementRawStreamLP(RdbParser *p) {
             return updateElementState(p, ST_LOAD_NEXT_CONSUMER, 0);
         }
 
+        case ST_LOAD_IDMP_CONFIG: { /* IDMP states for RDB_TYPE_STREAM_LISTPACKS_4 */
+            int written = 0;
+            uint64_t dummyVal;
+            aggMakeRoom(p, LONG_STR_SIZE * 3);
+
+            /* Load IDMP duration (in seconds) */
+            IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &dummyVal, (unsigned char *) (rawCtx->at + written), &written));
+            /* Load IDMP max entries */
+            IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &dummyVal, (unsigned char *) (rawCtx->at + written), &written));
+            /* Load number of producers */
+            IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &streamCtx->idmpProducersLeft,
+                                        (unsigned char *) (rawCtx->at + written), &written));
+
+            /*** ENTER SAFE STATE ***/
+            IF_NOT_OK_RETURN(aggUpdateWritten(p, written));
+
+            if (streamCtx->idmpProducersLeft == 0) {
+                return updateElementState(p, ST_LOAD_IDMP_STATS, 0);
+            }
+        } /* fall-thru */ 
+        case ST_LOAD_IDMP_NEXT_PRODUCER:
+            /* Load producer PID */
+            return subElementCall(p, PE_RAW_STRING, ST_LOAD_IDMP_PRODUCER_RETURN);
+
+        case ST_LOAD_IDMP_PRODUCER_RETURN: {
+            size_t pidLen;
+            unsigned char *pidUnused;
+            int written = 0;
+
+            subElementCallEnd(p, (char **) &pidUnused, &pidLen);
+            aggMakeRoom(p, LONG_STR_SIZE);
+
+            /* Load number of entries for this producer */
+            IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &streamCtx->idmpEntriesLeft,
+                                        (unsigned char *) (rawCtx->at), &written));
+
+            /*** ENTER SAFE STATE ***/
+            IF_NOT_OK_RETURN(aggUpdateWritten(p, written));
+
+            if (streamCtx->idmpEntriesLeft == 0) {
+                streamCtx->idmpProducersLeft--;
+                if (streamCtx->idmpProducersLeft == 0) {
+                    return updateElementState(p, ST_LOAD_IDMP_STATS, 0);
+                }
+                /* Load next producer's PID */
+                return updateElementState(p, ST_LOAD_IDMP_NEXT_PRODUCER, 0);
+            }
+        } /* fall-thru */
+        case ST_LOAD_IDMP_NEXT_ENTRY:
+            /* Load next entry's IID */
+            return subElementCall(p, PE_RAW_STRING, ST_LOAD_IDMP_ENTRY_IID_RETURN);
+
+        case ST_LOAD_IDMP_ENTRY_IID_RETURN: {
+            size_t iidLen;
+            unsigned char *iidUnused;
+            int written = 0;
+            uint64_t dummyVal;
+
+            subElementCallEnd(p, (char **) &iidUnused, &iidLen);
+            aggMakeRoom(p, LONG_STR_SIZE * 2);
+
+            /* Load the associated stream ID (ms + seq) */
+            IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &dummyVal, (unsigned char *) (rawCtx->at + written), &written));
+            IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &dummyVal, (unsigned char *) (rawCtx->at + written), &written));
+
+            /*** ENTER SAFE STATE ***/
+            IF_NOT_OK_RETURN(aggUpdateWritten(p, written));
+
+            streamCtx->idmpEntriesLeft--;
+            /* if more entries, load next entry's IID */
+            if (streamCtx->idmpEntriesLeft > 0)
+                return updateElementState(p, ST_LOAD_IDMP_NEXT_ENTRY, 0);
+
+            streamCtx->idmpProducersLeft--;
+            /* if more producers, load next producer's PID */
+            if (streamCtx->idmpProducersLeft > 0)
+                return updateElementState(p, ST_LOAD_IDMP_NEXT_PRODUCER, 0);
+
+            /* done with IDMP data. Load stats */
+            return updateElementState(p, ST_LOAD_IDMP_STATS, 0);
+        }
+
+        case ST_LOAD_IDMP_STATS: {
+            int written = 0;
+            uint64_t dummyVal;
+            aggMakeRoom(p, LONG_STR_SIZE * 2);
+
+            /* Load all-time count of IIDs added */
+            IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &dummyVal, (unsigned char *) (rawCtx->at + written), &written));
+            /* Load all-time count of duplicate IIDs detected */
+            IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &dummyVal, (unsigned char *) (rawCtx->at + written), &written));
+
+            /*** ENTER SAFE STATE ***/
+            IF_NOT_OK_RETURN(aggUpdateWritten(p, written));
+
+            return nextParsingElement(p, PE_RAW_END_KEY); /* done */
+        }
+
         default:
             RDB_reportError(p, RDB_ERR_STREAM_INVALID_STATE,
                             "elementRawStreamLP() : Invalid parsing element state: %d.", p->elmCtx.state);
             return RDB_STATUS_ERROR;
+    }
+}
+
+/* Capture raw key metadata (RDB +v13) bytes using the bulk aggregator.
+ * Format: opcode(243) + NUM_CLASSES + for each class: 4-byte CLASS_SPEC + VALUE + EOF marker.
+ * The VALUE uses module opcodes (SINT, UINT, FLOAT, DOUBLE, STRING).
+ * The aggregated data will be kept for raw level (prepended to key data) or
+ * discarded for struct/data level (via aggReset in elementNewKey()). */
+RdbStatus elementRawKeyMeta(RdbParser *p) {
+    enum RAW_KEY_META_STATES {
+        ST_RAW_KEY_META_OPCODE = 0,
+        /* Following enums are aligned to module-opcodes to save mapping. */
+        ST_RAW_KEY_META_OPCODE_SINT   = RDB_MODULE_OPCODE_SINT,
+        ST_RAW_KEY_META_OPCODE_UINT   = RDB_MODULE_OPCODE_UINT,
+        ST_RAW_KEY_META_OPCODE_FLOAT  = RDB_MODULE_OPCODE_FLOAT,
+        ST_RAW_KEY_META_OPCODE_DOUBLE = RDB_MODULE_OPCODE_DOUBLE,
+        ST_RAW_KEY_META_OPCODE_STRING_CALL_STR = RDB_MODULE_OPCODE_STRING,
+
+        ST_RAW_KEY_META_OPCODE_STRING_STR_RETURN, /* return from sub-element string parsing */
+        ST_RAW_KEY_META_NUM_CLASSES,
+        ST_RAW_KEY_META_CLASS_SPEC,
+        ST_RAW_KEY_META_NEXT_OPCODE
+    };
+
+    RawContext *rawCtx = &p->rawCtx;
+    ElementKeyCtx *keyCtx = &p->elmCtx.key;
+
+    while (1) {
+        switch (p->elmCtx.state) {
+            case ST_RAW_KEY_META_OPCODE: {
+                /* Initialize aggregator and store the opcode byte (243).
+                 * Note: We don't call cbHandleBegin here because key metadata
+                 * is not a separate key - it will be prepended to the actual
+                 * key's raw data when cbHandleBegin is called for that key.
+                 * Set aggType to AGG_TYPE_ENTIRE_DATA so that sub-element calls
+                 * to cbHandleBegin (e.g., from elementRawString) are ignored. */
+                aggReset(p);
+                rawCtx->aggType = AGG_TYPE_ENTIRE_DATA;
+                rawCtx->at[0] = (char) RDB_OPCODE_KEY_META;
+                IF_NOT_OK_RETURN(aggUpdateWritten(p, 1));
+                updateElementState(p, ST_RAW_KEY_META_NUM_CLASSES, 0); 
+            } /* fall-thru */
+            case ST_RAW_KEY_META_NUM_CLASSES: {
+                uint64_t numClasses;
+                int len = 0;
+                IF_NOT_OK_RETURN(aggMakeRoom(p, 1));
+                IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &numClasses, (unsigned char *) rawCtx->at, &len));
+                /*** ENTER SAFE STATE ***/
+                IF_NOT_OK_RETURN(aggUpdateWritten(p, len));
+
+                keyCtx->metaClassesLeft = numClasses;
+                p->elmCtx.key.info.numMeta = numClasses;
+                
+                if (numClasses == 0)
+                    return nextParsingElement(p, PE_NEXT_RDB_TYPE);
+                updateElementState(p, ST_RAW_KEY_META_CLASS_SPEC, 0); 
+            } /* fall-thru */
+            case ST_RAW_KEY_META_CLASS_SPEC: {
+                BulkInfo *binfo;
+                IF_NOT_OK_RETURN(aggMakeRoom(p, 4));
+                IF_NOT_OK_RETURN(rdbLoad(p, 4, RQ_ALLOC_REF, rawCtx->at, &binfo));
+                /*** ENTER SAFE STATE ***/
+                IF_NOT_OK_RETURN(aggUpdateWritten(p, 4));
+                updateElementState(p, ST_RAW_KEY_META_NEXT_OPCODE, 0);
+                break;
+            }
+            case ST_RAW_KEY_META_OPCODE_SINT:
+            case ST_RAW_KEY_META_OPCODE_UINT: {
+                uint64_t val;
+                int len = 0;
+                IF_NOT_OK_RETURN(aggMakeRoom(p, 32));
+                IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &val, (unsigned char *) rawCtx->at, &len));
+                /*** ENTER SAFE STATE ***/
+                IF_NOT_OK_RETURN(aggUpdateWritten(p, len));
+                updateElementState(p, ST_RAW_KEY_META_NEXT_OPCODE, 0);
+                break;
+            }
+            case ST_RAW_KEY_META_OPCODE_FLOAT: {
+                IF_NOT_OK_RETURN(aggMakeRoom(p, sizeof(float)));
+                IF_NOT_OK_RETURN(rdbLoadFloatValue(p, (float *) rawCtx->at));
+                /*** ENTER SAFE STATE ***/
+                IF_NOT_OK_RETURN(aggUpdateWritten(p, sizeof(float)));
+                updateElementState(p, ST_RAW_KEY_META_NEXT_OPCODE, 0);
+                break;
+            }
+            case ST_RAW_KEY_META_OPCODE_DOUBLE: {
+                IF_NOT_OK_RETURN(aggMakeRoom(p, sizeof(double)));
+                IF_NOT_OK_RETURN(rdbLoadBinaryDoubleValue(p, (double *) rawCtx->at));
+                /*** ENTER SAFE STATE ***/
+                IF_NOT_OK_RETURN(aggUpdateWritten(p, sizeof(double)));
+                updateElementState(p, ST_RAW_KEY_META_NEXT_OPCODE, 0);
+                break;
+            }
+            case ST_RAW_KEY_META_OPCODE_STRING_CALL_STR: {
+                /* call raw string as subelement */
+                return subElementCall(p, PE_RAW_STRING, ST_RAW_KEY_META_OPCODE_STRING_STR_RETURN);
+            }
+
+            case ST_RAW_KEY_META_OPCODE_STRING_STR_RETURN: {
+                /*** ENTER SAFE STATE (no rdb read)***/
+                size_t len;
+                char *dataRet;
+                subElementCallEnd(p, &dataRet, &len);
+                updateElementState(p, ST_RAW_KEY_META_NEXT_OPCODE, 1);
+                break;
+            }
+            case ST_RAW_KEY_META_NEXT_OPCODE: {
+                uint64_t opcode = 0;
+                int len = 0;
+                IF_NOT_OK_RETURN(aggMakeRoom(p, 32));
+                IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &opcode, (unsigned char *) rawCtx->at, &len));
+                /*** ENTER SAFE STATE ***/
+                IF_NOT_OK_RETURN(aggUpdateWritten(p, len));
+
+                if ((int) opcode != RDB_MODULE_OPCODE_EOF) {
+                    /* Valid cast. Took care to align opcode with states */
+                    if (opcode >= RDB_MODULE_OPCODE_SINT && opcode <= RDB_MODULE_OPCODE_STRING) {
+                        updateElementState(p, (int) opcode, 0);
+                    } else {
+                        RDB_reportError(p, RDB_ERR_MODULE_INVALID_STATE,
+                            "elementRawKeyMeta(): Invalid module opcode: %llu", (unsigned long long)opcode);
+                        return RDB_STATUS_ERROR;
+                    }
+                    break;
+                }
+
+                /* EOF for this class, check if more classes */
+                keyCtx->metaClassesLeft--;
+                if (keyCtx->metaClassesLeft > 0) {
+                    updateElementState(p, ST_RAW_KEY_META_CLASS_SPEC, 0);
+                    break;
+                }
+                
+                /* All classes parsed. Transition to next rdb type */
+                return nextParsingElement(p, PE_NEXT_RDB_TYPE);
+            }
+            default:
+                RDB_reportError(p, RDB_ERR_MODULE_INVALID_STATE,
+                    "elementRawKeyMeta(): Invalid parsing element state: %d.", p->elmCtx.state);
+                return RDB_STATUS_ERROR;
+        }
     }
 }
 

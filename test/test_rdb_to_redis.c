@@ -8,6 +8,17 @@
 
 int serverMajorVer, serverMinorVer;
 
+/* Default configuration for  test_rdb_to_redis_common() >> rdb_to_json(). */
+RdbxToJsonConf r2jConfDef = {
+    .level = RDB_LEVEL_DATA,
+    .encoding = RDBX_CONV_JSON_ENC_PLAIN,
+    .includeAuxField = 0,
+    .includeStreamIdmp = 0,
+    .includeFunc = 1,
+    .flatten = 1,
+    .includeStreamMeta = 0, /* too messy nested to compare json */
+};
+
 void dummyLogger(RdbLogLevel l, const char *msg) { UNUSED(l, msg); }
 
 static int setupTest(void **state) {
@@ -47,21 +58,13 @@ void rdb_to_tcp(const char *rdbfile, int pipelineDepth, int isRestore, char *res
     RDB_deleteParser(parser);
 }
 
-static void rdb_to_json(const char *rdbfile, const char *outfile) {
+static void rdb_to_json(const char *rdbfile, const char *outfile, RdbxToJsonConf *conf) {
     RdbStatus status;
-    RdbxToJsonConf rdb2jsonConf = {
-            .level = RDB_LEVEL_DATA,
-            .encoding = RDBX_CONV_JSON_ENC_PLAIN,
-            .includeAuxField = 0,
-            .includeFunc = 1,
-            .flatten = 1,
-            .includeStreamMeta = 0, /* too messy nested to compare json */
-    };
 
     RdbParser *parser = RDB_createParserRdb(NULL);
     RDB_setLogLevel(parser, RDB_LOG_ERR);
     assert_non_null(RDBX_createReaderFile(parser, rdbfile));
-    assert_non_null(RDBX_createHandlersToJson(parser, outfile, &rdb2jsonConf));
+    assert_non_null(RDBX_createHandlersToJson(parser, outfile, conf));
     while ((status = RDB_parse(parser)) == RDB_STATUS_WAIT_MORE_DATA);
     assert_int_equal(status, RDB_STATUS_OK);
     RDB_deleteParser(parser);
@@ -110,7 +113,13 @@ static void rdb_save_librdb_reload_eq(int isRestore, char *serverRdbFile) {
  * the background. test_rdb_to_resp.c verifies that RESTORE command is used
  * only when it should.
  */
-static void test_rdb_to_redis_common(const char *rdbfile, int ignoreListOrder, char *expRespCmd, const char *expJsonFile) {
+static void test_rdb_to_redis_common(
+    const char *rdbfile, 
+    int ignoreListOrder, 
+    char *expRespCmd, 
+    const char *expJsonFile, 
+    RdbxToJsonConf *r2jConf) 
+{
 
     /* test one time without RESTORE, Playing against old version.
      * and one time with RESTORE, Playing against new version. */
@@ -122,7 +131,7 @@ static void test_rdb_to_redis_common(const char *rdbfile, int ignoreListOrder, c
             sendRedisCmd("FUNCTION FLUSH", REDIS_REPLY_STATUS, NULL);
 
         /* 1. Convert RDB to Json (out1.json) */
-        rdb_to_json(rdbfile, TMP_FOLDER("out1.json"));
+        rdb_to_json(rdbfile, TMP_FOLDER("out1.json"), r2jConf);
 
         /* 2. Upload RDB against Redis and save DUMP-RDB */
         rdb_to_tcp(rdbfile, 1, isRestore, TMP_FOLDER("cmd.resp"));
@@ -137,7 +146,7 @@ static void test_rdb_to_redis_common(const char *rdbfile, int ignoreListOrder, c
         }
 
         /* 3. From DUMP-RDB generate Json (out2.json) */
-        rdb_to_json(TMP_FOLDER("dump.rdb"), TMP_FOLDER("out2.json"));
+        rdb_to_json(TMP_FOLDER("dump.rdb"), TMP_FOLDER("out2.json"), r2jConf);
 
         /* 4. Verify that dumped RDB and converted to json is as expected  */
         if (expJsonFile)
@@ -149,42 +158,42 @@ static void test_rdb_to_redis_common(const char *rdbfile, int ignoreListOrder, c
 
 static void test_rdb_to_redis_single_string(void **state) {
     UNUSED(state);
-    test_rdb_to_redis_common(DUMP_FOLDER("single_key.rdb"), 0, "SET", NULL);
+    test_rdb_to_redis_common(DUMP_FOLDER("single_key.rdb"), 0, "SET", NULL, &r2jConfDef);
 }
 
 static void test_rdb_to_redis_single_list(void **state) {
     UNUSED(state);
-    test_rdb_to_redis_common(DUMP_FOLDER("quicklist2_v11.rdb"), 0, "$5\r\nRPUSH", NULL);
+    test_rdb_to_redis_common(DUMP_FOLDER("quicklist2_v11.rdb"), 0, "$5\r\nRPUSH", NULL, &r2jConfDef);
 }
 
 static void test_rdb_to_redis_multiple_lists_strings(void **state) {
     UNUSED(state);
-    test_rdb_to_redis_common(DUMP_FOLDER("multiple_lists_strings.rdb"), 0, "$5\r\nRPUSH", NULL);
+    test_rdb_to_redis_common(DUMP_FOLDER("multiple_lists_strings.rdb"), 0, "$5\r\nRPUSH", NULL, &r2jConfDef);
 }
 
 static void test_rdb_to_redis_multiple_lists_strings_pipeline_depth_1(void **state) {
     UNUSED(state);
-    test_rdb_to_redis_common(DUMP_FOLDER("multiple_lists_strings.rdb"), 0, "$5\r\nRPUSH", NULL);
+    test_rdb_to_redis_common(DUMP_FOLDER("multiple_lists_strings.rdb"), 0, "$5\r\nRPUSH", NULL, &r2jConfDef);
 }
 
 static void test_rdb_to_redis_plain_list(void **state) {
     UNUSED(state);
-    test_rdb_to_redis_common(DUMP_FOLDER("plain_list_v6.rdb"), 0, "$5\r\nRPUSH", NULL);
+    test_rdb_to_redis_common(DUMP_FOLDER("plain_list_v6.rdb"), 0, "$5\r\nRPUSH", NULL, &r2jConfDef);
 }
 
 static void test_rdb_to_redis_quicklist(void **state) {
     UNUSED(state);
-    test_rdb_to_redis_common(DUMP_FOLDER("quicklist.rdb"), 0, "$5\r\nRPUSH", NULL);
+    test_rdb_to_redis_common(DUMP_FOLDER("quicklist.rdb"), 0, "$5\r\nRPUSH", NULL, &r2jConfDef);
 }
 
 static void test_rdb_to_redis_single_ziplist(void **state) {
     UNUSED(state);
-    test_rdb_to_redis_common(DUMP_FOLDER("ziplist_v3.rdb"), 0, "$5\r\nRPUSH", NULL);
+    test_rdb_to_redis_common(DUMP_FOLDER("ziplist_v3.rdb"), 0, "$5\r\nRPUSH", NULL, &r2jConfDef);
 }
 
 static void test_rdb_to_redis_hash(void **state) {
     UNUSED(state);
-    test_rdb_to_redis_common(DUMP_FOLDER("hash_v3.rdb"), 0, "$4\r\nHSET", NULL);
+    test_rdb_to_redis_common(DUMP_FOLDER("hash_v3.rdb"), 0, "$4\r\nHSET", NULL, &r2jConfDef);
 }
 
 static void test_rdb_to_redis_hash_with_expire(void **state) {
@@ -215,81 +224,81 @@ static void test_rdb_to_redis_hash_with_expire(void **state) {
 
 static void test_rdb_to_redis_hash_zl(void **state) {
     UNUSED(state);
-    test_rdb_to_redis_common(DUMP_FOLDER("hash_zl_v6.rdb"), 0, "$4\r\nHSET", NULL);
+    test_rdb_to_redis_common(DUMP_FOLDER("hash_zl_v6.rdb"), 0, "$4\r\nHSET", NULL, &r2jConfDef);
 }
 
 static void test_rdb_to_redis_hash_lp(void **state) {
     UNUSED(state);
-    test_rdb_to_redis_common(DUMP_FOLDER("hash_lp_v11.rdb"), 0, "$4\r\nHSET", NULL);
+    test_rdb_to_redis_common(DUMP_FOLDER("hash_lp_v11.rdb"), 0, "$4\r\nHSET", NULL, &r2jConfDef);
 }
 
 static void test_rdb_to_redis_hash_zm(void **state) {
     UNUSED(state);
-    test_rdb_to_redis_common(DUMP_FOLDER("hash_zm_v2.rdb"), 0, "$4\r\nHSET", NULL);
+    test_rdb_to_redis_common(DUMP_FOLDER("hash_zm_v2.rdb"), 0, "$4\r\nHSET", NULL, &r2jConfDef);
 }
 
 static void test_rdb_to_redis_plain_set(void **state) {
     UNUSED(state);
-    test_rdb_to_redis_common(DUMP_FOLDER("plain_set_v6.rdb"), 1, "$4\r\nSADD", NULL);
+    test_rdb_to_redis_common(DUMP_FOLDER("plain_set_v6.rdb"), 1, "$4\r\nSADD", NULL, &r2jConfDef);
 }
 
 static void test_rdb_to_redis_set_is(void **state) {
     UNUSED(state);
-    test_rdb_to_redis_common(DUMP_FOLDER("set_is_v11.rdb"), 1, "$4\r\nSADD", NULL);
+    test_rdb_to_redis_common(DUMP_FOLDER("set_is_v11.rdb"), 1, "$4\r\nSADD", NULL, &r2jConfDef);
 }
 
 static void test_rdb_to_redis_set_lp(void **state) {
     UNUSED(state);
-    test_rdb_to_redis_common(DUMP_FOLDER("set_lp_v11.rdb"), 1, "$4\r\nSADD", NULL);
+    test_rdb_to_redis_common(DUMP_FOLDER("set_lp_v11.rdb"), 1, "$4\r\nSADD", NULL, &r2jConfDef);
 }
 
 static void test_rdb_to_redis_plain_zset(void **state) {
     UNUSED(state);
-    test_rdb_to_redis_common(DUMP_FOLDER("plain_zset_v6.rdb"), 1, "$4\r\nZADD", NULL);
+    test_rdb_to_redis_common(DUMP_FOLDER("plain_zset_v6.rdb"), 1, "$4\r\nZADD", NULL, &r2jConfDef);
 }
 
 static void test_rdb_to_redis_plain_zset_2(void **state) {
     UNUSED(state);
-    test_rdb_to_redis_common(DUMP_FOLDER("plain_zset_2_v11.rdb"), 1, "$4\r\nZADD", NULL);
+    test_rdb_to_redis_common(DUMP_FOLDER("plain_zset_2_v11.rdb"), 1, "$4\r\nZADD", NULL, &r2jConfDef);
 }
 
 static void test_rdb_to_redis_zset_lp(void **state) {
     UNUSED(state);
-    test_rdb_to_redis_common(DUMP_FOLDER("zset_lp_v11.rdb"), 1, "$4\r\nZADD", NULL);
+    test_rdb_to_redis_common(DUMP_FOLDER("zset_lp_v11.rdb"), 1, "$4\r\nZADD", NULL, &r2jConfDef);
 }
 
 static void test_rdb_to_redis_zset_zl(void **state) {
     UNUSED(state);
-    test_rdb_to_redis_common(DUMP_FOLDER("zset_zl_v6.rdb"), 1, "$4\r\nZADD", NULL);
+    test_rdb_to_redis_common(DUMP_FOLDER("zset_zl_v6.rdb"), 1, "$4\r\nZADD", NULL, &r2jConfDef);
 }
 
 static void test_rdb_to_redis_multiple_dbs(void **state) {
     UNUSED(state);
-    test_rdb_to_redis_common(DUMP_FOLDER("multiple_dbs.rdb"), 1, NULL, NULL);
+    test_rdb_to_redis_common(DUMP_FOLDER("multiple_dbs.rdb"), 1, NULL, NULL, &r2jConfDef);
 }
 
 static void test_rdb_to_redis_set_expired(void **state) {
     UNUSED(state);
     test_rdb_to_redis_common(DUMP_FOLDER("set_expired_v11.rdb"), 1, "$9\r\nPEXPIREAT",
-                             DUMP_FOLDER("set_expired.json"));
+                             DUMP_FOLDER("set_expired.json"), &r2jConfDef);
 }
 
 static void test_rdb_to_redis_set_not_expired(void **state) {
     UNUSED(state);
     test_rdb_to_redis_common(DUMP_FOLDER("set_not_expired_v11.rdb"), 1,"$9\r\nPEXPIREAT",
-                             DUMP_FOLDER("set_not_expired.json"));
+                             DUMP_FOLDER("set_not_expired.json"), &r2jConfDef);
 }
 
 static void test_rdb_to_redis_policy_lfu(void **state) {
     UNUSED(state);
     test_rdb_to_redis_common(DUMP_FOLDER("mem_policy_lfu.rdb"), 1, NULL,
-                             DUMP_FOLDER("mem_policy_lfu.json"));
+                             DUMP_FOLDER("mem_policy_lfu.json"), &r2jConfDef);
 }
 
 static void test_rdb_to_redis_policy_lru(void **state) {
     UNUSED(state);
     test_rdb_to_redis_common(DUMP_FOLDER("mem_policy_lru.rdb"), 1, NULL,
-                             DUMP_FOLDER("mem_policy_lru.json"));
+                             DUMP_FOLDER("mem_policy_lru.json"), &r2jConfDef);
 }
 
 static void test_rdb_to_redis_function(void **state) {
@@ -298,7 +307,7 @@ static void test_rdb_to_redis_function(void **state) {
     if (serverMajorVer < 7)
         skip();
 
-    test_rdb_to_redis_common(DUMP_FOLDER("function.rdb"), 1, NULL, NULL);
+    test_rdb_to_redis_common(DUMP_FOLDER("function.rdb"), 1, NULL, NULL, &r2jConfDef);
     sendRedisCmd("FUNCTION LIST", REDIS_REPLY_ARRAY, "myfunc");
 }
 
@@ -424,7 +433,114 @@ static void test_rdb_to_redis_module_aux(void **state) {
 
 static void test_rdb_to_redis_stream(void **state) {
     UNUSED(state);
-    test_rdb_to_redis_common(DUMP_FOLDER("stream_v11.rdb"), 1, NULL, NULL);
+    test_rdb_to_redis_common(DUMP_FOLDER("stream_v11.rdb"), 1, NULL, NULL, &r2jConfDef);
+}
+
+/* Test RDB v13 stream IDMP (Idempotent Message Producer) round-trip.
+ * Requires Redis 8.6+ which introduced IDMP support for streams.
+ *
+ * This test verifies that stream and starting 8.6 IDMP metadata (producers, entries, iids)
+ * is correctly parsed from RDB, restored to Redis, saved back to RDB, and re-parsed to
+ * JSON. The flow is: stream_v13_idmp.rdb -> JSON (out1) -> Redis -> SAVE -> JSON (out2)
+ * Then out1.json is compared with out2.json to ensure IDMP data survives round-trip.
+ *
+ * Coverage:
+ * - Stream IDMP duration and maxEntries configuration
+ * - Multiple IDMP producers with their entries
+ * - IDMP entry iids (idempotency identifiers) and associated stream IDs
+ * - Integration with stream metadata (consumer groups, pending entries)
+ */
+static void test_rdb_to_redis_idmp(void **state) {
+    UNUSED(state);
+
+    /* IDMP support available since Redis 8.6 */
+    int supportIdmp = (serverMajorVer<8) || ((serverMajorVer==8) && (serverMinorVer<6));
+    RdbxToJsonConf idmpConf = r2jConfDef;
+    idmpConf.includeStreamIdmp =  (supportIdmp) ? 0 : 1;
+
+    test_rdb_to_redis_common(DUMP_FOLDER("stream_v13_idmp.rdb"), 1, NULL, NULL, &idmpConf);
+}
+
+/* Test RDB v13 key metadata (RDB_OPCODE_KEY_META) parsing.
+ * This test relies on test_keymeta module within redis repo, if available.
+ * The test creates keys with module metadata, saves RDB, then parses it.
+ *
+ * Coverage:
+ * - Multiple keys with metadata attached
+ * - Different key types: string, hash, list, set, zset
+ * - Key without metadata (to ensure mixed RDB works)
+ * - Both RESTORE mode (raw parsing) and non-RESTORE mode (data parsing)
+ */
+static void test_rdb_to_redis_key_meta(void **state) {
+    UNUSED(state);
+    
+    if ((serverMajorVer<8) || ((serverMajorVer==8) && (serverMinorVer<6)))
+        skip();
+
+    /* Skip test if test_keymeta module is not loaded */
+    if (! strstr( sendRedisCmd("MODULE LIST", REDIS_REPLY_ARRAY, NULL), "test_metakey" ) )
+        skip();
+
+    /* setup redis server with debug command enabled */
+    setupRedisServer("--enable-debug-command yes", 0);
+    
+    /* Register all 7 metadata classes once at the beginning. Can do it since debug 
+     * command is enabled. In a real module it must be registered via OnLoad */
+    for (int i = 0; i < 7; i++) {
+        char regCmd[128];
+        snprintf(regCmd, sizeof(regCmd),
+                 "keymeta.register KMT%d %d KEEPONCOPY:ALLOWIGNORE:RDBLOAD:RDBSAVE", i, i);
+        sendRedisCmd(regCmd, REDIS_REPLY_INTEGER, NULL);
+    }
+
+    /* Test with 1 to 7 metadata classes attached to a key */
+    for (int numMeta = 1; numMeta <= 7; numMeta++) {
+        /* Flushall Redis database to start fresh for each iteration */
+        sendRedisCmd("FLUSHALL", REDIS_REPLY_STATUS, NULL);
+
+        /* Create a string key with metadata */
+        sendRedisCmd("SET str_key str_value", REDIS_REPLY_STATUS, NULL);
+
+        /* Attach metadata from numMeta registered classes */
+        for (int i = 0; i < numMeta; i++) {
+            char setCmd[128], getCmd[128], metaVal[32];
+            snprintf(setCmd, sizeof(setCmd), "keymeta.set KMT%d str_key meta%d", i, i);
+            snprintf(getCmd, sizeof(getCmd), "keymeta.get KMT%d str_key", i);
+            snprintf(metaVal, sizeof(metaVal), "meta%d", i);
+            sendRedisCmd(setCmd, REDIS_REPLY_STATUS, NULL);
+            sendRedisCmd(getCmd, REDIS_REPLY_STRING, metaVal);
+        }
+
+        /* Save rdb aside */
+        sendRedisCmd("SAVE", REDIS_REPLY_STATUS, NULL);
+        runSystemCmd("cp %s %s > /dev/null", TMP_FOLDER("dump.rdb"), TMP_FOLDER("test_rdb_to_redis_key_meta.rdb"));
+
+        /* Test both non-RESTORE mode (data level parsing) and RESTORE mode (raw level parsing) */
+        for (int isRestore = 0; isRestore <= 1; isRestore++) {
+            /* Flushall Redis database */
+            sendRedisCmd("FLUSHALL", REDIS_REPLY_STATUS, NULL);
+
+            /* Run the parser against Redis */
+            rdb_to_tcp(TMP_FOLDER("test_rdb_to_redis_key_meta.rdb"), 1, isRestore,
+                       TMP_FOLDER("rdb_to_tcp_keymeta.resp"));
+
+            /* Verify key was restored correctly */
+            sendRedisCmd("GET str_key", REDIS_REPLY_STRING, "str_value");
+
+            /* Verify metadata was restored (only works with RESTORE mode since
+             * metadata is included in raw RDB payload) */
+            if (!isRestore) continue;
+
+            for (int i = 0; i < numMeta; i++) {
+                char getCmd[128], metaVal[32];
+                snprintf(getCmd, sizeof(getCmd), "keymeta.get KMT%d str_key", i);
+                snprintf(metaVal, sizeof(metaVal), "meta%d", i);
+                sendRedisCmd(getCmd, REDIS_REPLY_STRING, metaVal);
+            }
+        }
+    }
+
+    teardownRedisServer();
 }
 
 /* iff 'delKeyBeforeWrite' is not set, then the parser will return an error on
@@ -730,9 +846,11 @@ int group_rdb_to_redis(void) {
             cmocka_unit_test_setup(test_rdb_to_redis_module, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_module_aux_empty, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_module_aux, setupTest),
+            cmocka_unit_test_setup(test_rdb_to_redis_key_meta, setupTest),
 
             /* stream */
             cmocka_unit_test_setup(test_rdb_to_redis_stream, setupTest),
+            cmocka_unit_test_setup(test_rdb_to_redis_idmp, setupTest),
 
             /* expired keys */
             cmocka_unit_test_setup(test_rdb_to_redis_set_expired, setupTest),
