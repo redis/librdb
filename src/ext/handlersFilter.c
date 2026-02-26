@@ -291,15 +291,15 @@ static void defaultFilterDataCb(RdbHandlersDataCallbacks *dataCb) {
         filterModule,                       /*handleModule*/
 
         /*stream:*/
-        filterStreamMetadata,                                         /*handleStreamMetadata*/
-        filterStreamItem,                              /*handleStreamItem*/
-        filterStreamNewCGroup,                    /*handleStreamNewCGroup*/
+        filterStreamMetadata,               /*handleStreamMetadata*/
+        filterStreamItem,                   /*handleStreamItem*/
+        filterStreamNewCGroup,              /*handleStreamNewCGroup*/
         filterStreamCGroupPendingEntry,     /*handleStreamCGroupPendingEntry*/
-        filterStreamNewConsumer,                /*handleStreamNewConsumer*/
-        filterStreamConsumerPendingEntry, /*handleStreamConsumerPendingEntry*/
-        filterStreamIdmpMeta,                                         /*handleStreamIdmpMeta*/
-        filterStreamIdmpProducer,                                     /*handleStreamIdmpProducer*/
-        filterStreamIdmpEntry,                     /*handleStreamIdmpEntry*/
+        filterStreamNewConsumer,            /*handleStreamNewConsumer*/
+        filterStreamConsumerPendingEntry,   /*handleStreamConsumerPendingEntry*/
+        filterStreamIdmpMeta,               /*handleStreamIdmpMeta*/
+        filterStreamIdmpProducer,           /*handleStreamIdmpProducer*/
+        filterStreamIdmpEntry,              /*handleStreamIdmpEntry*/
     };
     *dataCb = defDataCb;
 }

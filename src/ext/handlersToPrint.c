@@ -327,15 +327,15 @@ RdbxToPrint *RDBX_createHandlersToPrint(RdbParser *p,
             NULL, /*handleModule*/
         
             /*stream:*/
-            NULL,            /*handleStreamMetadata*/
-            toPrintStreamItem,  /*handleStreamItem*/ 
-            NULL,          /*handleStreamNewCGroup*/
-            NULL,    /*handleStreamCGroupPendingEntry*/
-            NULL,        /*handleStreamNewConsumer*/
-            NULL,  /*handleStreamConsumerPendingEntry*/
-            NULL,           /*handleStreamIdmpMeta*/
-            NULL,         /*handleStreamIdmpProducer*/
-            NULL,           /*handleStreamIdmpEntry*/
+            NULL,              /*handleStreamMetadata*/
+            toPrintStreamItem, /*handleStreamItem*/ 
+            NULL,              /*handleStreamNewCGroup*/
+            NULL,              /*handleStreamCGroupPendingEntry*/
+            NULL,              /*handleStreamNewConsumer*/
+            NULL,              /*handleStreamConsumerPendingEntry*/
+            NULL,              /*handleStreamIdmpMeta*/
+            NULL,              /*handleStreamIdmpProducer*/
+            NULL,              /*handleStreamIdmpEntry*/
     };
 
     if (auxFmt)

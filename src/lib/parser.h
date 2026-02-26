@@ -242,7 +242,7 @@ typedef struct {
 } ElementStreamCtx;
 
 typedef struct {
-    RdbKeyInfo info;
+    RdbKeyInfo info;      /* key info (passed to app on handleNewKey cb) */
     ParsingElementType parsingElemType;
     RdbHandlersLevel handleByLevel;
     int64_t numItemsHint; /* hint for the total number of items in the current parsed key. -1 if unknown */

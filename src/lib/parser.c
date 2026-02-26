@@ -1477,7 +1477,7 @@ RdbStatus elementNewKey(RdbParser *p) {
 
     p->elmCtx.key.info.opcode = p->currOpcode; /* tell cb what is current opcode */
     p->elmCtx.key.info.dataType = getDataType(p->currOpcode);
-    /* p->elmCtx.key.info.numKeyMeta = may have been set earlier by elementRawKeyMeta */
+    /* p->elmCtx.key.info.numMeta = may have been set earlier by elementRawKeyMeta */
 
     registerAppBulkForNextCb(p, binfoKey);
     CALL_HANDLERS_CB(p, NOP, p->elmCtx.key.handleByLevel, common.handleNewKey, binfoKey->ref, &p->elmCtx.key.info);

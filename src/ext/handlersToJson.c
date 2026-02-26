@@ -835,14 +835,14 @@ RdbxToJson *RDBX_createHandlersToJson(RdbParser *p, const char *filename, RdbxTo
             
                 /*stream:*/            
                 NULL,             /*handleStreamMetadata*/
-                toJsonStreamItem,    /*handleStreamItem*/
-                NULL,           /* handleStreamNewCGroup */
-                NULL,     /* handleStreamCGroupPendingEntry */
-                NULL,         /* handleStreamNewConsumer */
-                NULL,   /* handleStreamConsumerPendingEntry */
-                NULL,            /* handleStreamIdmpMeta */
-                NULL,          /* handleStreamIdmpProducer */
-                NULL,            /* handleStreamIdmpEntry */
+                toJsonStreamItem, /*handleStreamItem*/
+                NULL,             /* handleStreamNewCGroup */
+                NULL,             /* handleStreamCGroupPendingEntry */
+                NULL,             /* handleStreamNewConsumer */
+                NULL,             /* handleStreamConsumerPendingEntry */
+                NULL,             /* handleStreamIdmpMeta */
+                NULL,             /* handleStreamIdmpProducer */
+                NULL,             /* handleStreamIdmpEntry */
         };
 
         if (ctx->conf.includeAuxField)
