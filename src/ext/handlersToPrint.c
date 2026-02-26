@@ -171,6 +171,9 @@ static void printKeyFmt(RdbxToPrint *ctx, RdbBulk string) {
                 case 'f':
                     fprintf(ctx->outfile, "%d", ctx->keyCtx.info.lfuFreq);
                     break;
+                case 'm':
+                    fprintf(ctx->outfile, "%d", ctx->keyCtx.info.numMeta);
+                    break;
                 case 'i':
                     fprintf(ctx->outfile, "%ld", ctx->keyCtx.items);
                     break;
@@ -322,12 +325,17 @@ RdbxToPrint *RDBX_createHandlersToPrint(RdbParser *p,
             toPrintZset,
             NULL, /*handleFunction*/
             NULL, /*handleModule*/
-            NULL, /*handleStreamMetadata*/
-            toPrintStreamItem,
-            NULL, /*handleStreamNewCGroup*/
-            NULL, /*handleStreamCGroupPendingEntry*/
-            NULL, /*handleStreamNewConsumer*/
-            NULL, /*handleStreamConsumerPendingEntry*/
+        
+            /*stream:*/
+            NULL,              /*handleStreamMetadata*/
+            toPrintStreamItem, /*handleStreamItem*/ 
+            NULL,              /*handleStreamNewCGroup*/
+            NULL,              /*handleStreamCGroupPendingEntry*/
+            NULL,              /*handleStreamNewConsumer*/
+            NULL,              /*handleStreamConsumerPendingEntry*/
+            NULL,              /*handleStreamIdmpMeta*/
+            NULL,              /*handleStreamIdmpProducer*/
+            NULL,              /*handleStreamIdmpEntry*/
     };
 
     if (auxFmt)

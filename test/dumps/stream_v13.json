@@ -1,0 +1,49 @@
+"stream_lp1_cg2_pel1_prod2_ent1": {
+  "entries": [
+    {
+      "id": "1771945454291-0",
+      "items": {
+        "field1": "value1"
+      }
+    },
+    {
+      "id": "1771945454291-1",
+      "items": {
+        "idmp_field": "prod1_ent1"
+      }
+    },
+    {
+      "id": "1771945454291-2",
+      "items": {
+        "idmp_field": "prod2_ent1"
+      }
+    }
+  ],
+  "idmp": {
+    "duration": 100,
+    "maxEntries": 100,
+    "numProducers": 2,
+    "producers": [
+      {
+        "pid": "producer1",
+        "numEntries": 1,
+        "entries": [
+          {
+            "iid": "iid_p1_e1",
+            "streamId": "1771945454291-1"
+          }
+        ]
+      },
+      {
+        "pid": "producer2",
+        "numEntries": 1,
+        "entries": [
+          {
+            "iid": "iid_p2_e1",
+            "streamId": "1771945454291-2"
+          }
+        ]
+      }
+    ]
+  }
+}

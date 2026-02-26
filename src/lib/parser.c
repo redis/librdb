@@ -88,7 +88,7 @@ struct ParsingElementInfo peInfo[PE_MAX] = {
 
         /*** parsing raw data (RDB_LEVEL_RAW) ***/
 
-        [PE_RAW_NEW_KEY]      = {elementRawNewKey, "elementRawNewKey", "Parsing new raw key-value"},
+        [PE_RAW_NEW_KEY]      = {elementNewKey, "elementNewKey", "Parsing new raw key-value"},
         [PE_RAW_END_KEY]      = {elementRawEndKey, "elementRawEndKey", "Parsing raw end key"},
 
         /* string */
@@ -118,7 +118,9 @@ struct ParsingElementInfo peInfo[PE_MAX] = {
         [PE_RAW_MODULE_AUX]   = {elementRawModule, "elementRawModule(aux)", "Parsing Module Auxiliary data"},
         /* stream */
         [PE_RAW_STREAM_LP]    = {elementRawStreamLP, "elementRawStreamLP", "Parsing raw stream Listpack"},
-    
+        /* key metadata (RDB v13) */
+        [PE_RAW_KEY_META]     = {elementRawKeyMeta, "elementRawKeyMeta", "Parsing raw key metadata"},
+
         /* Redis Enterprise only */
         [__PE_SLOT_NUM]         = {__elementSlotNum, "elementSlotNum", "Parse cluster slot number (Redis Ent.)"},
         [__PE_RAM_LRU]        = {__elementRamLru, "elementRamLru", "Parsing RAM LRU Opcode. Relevant only for Redis Ent."},
@@ -607,6 +609,7 @@ _LIBRDB_API int RDB_handleByLevel(RdbParser *p, RdbDataType type, RdbHandlersLev
             p->handleTypeObjByLevel[RDB_TYPE_STREAM_LISTPACKS] = lvl;
             p->handleTypeObjByLevel[RDB_TYPE_STREAM_LISTPACKS_2] = lvl;
             p->handleTypeObjByLevel[RDB_TYPE_STREAM_LISTPACKS_3] = lvl;
+            p->handleTypeObjByLevel[RDB_TYPE_STREAM_LISTPACKS_4] = lvl;
             break;
         case RDB_DATA_TYPE_FUNCTION:
             p->handleTypeObjByLevel[RDB_OPCODE_FUNCTION2] = lvl;
@@ -668,6 +671,7 @@ static inline RdbDataType getDataType(int opcode) {
         case RDB_TYPE_STREAM_LISTPACKS:
         case RDB_TYPE_STREAM_LISTPACKS_2:
         case RDB_TYPE_STREAM_LISTPACKS_3:
+        case RDB_TYPE_STREAM_LISTPACKS_4:
             return RDB_DATA_TYPE_STREAM;
         default:
             return RDB_DATA_TYPE_MAX;
@@ -1473,16 +1477,28 @@ RdbStatus elementNewKey(RdbParser *p) {
 
     p->elmCtx.key.info.opcode = p->currOpcode; /* tell cb what is current opcode */
     p->elmCtx.key.info.dataType = getDataType(p->currOpcode);
+    /* p->elmCtx.key.info.numMeta = may have been set earlier by elementRawKeyMeta */
 
     registerAppBulkForNextCb(p, binfoKey);
     CALL_HANDLERS_CB(p, NOP, p->elmCtx.key.handleByLevel, common.handleNewKey, binfoKey->ref, &p->elmCtx.key.info);
 
+    if (p->parsingElement == PE_RAW_NEW_KEY) {
+        /* Init new raw key handling and start aggregating its raw bytes */
+        newRawKey(p);
+    } else if (p->elmCtx.key.info.numMeta > 0) {
+        /* Layout: [<KEY-METADATA>,]<TYPE>,<KEY>,<VALUE> */
+        
+        /* At struct/data level, discard previously aggregated key metadata 
+         * bytes - they're only useful for raw level (RESTORE commands). */
+        clearKeyMetaFromAgg(p);
+    }
+    
     /* reset values for next key */
+    p->elmCtx.key.info.numMeta = 0;    
     p->elmCtx.key.info.expiretime = -1;
     p->elmCtx.key.info.lruIdle = -1;
     p->elmCtx.key.info.lfuFreq = -1;
     p->elmCtx.key.numItemsHint = -1;
-
     /* Read value */
     return nextParsingElement(p, p->elmCtx.key.parsingElemType);
 }
@@ -1543,7 +1559,8 @@ RdbStatus elementNextRdbType(RdbParser *p) {
         case RDB_OPCODE_RESIZEDB:           return nextParsingElement(p, PE_RESIZE_DB);
         case RDB_OPCODE_FREQ:               return nextParsingElement(p, PE_FREQ);
         case RDB_OPCODE_IDLE:               return nextParsingElement(p, PE_IDLE);
-            
+        case RDB_OPCODE_KEY_META:           return nextParsingElement(p, PE_RAW_KEY_META);
+
         /* Redis Enterprise only */
         case __RDB_OPCODE_RAM_LRU:          return nextParsingElement(p, __PE_RAM_LRU);
         case __RDB_OPCODE_SLOT_NUM:         return nextParsingElement(p, __PE_SLOT_NUM);
@@ -1578,7 +1595,8 @@ RdbStatus elementNextRdbType(RdbParser *p) {
         /* stream */
         case RDB_TYPE_STREAM_LISTPACKS:
         case RDB_TYPE_STREAM_LISTPACKS_2:
-        case RDB_TYPE_STREAM_LISTPACKS_3:   return nextParsingElementKeyValue(p, PE_RAW_STREAM_LP, PE_STREAM_LP);
+        case RDB_TYPE_STREAM_LISTPACKS_3:
+        case RDB_TYPE_STREAM_LISTPACKS_4:   return nextParsingElementKeyValue(p, PE_RAW_STREAM_LP, PE_STREAM_LP);
 
         case RDB_OPCODE_MODULE_AUX:         if (p->handleTypeObjByLevel[RDB_OPCODE_MODULE_AUX] == RDB_LEVEL_RAW)
                                                 return nextParsingElement(p, PE_RAW_MODULE_AUX);
@@ -2348,6 +2366,11 @@ RdbStatus elementStreamLP(RdbParser *p) {
         ST_LOAD_NUM_CONSUMERS,        /*   Load the number of consumers                                           */
         ST_LOAD_NEXT_CONSUMER,        /*   While more consumers to load                                           */
         ST_LOAD_NEXT_CONSUMER_PEL,    /*       Load the PEL about entries owned by next consumer                  */
+        /* IDMP states for RDB_TYPE_STREAM_LISTPACKS_4 */
+        ST_LOAD_IDMP_CONFIG,          /* Load IDMP config (duration, max_entries, num_producers)                  */
+        ST_LOAD_IDMP_NEXT_PRODUCER,   /*   Load producer PID and entries                                          */
+        ST_LOAD_IDMP_ENTRY,           /*     Load IDMP entry (IID + stream ID)                                    */
+        ST_LOAD_IDMP_STATS,           /* Load IDMP stats (iids_added, iids_duplicates)                            */
     };
 
     ElementCtx *ctx = &p->elmCtx;
@@ -2357,7 +2380,7 @@ RdbStatus elementStreamLP(RdbParser *p) {
             case ST_READ_NUM_LP:
                 IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &ctx->stream.numListPacks, NULL, NULL));
                 /*** ENTER SAFE STATE ***/
-                return updateElementState(p, ST_LOAD_ALL_LP, 0); /* fall-thru */
+                updateElementState(p, ST_LOAD_ALL_LP, 0); /* fall-thru */
 
             case ST_LOAD_ALL_LP:
                 while (ctx->stream.numListPacks > 0) {
@@ -2456,8 +2479,16 @@ RdbStatus elementStreamLP(RdbParser *p) {
                     BulkInfo *binfoNameCG;
 
                     /* if not more consumer groups */
-                    if (!(ctx->stream.cgroupsLeft))
+                    if (!(ctx->stream.cgroupsLeft)) {
+                        /* Check for IDMP data in RDB_TYPE_STREAM_LISTPACKS_4 */
+                        if (p->currOpcode >= RDB_TYPE_STREAM_LISTPACKS_4) {
+                            updateElementState(p, ST_LOAD_IDMP_CONFIG, 1);
+                            break;                            
+                        }
+
+                        /* Legacy stream format ends here */
                         return nextParsingElement(p, PE_END_KEY);
+                    }
 
                     IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC_APP_BULK, NULL, &binfoNameCG));
                     IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &cgMeta.lastId.ms, NULL, NULL));
@@ -2557,11 +2588,106 @@ RdbStatus elementStreamLP(RdbParser *p) {
                     updateElementState(p, ST_LOAD_NEXT_CONS_GROUP, 0);
                 break;
 
+            /* IDMP (Idempotent Message Producer) states for RDB_TYPE_STREAM_LISTPACKS_4 */
+            case ST_LOAD_IDMP_CONFIG: {
+                /* Load IDMP duration (in seconds) */
+                IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &ctx->stream.idmpDuration, NULL, NULL));
+                /* Load IDMP max entries */
+                IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &ctx->stream.idmpMaxEntries, NULL, NULL));
+                /* Load number of producers */
+                IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &ctx->stream.idmpProducersLeft, NULL, NULL));
+                ctx->stream.idmpNumProducers = ctx->stream.idmpProducersLeft;
+
+                /*** ENTER SAFE STATE ***/
+
+                /* Call handleStreamIdmpMeta first, before producers/entries */
+                RdbStreamIdmpMeta idmpMeta = {
+                    .duration = ctx->stream.idmpDuration,
+                    .maxEntries = ctx->stream.idmpMaxEntries,
+                    .numProducers = ctx->stream.idmpNumProducers,
+                };
+                CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_DATA, rdbData.handleStreamIdmpMeta, &idmpMeta);
+
+                if (ctx->stream.idmpProducersLeft == 0)
+                    updateElementState(p, ST_LOAD_IDMP_STATS, 0);
+                else 
+                    updateElementState(p, ST_LOAD_IDMP_NEXT_PRODUCER, 0);
+                break;
+            }
+
+            case ST_LOAD_IDMP_NEXT_PRODUCER: {
+                BulkInfo *bPid;
+                /* Load producer PID (raw string) */
+                IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC_APP_BULK, NULL, &bPid));
+                /* Load number of entries for this producer */
+                IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &ctx->stream.idmpEntriesLeft, NULL, NULL));
+
+                /*** ENTER SAFE STATE ***/
+                
+                RdbStreamIdmpProducer producer = {
+                    .pid = bPid->ref,
+                    .numEntries = ctx->stream.idmpEntriesLeft,
+                };
+                registerAppBulkForNextCb(p, bPid);
+                CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_DATA, rdbData.handleStreamIdmpProducer, &producer);
+
+                if (ctx->stream.idmpEntriesLeft == 0) {
+                    ctx->stream.idmpProducersLeft--;
+                    if (ctx->stream.idmpProducersLeft == 0)
+                        updateElementState(p, ST_LOAD_IDMP_STATS, 0);
+                    else 
+                        updateElementState(p, ST_LOAD_IDMP_NEXT_PRODUCER, 0);
+                } else {
+                    updateElementState(p, ST_LOAD_IDMP_ENTRY, 0);
+                }
+                break;
+            }
+
+            case ST_LOAD_IDMP_ENTRY: {
+                BulkInfo *bIid;
+                /* Load entry IID (raw string) */
+                IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC_APP_BULK, NULL, &bIid));
+                /* Load the associated stream ID (ms + seq) - store in context for safe state */
+                IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &ctx->stream.idmpEntryStreamId.ms, NULL, NULL));
+                IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &ctx->stream.idmpEntryStreamId.seq, NULL, NULL));
+
+                /*** ENTER SAFE STATE ***/
+                RdbStreamIdmpEntry entry = {
+                    .iid = bIid->ref,
+                    .streamId = ctx->stream.idmpEntryStreamId,
+                };
+
+                registerAppBulkForNextCb(p, bIid);
+                CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_DATA, rdbData.handleStreamIdmpEntry, &entry);
+
+                ctx->stream.idmpEntriesLeft--;
+                if (ctx->stream.idmpEntriesLeft > 0) {
+                    updateElementState(p, ST_LOAD_IDMP_ENTRY, 0);
+                } else {
+                    ctx->stream.idmpProducersLeft--;
+                    if (ctx->stream.idmpProducersLeft > 0)
+                        updateElementState(p, ST_LOAD_IDMP_NEXT_PRODUCER, 0);
+                    else 
+                        updateElementState(p, ST_LOAD_IDMP_STATS, 0);                    
+                }
+                break;
+            }
+
+            case ST_LOAD_IDMP_STATS: {
+                uint64_t iidsAddedDummy, iidsDupDummy;
+                /* Load and discard IDMP stats (not exposed in API) */
+                IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &iidsAddedDummy, NULL, NULL));
+                IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &iidsDupDummy, NULL, NULL));
+
+                /*** ENTER SAFE STATE ***/
+
+                return nextParsingElement(p, PE_END_KEY);
+            }
+
             default:
                 RDB_reportError(p, RDB_ERR_STREAM_INVALID_STATE,
                                 "elementStreamLP() : Invalid parsing element state: %d.", ctx->state);
                 return RDB_STATUS_ERROR;
-                break;
         }
     }
     return RDB_STATUS_OK;

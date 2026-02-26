@@ -80,8 +80,8 @@ struct RdbxToResp {
          * delivery times, which are necessary for reconstructing XCLAIM commands). */
         rax *groupPel;
 
-        RdbBulkCopy grpName, consName;
-        int grpNameLen, consNameLen;
+        RdbBulkCopy grpName, consName, idmpPid;
+        int grpNameLen, consNameLen, idmpPidLen;
 
     } streamCtx;
 };
@@ -116,6 +116,8 @@ static void deleteRdbToRespCtx(RdbParser *p, void *context) {
     RDB_bulkCopyFree(p, ctx->keyCtx.key);
 
     RDB_bulkCopyFree(p, ctx->streamCtx.consName);
+
+    RDB_bulkCopyFree(p, ctx->streamCtx.idmpPid);
 
     /* destroy respWriter */
     if (ctx->respWriter.destroy)
@@ -883,6 +885,80 @@ static RdbRes toRespStreamConsumerPendingEntry(RdbParser *p, void *userData, Rdb
     return writevWrap(ctx, iov, iovs, &startCmd, 1);
 }
 
+/* Emit XCFGSET command to configure IDMP settings for the stream.
+ * XCFGSET key IDMP-DURATION duration IDMP-MAXSIZE maxsize */
+static RdbRes toRespStreamIdmpMeta(RdbParser *p, void *userData, RdbStreamIdmpMeta *meta) {
+    UNUSED(p);
+    RdbxToResp *ctx = userData;
+    
+    if (ctx->targetRedisVerVal < VER_VAL(8, 6)) /* Supported starting Redis 8.6+ */
+        return RDB_OK;
+
+    struct iovec iov[12];
+    char keyLenStr[32], durationLenStr[32], durationStr[32], maxsizeLenStr[32], maxsizeStr[32];
+
+    RdbxRespWriterStartCmd startCmd = {"XCFGSET", ctx->keyCtx.key, 0};
+
+    /* XCFGSET key IDMP-DURATION duration IDMP-MAXSIZE maxsize */
+    IOV_CONST(&iov[0], "*6\r\n$7\r\nXCFGSET");
+    IOV_LENGTH(&iov[1], ctx->keyCtx.keyLen, keyLenStr);
+    IOV_STRING(&iov[2], ctx->keyCtx.key, ctx->keyCtx.keyLen);
+    IOV_CONST(&iov[3], "\r\n$13\r\nIDMP-DURATION");
+    IOV_LEN_AND_VAL(&iov[4], meta->duration, durationLenStr, durationStr);
+    IOV_CONST(&iov[6], "$12\r\nIDMP-MAXSIZE");
+    IOV_LEN_AND_VAL(&iov[7], meta->maxEntries, maxsizeLenStr, maxsizeStr);
+    return writevWrap(ctx, iov, 9, &startCmd, 1);
+}
+
+/* Store the producer ID for use in subsequent XIDMPRECORD commands */
+static RdbRes toRespStreamIdmpProducer(RdbParser *p, void *userData, RdbStreamIdmpProducer *producer) {
+    RdbxToResp *ctx = userData;
+
+    if (ctx->targetRedisVerVal < VER_VAL(8, 6)) /* Supported starting Redis 8.6+ */
+        return RDB_OK;
+
+    /* Free previous producer ID if any */
+    RDB_bulkCopyFree(p, ctx->streamCtx.idmpPid);
+
+    /* Store the producer ID for use in handleStreamIdmpEntry */
+    ctx->streamCtx.idmpPid = RDB_bulkClone(p, producer->pid);
+    ctx->streamCtx.idmpPidLen = RDB_bulkLen(p, producer->pid);
+
+    return RDB_OK;
+}
+
+/* Emit XIDMPRECORD command to record an IDMP entry.
+ * XIDMPRECORD key pid iid stream-id */
+static RdbRes toRespStreamIdmpEntry(RdbParser *p, void *userData, RdbStreamIdmpEntry *entry) {
+    RdbxToResp *ctx = userData;
+
+    if (ctx->targetRedisVerVal < VER_VAL(8, 6)) /* Supported starting Redis 8.6+ */
+        return RDB_OK;
+
+    struct iovec iov[12];
+    char keyLenStr[32], pidLenStr[32], iidLenStr[32], streamIdStr[64], streamIdLenStr[32];
+    int iidLen = RDB_bulkLen(p, entry->iid);
+
+    RdbxRespWriterStartCmd startCmd = {"XIDMPRECORD", ctx->keyCtx.key, 0};
+
+    /* Format stream ID as "ms-seq" */
+    int streamIdLen = snprintf(streamIdStr, sizeof(streamIdStr), "%" PRIu64 "-%" PRIu64,
+                               entry->streamId.ms, entry->streamId.seq);
+
+    /* XIDMPRECORD key pid iid stream-id */
+    IOV_CONST(&iov[0], "*5\r\n$11\r\nXIDMPRECORD");
+    IOV_LENGTH(&iov[1], ctx->keyCtx.keyLen, keyLenStr);
+    IOV_STRING(&iov[2], ctx->keyCtx.key, ctx->keyCtx.keyLen);
+    IOV_LENGTH(&iov[3], ctx->streamCtx.idmpPidLen, pidLenStr);
+    IOV_STRING(&iov[4], ctx->streamCtx.idmpPid, ctx->streamCtx.idmpPidLen);
+    IOV_LENGTH(&iov[5], iidLen, iidLenStr);
+    IOV_STRING(&iov[6], entry->iid, iidLen);
+    IOV_LENGTH(&iov[7], streamIdLen, streamIdLenStr);
+    IOV_STRING(&iov[8], streamIdStr, streamIdLen);
+    IOV_CONST(&iov[9], "\r\n");
+    return writevWrap(ctx, iov, 10, &startCmd, 1);
+}
+
 /*** Handling raw (RESTORE) ***/
 /* Callback on start of serializing module aux data (alternative to toRespRestoreBegin).
  * Following this call, one or more calls will be made to toRespRestoreFrag() to
@@ -1066,12 +1142,17 @@ _LIBRDB_API RdbxToResp *RDBX_createHandlersToResp(RdbParser *p, RdbxToRespConf *
             toRespZset,                        /*handleZsetMember*/
             toRespFunction,                    /*handleFunction*/
             NULL,                              /*handleModule*/
-            toRespStreamMetaData,              /*handleStreamMetadata*/
-            toRespStreamItem,                  /*handleStreamItem*/
-            toRespStreamNewCGroup,             /*handleStreamNewCGroup*/
-            toRespStreamCGroupPendingEntry,    /*handleStreamCGroupPendingEntry*/
-            toRespStreamNewConsumer,           /*handleStreamNewConsumer*/
-            toRespStreamConsumerPendingEntry   /*handleStreamConsumerPendingEntry*/
+
+            /*stream:*/
+            toRespStreamMetaData,                       /*handleStreamMetadata*/
+            toRespStreamItem,                              /*handleStreamItem*/
+            toRespStreamNewCGroup,                    /*handleStreamNewCGroup*/
+            toRespStreamCGroupPendingEntry,     /*handleStreamCGroupPendingEntry*/
+            toRespStreamNewConsumer,                /*handleStreamNewConsumer*/
+            toRespStreamConsumerPendingEntry, /*handleStreamConsumerPendingEntry*/
+            toRespStreamIdmpMeta,                                         /*handleStreamIdmpMeta*/
+            toRespStreamIdmpProducer,                                     /*handleStreamIdmpProducer*/
+            toRespStreamIdmpEntry                      /*handleStreamIdmpEntry*/
     };
     RDB_createHandlersData(p, &dataCb, ctx, deleteRdbToRespCtx);
 

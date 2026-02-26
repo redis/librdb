@@ -35,10 +35,12 @@
 #define RDB_TYPE_HASH_LISTPACK_EX_PRE_GA 23   /* Hash LP with HFEs. Doesn't attach min TTL at start (7.4 RC) */
 #define RDB_TYPE_HASH_METADATA      24        /* Hash with HFEs. Attach min TTL at start */
 #define RDB_TYPE_HASH_LISTPACK_EX   25        /* Hash LP with HFEs. Attach min TTL at start */
-#define RDB_TYPE_MAX                26
+#define RDB_TYPE_STREAM_LISTPACKS_4 26        /* Stream with IDMP support */
+#define RDB_TYPE_MAX                27
 
 
 /* Special RDB opcodes (saved/loaded with rdbSaveType/rdbLoadType). */
+#define RDB_OPCODE_KEY_META   243   /* Key metadata (module metadata classes). */
 #define RDB_OPCODE_SLOT_INFO  244   /* Individual slot info, such as slot id and size (cluster mode only). */
 #define RDB_OPCODE_FUNCTION2  245   /* function library data */
 #define RDB_OPCODE_FUNCTION   246   /* old function library data for 7.0 rc1 and rc2 */
