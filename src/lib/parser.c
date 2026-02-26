@@ -2674,10 +2674,10 @@ RdbStatus elementStreamLP(RdbParser *p) {
             }
 
             case ST_LOAD_IDMP_STATS: {
-                uint64_t iidsAdded, iidsDuplicates;
+                uint64_t iidsAddedDummy, iidsDupDummy;
                 /* Load and discard IDMP stats (not exposed in API) */
-                IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &iidsAdded, NULL, NULL));
-                IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &iidsDuplicates, NULL, NULL));
+                IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &iidsAddedDummy, NULL, NULL));
+                IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &iidsDupDummy, NULL, NULL));
 
                 /*** ENTER SAFE STATE ***/
 

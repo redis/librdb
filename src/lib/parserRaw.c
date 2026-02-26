@@ -1111,12 +1111,12 @@ RdbStatus elementRawStreamLP(RdbParser *p) {
             return subElementCall(p, PE_RAW_STRING, ST_LOAD_IDMP_ENTRY_IID_RETURN);
 
         case ST_LOAD_IDMP_ENTRY_IID_RETURN: {
-            size_t iidLen;
+            size_t iidLenUnused;
             unsigned char *iidUnused;
             int written = 0;
             uint64_t dummyVal;
 
-            subElementCallEnd(p, (char **) &iidUnused, &iidLen);
+            subElementCallEnd(p, (char **) &iidUnused, &iidLenUnused);
             aggMakeRoom(p, LONG_STR_SIZE * 2);
 
             /* Load the associated stream ID (ms + seq) */
@@ -1205,7 +1205,7 @@ RdbStatus elementRawKeyMeta(RdbParser *p) {
             case ST_RAW_KEY_META_NUM_CLASSES: {
                 uint64_t numClasses;
                 int len = 0;
-                IF_NOT_OK_RETURN(aggMakeRoom(p, 1));
+                IF_NOT_OK_RETURN(aggMakeRoom(p, 10)); /* numClasses<8, actually fits in 1 byte */
                 IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &numClasses, (unsigned char *) rawCtx->at, &len));
                 /*** ENTER SAFE STATE ***/
                 IF_NOT_OK_RETURN(aggUpdateWritten(p, len));

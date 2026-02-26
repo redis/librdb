@@ -725,6 +725,9 @@ static RdbRes toJsonStreamIdmpProducer(RdbParser *p, void *userData, RdbStreamId
         prefix = ",\n        \"producers\": [\n          {\"pid\": ";
     } else if (ctx->state == R2J_IN_STREAM_IDMP_ENTRY) {
         prefix = "]},\n          {\"pid\": ";
+    } else if (ctx->state == R2J_IN_STREAM_IDMP_PRODUCER) {
+        /* Previous producer had zero entries - close it without entries array */
+        prefix = "},\n          {\"pid\": ";
     } else {
         RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
                         "toJsonStreamIdmpProducer(): Invalid state value: %d", ctx->state);
