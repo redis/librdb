@@ -1484,7 +1484,7 @@ RdbStatus elementNewKey(RdbParser *p) {
 
     if (p->parsingElement == PE_RAW_NEW_KEY) {
         /* Init new raw key handling and start aggregating its raw bytes */
-        newRawKey(p);
+        IF_NOT_OK_RETURN(newRawKey(p));
     } else if (p->elmCtx.key.info.numMeta > 0) {
         /* Layout: [<KEY-METADATA>,]<TYPE>,<KEY>,<VALUE> */
         
