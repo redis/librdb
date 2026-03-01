@@ -1,3 +1,21 @@
+## [2.2.0] - 2026-03-01
+
+### New Features
+- **RDB v13 Support**: Add support for RDB version 13 (#93)
+  - Ensures compatibility with latest Redis RDB format, specifically key-metadata and stream IDMP
+- **RESTOREMODAUX Downgrading**: Support downgrading RESTOREMODAUX commands (#92)
+  - Enables compatibility when restoring to older Redis versions
+- **Redis Enterprise Support**: Skip new Redis Enterprise RDB_OPCODE_SLOT_NUM opcode (#91)
+  - Improves compatibility with Redis Enterprise RDB files
+- **Authentication**: Add LIBRDB_AUTH environment variable support for password authentication
+  - Simplifies authentication configuration in automated environments
+
+### Bug Fixes
+- **Error Handling**: Add goto cleanup on rdb-cli return error
+  - Ensures proper resource cleanup on error conditions
+
+---
+
 ## [2.1.0] - 2025-12-11
 
 ### New Features
