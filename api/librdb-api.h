@@ -149,7 +149,8 @@ typedef struct RdbKeyInfo {
     long long lruIdle;      /* -1 if not set */
     int lfuFreq;            /* -1 if not set */
     int opcode;
-    int dataType;          /* See enum RdbDataType */
+    int dataType;           /* See enum RdbDataType */
+    int numMeta;            /* number of metadata attached to the key */
 } RdbKeyInfo;
 
 typedef struct RdbSlotInfo {
@@ -186,6 +187,22 @@ typedef struct RdbStreamConsumerMeta {
     long long activeTime;
     long long seenTime;
 } RdbStreamConsumerMeta;
+
+typedef struct RdbStreamIdmpMeta {
+    uint64_t duration;       /* IDMP duration in seconds (1-86400) */
+    uint64_t maxEntries;     /* Max IIDs per producer (1-10000) */
+    uint64_t numProducers;   /* Number of producers with active IDMP maps */
+} RdbStreamIdmpMeta;
+
+typedef struct RdbStreamIdmpProducer {
+    RdbBulk pid;             /* Producer ID (binary/string, up to 36 bytes recommended) */
+    uint64_t numEntries;     /* Number of (iid -> stream_id) entries for this producer */
+} RdbStreamIdmpProducer;
+
+typedef struct RdbStreamIdmpEntry {
+    RdbBulk iid;             /* Idempotent ID (binary, typically 16 bytes for IDMPAUTO) */
+    RdbStreamID streamId;    /* Associated stream entry ID */
+} RdbStreamIdmpEntry;
 
 /* misc function pointer typedefs */
 typedef RdbStatus (*RdbReaderFunc) (void *readerData, void *buf, size_t len);
@@ -317,6 +334,19 @@ typedef struct RdbHandlersDataCallbacks {
     RdbRes (*handleFunction)(RdbParser *p, void *userData, RdbBulk func);
     /* Callback to handle module. Currently only reports about the name & size */
     RdbRes (*handleModule)(RdbParser *p, void *userData, RdbBulk moduleName, size_t serializedSize);
+    
+    /****************************************************************
+     * Stream cb - invoked in this order for each stream key. Indentation represent nesting.
+     *   handleStreamMetadata(meta)
+     *   handleStreamItem(id, field, value, itemsLeft)        [repeated per entry/field]
+     *   handleStreamNewCGroup(grpName, meta)                 [per consumer group]
+     *     handleStreamCGroupPendingEntry(entry)              [per group PEL entry]
+     *     handleStreamNewConsumer(consName, meta)            [per consumer]
+     *       handleStreamConsumerPendingEntry(id)             [per consumer PEL entry]
+     *   handleStreamIdmpMeta(meta)                           [once, if IDMP enabled]
+     *     handleStreamIdmpProducer(producer)                 [per producer]
+     *       handleStreamIdmpEntry(entry)                     [per IID mapping]
+     ****************************************************************/
     /* Callback to handle metadata associated with a stream */
     RdbRes (*handleStreamMetadata)(RdbParser *p, void *userData, RdbStreamMeta *meta);
     /* Callback to handle an item within a stream along with its field and value */
@@ -329,6 +359,12 @@ typedef struct RdbHandlersDataCallbacks {
     RdbRes (*handleStreamNewConsumer)(RdbParser *p, void *userData, RdbBulk consName, RdbStreamConsumerMeta *meta);
     /* Callback to handle a pending entry within a consumer */
     RdbRes (*handleStreamConsumerPendingEntry)(RdbParser *p, void *userData, RdbStreamID *streamId);
+    /* Callback to handle IDMP (Idempotent Message Producer) metadata for a stream */
+    RdbRes (*handleStreamIdmpMeta)(RdbParser *p, void *userData, RdbStreamIdmpMeta *meta);
+    /* Callback to handle start of a new IDMP producer */
+    RdbRes (*handleStreamIdmpProducer)(RdbParser *p, void *userData, RdbStreamIdmpProducer *producer);
+    /* Callback to handle an IDMP entry (iid -> stream_id mapping) */
+    RdbRes (*handleStreamIdmpEntry)(RdbParser *p, void *userData, RdbStreamIdmpEntry *entry);
 
 } RdbHandlersDataCallbacks;
 

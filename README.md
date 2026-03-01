@@ -222,8 +222,8 @@ destruction, or when newer block replacing old one.
 
     FORMAT_OPTIONS ('print'):
             -a, --aux-val <FMT>           %f=Auxiliary-Field, %v=Auxiliary-Value (Default: "")
-            -k, --key <FMT>               %d=Db %k=Key %v=Value %t=Type %e=Expiry %r=LRU %f=LFU %i=Items
-                                          (Default: "%d,%k,%v,%t,%e,%i")
+            -k, --key <FMT>               %d=Db %k=Key %v=Value %t=Type %e=Expiry %r=LRU %f=LFU
+                                          %i=Items %m=NumMeta (Default: "%d,%k,%v,%t,%e,%i")
             -o, --output <FILE>           Specify the output file. If not specified, output to stdout
     
     FORMAT_OPTIONS ('json'):

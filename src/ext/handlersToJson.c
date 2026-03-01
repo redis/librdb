@@ -36,6 +36,11 @@ typedef enum
     R2J_IN_STREAM_CG_CONSUMER,
     R2J_IN_STREAM_CG_CONSUMER_PEL,
 
+    /* IDMP states */
+    R2J_IN_STREAM_IDMP,
+    R2J_IN_STREAM_IDMP_PRODUCER,
+    R2J_IN_STREAM_IDMP_ENTRY,
+
 } RdbxToJsonState;
 
 struct RdbxToJson {
@@ -128,6 +133,7 @@ static RdbxToJson *initRdbToJsonCtx(RdbParser *p, const char *outfilename, RdbxT
     ctx->conf.includeAuxField = 0;
     ctx->conf.includeFunc = 0;
     ctx->conf.includeStreamMeta = 0;
+    ctx->conf.includeStreamIdmp = 0;
     ctx->conf.includeDbInfo = 0;
 
     /* override configuration if provided */
@@ -224,6 +230,17 @@ static RdbRes toJsonEndKey(RdbParser *p, void *userData) {
             break;
         case R2J_IN_STREAM_CG_CONSUMER_PEL:
             fprintf(ctx->outfile, "]}]}]}");
+            break;
+
+        /* IDMP states */
+        case R2J_IN_STREAM_IDMP:
+            fprintf(ctx->outfile, "}}");
+            break;
+        case R2J_IN_STREAM_IDMP_PRODUCER:
+            fprintf(ctx->outfile, "}]}}");
+            break;
+        case R2J_IN_STREAM_IDMP_ENTRY:
+            fprintf(ctx->outfile, "]}]}}");
             break;
 
         case R2J_IN_LIST:
@@ -574,7 +591,7 @@ static RdbRes toJsonStreamMetadata(RdbParser *p, void *userData, RdbStreamMeta *
     fprintf(ctx->outfile, "\n      \"entriesAdded\": %" PRIu64 ", ", meta->entriesAdded);
     fprintf(ctx->outfile, "\n      \"firstID\": \"%" PRIu64 "-%" PRIu64 "\", ", meta->firstID.ms, meta->firstID.seq);
     fprintf(ctx->outfile, "\n      \"lastID\": \"%" PRIu64 "-%" PRIu64 "\", ", meta->lastID.ms, meta->lastID.seq);
-    fprintf(ctx->outfile, "\n      \"maxDelEntryID\": \"%" PRIu64 "-%" PRIu64 "\",", meta->maxDelEntryID.ms, meta->maxDelEntryID.seq);
+    fprintf(ctx->outfile, "\n      \"maxDelEntryID\": \"%" PRIu64 "-%" PRIu64 "\"", meta->maxDelEntryID.ms, meta->maxDelEntryID.seq);
     return RDB_OK;
 }
 
@@ -582,7 +599,7 @@ static RdbRes toJsonStreamNewCGroup(RdbParser *p, void *userData, RdbBulk grpNam
     RdbxToJson *ctx = userData;
     char *prefix;
     if (ctx->state == R2J_IN_STREAM) {
-        prefix = "\n      \"groups\": [\n";
+        prefix = ",\n      \"groups\": [\n";
     } else if (ctx->state == R2J_IN_STREAM_CG) {
         prefix = "},\n";
     } else if (ctx->state == R2J_IN_STREAM_CG_PEL) {
@@ -663,6 +680,90 @@ static RdbRes toJsonStreamConsumerPendingEntry(RdbParser *p, void *userData, Rdb
     return RDB_OK;
 }
 
+static RdbRes toJsonStreamIdmpMeta(RdbParser *p, void *userData, RdbStreamIdmpMeta *meta) {
+    RdbxToJson *ctx = userData;
+    char *prefix;
+
+    /* Skip outputting IDMP section if there are no producers - it's effectively empty/default config */
+    if (meta->numProducers == 0)
+        return RDB_OK;
+
+    if (ctx->state == R2J_IN_STREAM) {
+        prefix = ",\n      \"idmp\": {";
+    } else if (ctx->state == R2J_IN_STREAM_CG) {
+        prefix = "}],\n      \"idmp\": {";
+    } else if (ctx->state == R2J_IN_STREAM_CG_PEL) {
+        prefix = "]}],\n      \"idmp\": {";
+    } else if (ctx->state == R2J_IN_STREAM_CG_CONSUMER) {
+        prefix = "}]}],\n      \"idmp\": {";
+    } else if (ctx->state == R2J_IN_STREAM_CG_CONSUMER_PEL) {
+        prefix = "]}]}],\n      \"idmp\": {";
+    } else if (ctx->state == R2J_IN_KEY) {
+        /* No stream entries were recorded - handleStreamMetadata not registered */
+        prefix = "{\n      \"idmp\": {";
+    } else if (ctx->state == R2J_IN_STREAM_ENTRIES) {
+        /* Stream entries exist but handleStreamMetadata not registered */
+        prefix = "],\n      \"idmp\": {";
+    } else {
+        RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
+                        "toJsonStreamIdmpMeta(): Invalid state value: %d", ctx->state);
+        return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
+    }
+
+    fprintf(ctx->outfile, "%s\n        \"duration\": %" PRIu64 ", \"maxEntries\": %" PRIu64 ", \"numProducers\": %" PRIu64,
+            prefix, meta->duration, meta->maxEntries, meta->numProducers);
+
+    ctx->state = R2J_IN_STREAM_IDMP;
+    return RDB_OK;
+}
+
+static RdbRes toJsonStreamIdmpProducer(RdbParser *p, void *userData, RdbStreamIdmpProducer *producer) {
+    RdbxToJson *ctx = userData;
+    char *prefix;
+
+    if (ctx->state == R2J_IN_STREAM_IDMP) {
+        prefix = ",\n        \"producers\": [\n          {\"pid\": ";
+    } else if (ctx->state == R2J_IN_STREAM_IDMP_ENTRY) {
+        prefix = "]},\n          {\"pid\": ";
+    } else if (ctx->state == R2J_IN_STREAM_IDMP_PRODUCER) {
+        /* Previous producer had zero entries - close it without entries array */
+        prefix = "},\n          {\"pid\": ";
+    } else {
+        RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
+                        "toJsonStreamIdmpProducer(): Invalid state value: %d", ctx->state);
+        return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
+    }
+
+    fprintf(ctx->outfile, "%s", prefix);
+    outputQuotedEscaping(ctx, producer->pid, RDB_bulkLen(p, producer->pid));
+    fprintf(ctx->outfile, ", \"numEntries\": %" PRIu64, producer->numEntries);
+
+    ctx->state = R2J_IN_STREAM_IDMP_PRODUCER;
+    return RDB_OK;
+}
+
+static RdbRes toJsonStreamIdmpEntry(RdbParser *p, void *userData, RdbStreamIdmpEntry *entry) {
+    RdbxToJson *ctx = userData;
+    char *prefix;
+
+    if (ctx->state == R2J_IN_STREAM_IDMP_PRODUCER) {
+        prefix = ",\n           \"entries\": [{\"iid\": ";
+    } else if (ctx->state == R2J_IN_STREAM_IDMP_ENTRY) {
+        prefix = ", {\"iid\": ";
+    } else {
+        RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
+                        "toJsonStreamIdmpEntry(): Invalid state value: %d", ctx->state);
+        return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
+    }
+
+    fprintf(ctx->outfile, "%s", prefix);
+    outputQuotedEscaping(ctx, entry->iid, RDB_bulkLen(p, entry->iid));
+    fprintf(ctx->outfile, ", \"streamId\": \"%" PRIu64 "-%" PRIu64 "\"}", entry->streamId.ms, entry->streamId.seq);
+
+    ctx->state = R2J_IN_STREAM_IDMP_ENTRY;
+    return RDB_OK;
+}
+
 /*** Handling struct ***/
 
 static RdbRes toJsonStruct(RdbParser *p, void *userData, RdbBulk value) {
@@ -734,12 +835,17 @@ RdbxToJson *RDBX_createHandlersToJson(RdbParser *p, const char *filename, RdbxTo
                 toJsonZset,
                 NULL, /* handleFunction */
                 toJsonModule,
-                NULL, /*handleStreamMetadata*/
-                toJsonStreamItem,
-                NULL, /* handleStreamNewCGroup */
-                NULL, /* handleStreamCGroupPendingEntry */
-                NULL, /* handleStreamNewConsumer */
-                NULL, /* handleStreamConsumerPendingEntry */
+            
+                /*stream:*/            
+                NULL,             /*handleStreamMetadata*/
+                toJsonStreamItem, /*handleStreamItem*/
+                NULL,             /* handleStreamNewCGroup */
+                NULL,             /* handleStreamCGroupPendingEntry */
+                NULL,             /* handleStreamNewConsumer */
+                NULL,             /* handleStreamConsumerPendingEntry */
+                NULL,             /* handleStreamIdmpMeta */
+                NULL,             /* handleStreamIdmpProducer */
+                NULL,             /* handleStreamIdmpEntry */
         };
 
         if (ctx->conf.includeAuxField)
@@ -754,6 +860,11 @@ RdbxToJson *RDBX_createHandlersToJson(RdbParser *p, const char *filename, RdbxTo
             dataCb.handleStreamCGroupPendingEntry = toJsonStreamCGroupPendingEntry;
             dataCb.handleStreamNewConsumer = toJsonStreamNewConsumer;
             dataCb.handleStreamConsumerPendingEntry = toJsonStreamConsumerPendingEntry;
+        }
+        if (ctx->conf.includeStreamIdmp) {
+            dataCb.handleStreamIdmpMeta = toJsonStreamIdmpMeta;
+            dataCb.handleStreamIdmpProducer = toJsonStreamIdmpProducer;
+            dataCb.handleStreamIdmpEntry = toJsonStreamIdmpEntry;
         }
 
         if (ctx->conf.includeDbInfo) {

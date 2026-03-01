@@ -493,6 +493,16 @@ static void test_r2j_stream_data(void **state) {
     testRdbToJsonCommon(DUMP_FOLDER("stream_v11.rdb"), DUMP_FOLDER("stream_data_with_meta.json"), &r2jConf);
 }
 
+/* Test RDB v13 stream with IDMP support (RDB_TYPE_STREAM_LISTPACKS_4) */
+static void test_r2j_stream_v13_idmp(void **state) {
+    UNUSED(state);
+    RdbxToJsonConf r2jConf = DEF_CONF(RDB_LEVEL_DATA);
+    r2jConf.includeAuxField = 0;
+    r2jConf.includeStreamMeta = 0;
+    r2jConf.includeStreamIdmp = 1;
+    testRdbToJsonCommon(DUMP_FOLDER("stream_v13_idmp.rdb"), DUMP_FOLDER("stream_v13.json"), &r2jConf);
+}
+
 static void test_r2j_cluster_slot_info(void **state) {
     UNUSED(state);
     RdbxToJsonConf r2jConf = DEF_CONF(RDB_LEVEL_DATA);
@@ -579,7 +589,8 @@ int group_rdb_to_json(void) {
         cmocka_unit_test(test_r2j_module_aux_data),
 
         /* stream */
-         cmocka_unit_test(test_r2j_stream_data),
+        cmocka_unit_test(test_r2j_stream_data),
+        cmocka_unit_test(test_r2j_stream_v13_idmp),
 
         /* misc */
         cmocka_unit_test(test_r2j_multiple_lists_and_strings_data),

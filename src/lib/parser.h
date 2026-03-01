@@ -182,6 +182,7 @@ typedef enum ParsingElementType {
     PE_RAW_MODULE,
     PE_RAW_MODULE_AUX,
     PE_RAW_STREAM_LP,
+    PE_RAW_KEY_META,
 
     PE_END_OF_FILE,
     PE_MAX
@@ -231,13 +232,22 @@ typedef struct {
     struct {
         uint64_t pelLeft;
     } consumer; /* current processed consumer */
+    /* IDMP (Idempotent Message Producer) fields for RDB_TYPE_STREAM_LISTPACKS_4 */
+    uint64_t idmpProducersLeft;
+    uint64_t idmpEntriesLeft;
+    uint64_t idmpDuration;      /* IDMP duration in seconds */
+    uint64_t idmpMaxEntries;    /* Max IIDs per producer */
+    uint64_t idmpNumProducers;  /* Total number of producers (for meta callback) */
+    RdbStreamID idmpEntryStreamId; /* Temp storage for entry stream ID across safe state */
 } ElementStreamCtx;
 
 typedef struct {
-    RdbKeyInfo info;
+    RdbKeyInfo info;      /* key info (passed to app on handleNewKey cb) */
     ParsingElementType parsingElemType;
     RdbHandlersLevel handleByLevel;
     int64_t numItemsHint; /* hint for the total number of items in the current parsed key. -1 if unknown */
+    /* key metadata fields */
+    uint64_t metaClassesLeft; /* number of metadata classes remaining to parse */
 } ElementKeyCtx;
 
 typedef struct {
@@ -275,6 +285,9 @@ typedef struct {
     uint64_t cgroupsLeft;
     uint64_t globPelLeft; /* global pending entries left to read */
     uint64_t consumersLeft;
+    /* IDMP (Idempotent Message Producer) fields for RDB_TYPE_STREAM_LISTPACKS_4 */
+    uint64_t idmpProducersLeft;
+    uint64_t idmpEntriesLeft;
 } ElementRawStreamCtx;
 
 typedef struct ElementCtx {
@@ -516,6 +529,8 @@ RdbStatus allocFromCache(RdbParser *p,
 /*** raw data parsing ***/
 void parserRawInit(RdbParser *p);
 void parserRawRelease(RdbParser *p);
+RdbStatus newRawKey(RdbParser *p);
+void clearKeyMetaFromAgg(RdbParser *p);
 
 /*** Common Parsing Elements ***/
 RdbStatus elementNewKey(RdbParser *p);
@@ -555,7 +570,6 @@ RdbStatus elementModule(RdbParser *p);
 RdbStatus elementStreamLP(RdbParser *p);
 
 /*** Raw Parsing Elements ***/
-RdbStatus elementRawNewKey(RdbParser *p);
 RdbStatus elementRawEndKey(RdbParser *p);
 RdbStatus elementRawList(RdbParser *p);
 RdbStatus elementRawQuickList(RdbParser *p);
@@ -574,6 +588,7 @@ RdbStatus elementRawZsetLP(RdbParser *p);
 RdbStatus elementRawZsetZL(RdbParser *p);
 RdbStatus elementRawModule(RdbParser *p);
 RdbStatus elementRawStreamLP(RdbParser *p);
+RdbStatus elementRawKeyMeta(RdbParser *p);
 
 /*** inline functions ***/
 

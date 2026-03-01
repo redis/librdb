@@ -97,6 +97,7 @@ typedef struct RdbxToJsonConf {
     int includeAuxField;     /* Set to include auxiliary fields in JSON output */
     int includeFunc;         /* Set to include functions in JSON output */
     int includeStreamMeta;   /* Set to include Stream metadata in JSON output */
+    int includeStreamIdmp;   /* Set to include Stream IDMP data in JSON output */
 
     int flatten;             /* Set to create a flattened JSON structure */
 } RdbxToJsonConf;
