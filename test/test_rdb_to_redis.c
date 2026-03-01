@@ -468,7 +468,7 @@ static void test_rdb_to_redis_key_meta(void **state) {
         skip();
 
     /* Skip test if test_keymeta module is not loaded */
-    if (! strstr( sendRedisCmd("MODULE LIST", REDIS_REPLY_ARRAY, NULL), "test_metakey" ) )
+    if (! strstr( sendRedisCmd("MODULE LIST", REDIS_REPLY_ARRAY, NULL), "test_keymeta" ) )
         skip();
 
     /* setup redis server with debug command enabled */
