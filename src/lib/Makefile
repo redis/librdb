@@ -21,10 +21,13 @@ REDIS_OBJECTS = $(patsubst %,../../deps/redis/%.o,$(REDIS_SOURCES))
 OPTIMIZATION ?= -O3
 LIBRDB_DEBUG ?= 0
 
+# Evaluate git commit hash
+LIBRDB_GIT_COMMIT ?= $(shell git rev-parse --short=6 HEAD 2>/dev/null || echo "unknown")
+
 STD      = -std=c99
 STACK    = -fstack-protector-all -Wstack-protector
 WARNS    = -Wall -Wextra -pedantic -Werror
-CFLAGS   = -fPIC $(OPTIMIZATION) $(STD) $(STACK) $(WARNS) -fvisibility=hidden
+CFLAGS   = -fPIC $(OPTIMIZATION) $(STD) $(STACK) $(WARNS) -fvisibility=hidden -DLIBRDB_GIT_COMMIT=\"$(LIBRDB_GIT_COMMIT)\"
 DEBUG    = -g3
 LIBS     =
 
