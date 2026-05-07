@@ -88,7 +88,7 @@ static int onReadRepliesErrorCb(void *context, char *msg) {
         (strstr(msg, "not found")))              /* error includes "not found" */
         return 0; /* mask error */
 
-    char buf[9];
+    char buf[16];
     RDB_reportError(ctx->p, (RdbRes) RDBX_ERR_RESP_WRITE,
                     "\nerror from dst '-%s' on key '%s' on command '%s' (RESP Command #%zu)\n",
                     msg,
