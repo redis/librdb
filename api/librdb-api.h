@@ -494,8 +494,9 @@ _LIBRDB_API void RDB_log(RdbParser *p, RdbLogLevel lvl, const char *format, ...)
 _LIBRDB_API void RDB_log(RdbParser *p, RdbLogLevel lvl, const char *format, ...);
 #endif
 
-/* To hide keys in logs by printing first 8 hex digits of SHA256(key) instead of 
- * printing the key itself */
+/* To hide keys in logs by printing "sha256:" followed by the first 8 hex digits
+ * of SHA256(key), instead of the key itself. The prefix makes it explicit to
+ * log readers that the value is a digest, not the actual key. */
 _LIBRDB_API void RDB_hideKeysInLog(RdbParser *p);
 
 /****************************************************************

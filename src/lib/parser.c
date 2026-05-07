@@ -194,7 +194,7 @@ static RdbStatus readRdbWaitMoreDataDbg(RdbParser *p, size_t len, AllocTypeRq ty
 
 /*** hidden LIB API function (not declared in librdb-api.h) ***/
 
-_LIBRDB_API char *__RDB_key(RdbParser *p, char *key, char buf[9]) {
+_LIBRDB_API char *__RDB_key(RdbParser *p, char *key, char buf[16]) {
     if (!(p->hideKeysInLog)) return key;
 
     BYTE hash[SHA256_BLOCK_SIZE];
@@ -203,9 +203,12 @@ _LIBRDB_API char *__RDB_key(RdbParser *p, char *key, char buf[9]) {
     sha256_update(&ctx, (unsigned char*) key, strlen(key));
     sha256_final(&ctx, hash);
 
+    /* Prefix the hex digest so log readers can tell the value is a hash and not
+     * the actual key. Output: "sha256:" + 8 hex chars + NUL = 16 bytes. */
+    memcpy(buf, "sha256:", 7);
     for (int i = 0; i < 4; i++)
-        snprintf(buf + (i * 2), 3, "%02x", hash[i]);
-    buf[8] = '\0';
+        snprintf(buf + 7 + (i * 2), 3, "%02x", hash[i]);
+    buf[15] = '\0';
     return buf;
 }
 

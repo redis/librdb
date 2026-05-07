@@ -586,8 +586,9 @@ static void test_rdb_to_redis_del_before_write(void **state) {
 
 /* This test verifies the behavior of the RDB parser when the `hideKeysInLog`
  * option is set. Specifically, it ensures that keys in error messages are
- * replaced with the first 8 hex digits of their SHA256 hash, rather than being
- * logged directly.
+ * replaced with "sha256:" followed by the first 8 hex digits of their SHA256
+ * hash, rather than being logged directly. The "sha256:" prefix makes it
+ * explicit to log readers that the value is a digest, not the actual key.
  */
 static void test_rdb_to_redis_hide_keys_in_log(void **state) {
     UNUSED(state);
@@ -628,15 +629,15 @@ static void test_rdb_to_redis_hide_keys_in_log(void **state) {
     assert_int_equal(status, RDB_STATUS_ERROR);
     assert_int_equal(RDB_getErrorCode(p), RDBX_ERR_RESP_WRITE);
     
-    /* Expected to print first 8 hex digits of SHA256(key) instead of the key 
-     * itself. To eval via bash apply:
-     * > echo -n "mylist27" | sha256sum | cut -c 1-8 
+    /* Expected to print "sha256:" followed by first 8 hex digits of
+     * SHA256(key) instead of the key itself. To eval via bash apply:
+     * > echo -n "mylist27" | sha256sum | cut -c 1-8
      */
     printf("%s\n", RDB_getErrorMessage(p));
-    assert_non_null(strstr(RDB_getErrorMessage(p), "0bdab52c")); /* sha256("mylist27") */
-    
+    assert_non_null(strstr(RDB_getErrorMessage(p), "sha256:0bdab52c")); /* sha256("mylist27") */
+
     /* Verify that the key is not in the log */
-    assert_null(strstr(RDB_getErrorMessage(p), "mylist27"));    
+    assert_null(strstr(RDB_getErrorMessage(p), "mylist27"));
     
     RDB_deleteParser(p);
 }
