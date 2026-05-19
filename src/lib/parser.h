@@ -232,6 +232,7 @@ typedef struct {
     struct {
         uint64_t pelLeft;
     } consumer; /* current processed consumer */
+    uint64_t nackedLeft;  /* NACKs remaining (RDB_TYPE_STREAM_LISTPACKS_5, v14+). */
     /* IDMP (Idempotent Message Producer) fields for RDB_TYPE_STREAM_LISTPACKS_4 */
     uint64_t idmpProducersLeft;
     uint64_t idmpEntriesLeft;
@@ -285,6 +286,7 @@ typedef struct {
     uint64_t cgroupsLeft;
     uint64_t globPelLeft; /* global pending entries left to read */
     uint64_t consumersLeft;
+    uint64_t nackedLeft; /* NACKs remaining (RDB_TYPE_STREAM_LISTPACKS_5, v14+). */
     /* IDMP (Idempotent Message Producer) fields for RDB_TYPE_STREAM_LISTPACKS_4 */
     uint64_t idmpProducersLeft;
     uint64_t idmpEntriesLeft;

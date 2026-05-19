@@ -333,6 +333,7 @@ RdbxToPrint *RDBX_createHandlersToPrint(RdbParser *p,
             NULL,              /*handleStreamCGroupPendingEntry*/
             NULL,              /*handleStreamNewConsumer*/
             NULL,              /*handleStreamConsumerPendingEntry*/
+            NULL,              /*handleStreamNackZoneEntry*/
             NULL,              /*handleStreamIdmpMeta*/
             NULL,              /*handleStreamIdmpProducer*/
             NULL,              /*handleStreamIdmpEntry*/

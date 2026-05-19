@@ -95,10 +95,13 @@ jobs:
 
       - name: Build Redis ${{ matrix.version }}
         run: |
+          # OPTIMIZATION=-O2 disables Redis's clang+LTO (& jemalloc -flto),
+          # which breaks on ubuntu-latest due to clang/binutils LLVMgold
+          # plugin version skew.
           if [ "${{ matrix.tls }}" = "true" ]; then
-            make BUILD_TLS=yes -j -C redis
+            make BUILD_TLS=yes OPTIMIZATION=-O2 -j -C redis
           else
-            make -j -C redis
+            make OPTIMIZATION=-O2 -j -C redis
           fi
 
           if [ $(bc -l <<< "${{ matrix.version }} >= 6.2") -eq 1 ] || [ "${{ matrix.version }}" = "unstable" ]; then

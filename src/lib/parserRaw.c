@@ -841,6 +841,9 @@ RdbStatus elementRawStreamLP(RdbParser *p) {
         ST_LOAD_NUM_CONSUMERS,             /*   Load number of consumers of current CG                                 */
         ST_LOAD_NEXT_CONSUMER,             /*     Load next consumer                                                   */
         ST_LOAD_NEXT_CONSUMER_STR_RETURN,  /*     Complete loading consumer name. Load consumer PEL.                   */
+        /* NACK zone states for RDB_TYPE_STREAM_LISTPACKS_5 (v14+) */
+        ST_LOAD_NACK_ZONE_COUNT,           /*   Load NACK zone entry count (per CG)                                    */
+        ST_LOAD_NACK_ZONE_BODY,            /*     Load NACK zone body (count * 16 bytes)                               */
         /* IDMP states for RDB_TYPE_STREAM_LISTPACKS_4 */
         ST_LOAD_IDMP_CONFIG,               /* Load IDMP config (duration, max_entries, num_producers)                  */
         ST_LOAD_IDMP_NEXT_PRODUCER,        /*   Load next producer PID                                          */
@@ -937,8 +940,9 @@ RdbStatus elementRawStreamLP(RdbParser *p) {
         case ST_LOAD_NEXT_CG_IS_MORE:
             /*** ENTER SAFE STATE (no rdb read)***/
             if (unlikely(!(streamCtx->cgroupsLeft))) {
-                /* if no more consumer-groups to load, check for IDMP data */
-                if (p->currOpcode == RDB_TYPE_STREAM_LISTPACKS_4)
+                /* if no more consumer-groups to load, check for IDMP data
+                 * (present in RDB_TYPE_STREAM_LISTPACKS_4 and above) */
+                if (p->currOpcode >= RDB_TYPE_STREAM_LISTPACKS_4)
                     return updateElementState(p, ST_LOAD_IDMP_CONFIG, 1);
 
                 /* Legacy stream format */
@@ -1019,7 +1023,10 @@ RdbStatus elementRawStreamLP(RdbParser *p) {
                 streamCtx->consumersLeft--;
                 /* call raw string as sub-element to read consumer name */
                 return subElementCall(p, PE_RAW_STRING, ST_LOAD_NEXT_CONSUMER_STR_RETURN);
-            }  else {
+            } else if (p->currOpcode >= RDB_TYPE_STREAM_LISTPACKS_5) {
+                /* v14+: per-CG NACK zone follows the consumers section. */
+                return updateElementState(p, ST_LOAD_NACK_ZONE_COUNT, 0);
+            } else {
                 return updateElementState(p, ST_LOAD_NEXT_CG_IS_MORE, 0);
             }
 
@@ -1057,6 +1064,37 @@ RdbStatus elementRawStreamLP(RdbParser *p) {
 
             return updateElementState(p, ST_LOAD_NEXT_CONSUMER, 0);
         }
+
+        case ST_LOAD_NACK_ZONE_COUNT: { /* NACK zone for RDB_TYPE_STREAM_LISTPACKS_5 (v14+) */
+            int written = 0;
+            aggMakeRoom(p, LONG_STR_SIZE);
+            IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &streamCtx->nackedLeft,
+                                        (unsigned char *) rawCtx->at, &written));
+            /*** ENTER SAFE STATE ***/
+            IF_NOT_OK_RETURN(aggUpdateWritten(p, written));
+
+            if (streamCtx->nackedLeft == 0)
+                return updateElementState(p, ST_LOAD_NEXT_CG_IS_MORE, 0);
+
+            /* Advance state before falling through, so that a WAIT_MORE_DATA
+             * during the body doesn't bounce us back to the COUNT state on
+             * retry (the length bytes are already consumed). */
+            updateElementState(p, ST_LOAD_NACK_ZONE_BODY, 0);
+        } /* fall-thru */
+
+        case ST_LOAD_NACK_ZONE_BODY:
+            while (streamCtx->nackedLeft) {
+                BulkInfo *binfo;
+                IF_NOT_OK_RETURN(aggMakeRoom(p, sizeof(RdbStreamID)));
+                IF_NOT_OK_RETURN(rdbLoad(p, sizeof(RdbStreamID), RQ_ALLOC_REF, rawCtx->at, &binfo));
+
+                /*** ENTER SAFE STATE ***/
+
+                IF_NOT_OK_RETURN(aggUpdateWritten(p, sizeof(RdbStreamID)));
+                streamCtx->nackedLeft--;
+                updateElementState(p, ST_LOAD_NACK_ZONE_BODY, 0);
+            }
+            return updateElementState(p, ST_LOAD_NEXT_CG_IS_MORE, 0);
 
         case ST_LOAD_IDMP_CONFIG: { /* IDMP states for RDB_TYPE_STREAM_LISTPACKS_4 */
             int written = 0;

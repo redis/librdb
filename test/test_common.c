@@ -281,6 +281,8 @@ size_t serializeRedisReply(const redisReply *reply, char *buffer, size_t bsize) 
 /*
  * For array-responses check 'expRsp' is a substring. Otherwise check match entirely.
  *
+ * expRetType - expected return type. -1 means accept any reply type
+ *
  * Return the response serialized
  */
 char *sendRedisCmd(const char *cmd, int expRetType, char *expRsp) {
@@ -293,7 +295,7 @@ char *sendRedisCmd(const char *cmd, int expRetType, char *expRsp) {
     //printf ("Command:%s\n", cmd);
 
     assert_non_null(reply);
-    assert_int_equal(reply->type, expRetType);
+    if (expRetType != -1) assert_int_equal(reply->type, expRetType);
 
     size_t written = serializeRedisReply(reply, rspbuf, sizeof(rspbuf)-1);
 
