@@ -141,8 +141,8 @@ static RdbRes filterStreamConsumerPendingEntry(RdbParser *p, void *userData, Rdb
     return ((RdbxFilter *) userData)->cbReturnValue;
 }
 
-static RdbRes filterStreamNackZoneEntry(RdbParser *p, void *userData, RdbStreamID *id) {
-    UNUSED(p, id);
+static RdbRes filterStreamNackZoneEntry(RdbParser *p, void *userData, RdbStreamID *id, int64_t itemsLeft) {
+    UNUSED(p, id, itemsLeft);
     return ((RdbxFilter *) userData)->cbReturnValue;
 }
 

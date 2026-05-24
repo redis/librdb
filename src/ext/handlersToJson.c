@@ -690,8 +690,8 @@ static RdbRes toJsonStreamConsumerPendingEntry(RdbParser *p, void *userData, Rdb
  * opened on the first call within a CG (closing whatever section preceded it:
  * the CG header, the global PEL, the consumers array, or the last consumer
  * PEL) and closed by the next state transition (new CG / IDMP / end key). */
-static RdbRes toJsonStreamNackZoneEntry(RdbParser *p, void *userData, RdbStreamID *id) {
-    UNUSED(p);
+static RdbRes toJsonStreamNackZoneEntry(RdbParser *p, void *userData, RdbStreamID *id, int64_t itemsLeft) {
+    UNUSED(p, itemsLeft);
     RdbxToJson *ctx = userData;
     const char *prefix;
 

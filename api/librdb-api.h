@@ -343,7 +343,7 @@ typedef struct RdbHandlersDataCallbacks {
      *     handleStreamCGroupPendingEntry(entry)              [per group PEL entry]
      *     handleStreamNewConsumer(consName, meta)            [per consumer]
      *       handleStreamConsumerPendingEntry(id)             [per consumer PEL entry]
-     *     handleStreamNackZoneEntry(id)                      [per NACKed entry, v14+]
+     *     handleStreamNackZoneEntry(id, itemsLeft)           [per NACKed entry, v14+]
      *   handleStreamIdmpMeta(meta)                           [once, if IDMP enabled]
      *     handleStreamIdmpProducer(producer)                 [per producer]
      *       handleStreamIdmpEntry(entry)                     [per IID mapping]
@@ -361,7 +361,7 @@ typedef struct RdbHandlersDataCallbacks {
     /* Callback to handle a pending entry within a consumer */
     RdbRes (*handleStreamConsumerPendingEntry)(RdbParser *p, void *userData, RdbStreamID *streamId);
     /* Callback to handle a NACK-zone entry (RDB_TYPE_STREAM_LISTPACKS_5, v14+) */
-    RdbRes (*handleStreamNackZoneEntry)(RdbParser *p, void *userData, RdbStreamID *id);
+    RdbRes (*handleStreamNackZoneEntry)(RdbParser *p, void *userData, RdbStreamID *id, int64_t itemsLeft);
     /* Callback to handle IDMP (Idempotent Message Producer) metadata for a stream */
     RdbRes (*handleStreamIdmpMeta)(RdbParser *p, void *userData, RdbStreamIdmpMeta *meta);
     /* Callback to handle start of a new IDMP producer */

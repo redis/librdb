@@ -2628,8 +2628,12 @@ RdbStatus elementStreamLP(RdbParser *p) {
 
                     streamDecodeID(binfoStreamID->ref, &id);
 
-                    CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_DATA, rdbData.handleStreamNackZoneEntry, &id);
+                    CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_DATA,
+                                     rdbData.handleStreamNackZoneEntry,
+                                     &id, (int64_t)(ctx->stream.nackedLeft - 1));
+                    
                     ctx->stream.nackedLeft--;
+
                     updateElementState(p, ST_LOAD_NACK_ZONE_ENTRY, 0);
                 }
                 updateElementState(p, ST_LOAD_NEXT_CONS_GROUP, 0);

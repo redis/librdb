@@ -405,9 +405,6 @@ static RdbRes toRespEndKey(RdbParser *p, void *userData) {
     RdbxToResp *ctx = userData;
     RdbRes res = RDB_OK;
 
-    /* Flush any pending NACK batch from the last CG of this key. */
-    IF_NOT_OK_RETURN(flushNackBatch(ctx));
-
     /* key is in db. Set its expiration time */
     if (ctx->keyCtx.info.expiretime != -1) {
         struct iovec iov[6];
@@ -777,10 +774,6 @@ static RdbRes toRespStreamNewCGroup(RdbParser *p, void *userData, RdbBulk grpNam
     RdbxToResp *ctx = userData;
     char keyLenStr[32], gNameLenStr[32], idStr[100], idLenStr[32], entriesReadStr[32], entriesReadLenStr[32];
 
-    /* Flush any pending NACK batch from the previous CG before its grpName
-     * gets overwritten. */
-    IF_NOT_OK_RETURN(flushNackBatch(ctx));
-
     /* (re)allocate mem to keep group name */
     RDB_bulkCopyFree(p, ctx->streamCtx.grpName);
     ctx->streamCtx.grpNameLen = RDB_bulkLen(p, grpName);
@@ -966,7 +959,7 @@ static RdbRes flushNackBatch(RdbxToResp *ctx) {
  * still replays via XADD/XGROUP/XCLAIM for owned PEL entries). Consecutive IDs
  * with the same delivery_count are batched into a single XNACK command, matching
  * the AOF rewrite behavior at redis2/src/aof.c:2387-2422. */
-static RdbRes toRespStreamNackZoneEntry(RdbParser *p, void *userData, RdbStreamID *id) {
+static RdbRes toRespStreamNackZoneEntry(RdbParser *p, void *userData, RdbStreamID *id, int64_t itemsLeft) {
     RdbxToResp *ctx = userData;
     RdbStreamPendingEntry *pe;
 
@@ -990,8 +983,8 @@ static RdbRes toRespStreamNackZoneEntry(RdbParser *p, void *userData, RdbStreamI
 
     ctx->streamCtx.nackBatch.ids[ctx->streamCtx.nackBatch.count++] = *id;
 
-    /* Flush when batch reaches AOF_REWRITE_ITEMS_PER_CMD. */
-    if (ctx->streamCtx.nackBatch.count == XNACK_BATCH_MAX)
+    /* Flush when batch reaches AOF_REWRITE_ITEMS_PER_CMD or this is the last */
+    if (ctx->streamCtx.nackBatch.count == XNACK_BATCH_MAX || itemsLeft == 0)
         return flushNackBatch(ctx);
 
     return RDB_OK;
