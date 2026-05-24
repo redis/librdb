@@ -664,7 +664,7 @@ static RdbRes toJsonStreamNewConsumer(RdbParser *p, void *userData, RdbBulk cons
     }
 
     ctx->state = R2J_IN_STREAM_CG_CONSUMER;
-    fprintf(ctx->outfile, "%s\n           { \"name\": \"%s\", \"activeTime\": %llu, \"seenTime\": %llu",
+    fprintf(ctx->outfile, "%s\n           { \"name\": \"%s\", \"activeTime\": %lld, \"seenTime\": %lld",
             prefix, consName, meta->activeTime, meta->seenTime);
 
     return RDB_OK;
@@ -676,9 +676,12 @@ static RdbRes toJsonStreamConsumerPendingEntry(RdbParser *p, void *userData, Rdb
     char *prefix;
     if (ctx->state == R2J_IN_STREAM_CG_CONSUMER) {
         prefix = ",\n             \"pending\": [";
-
-    } if (ctx->state == R2J_IN_STREAM_CG_CONSUMER_PEL) {
+    } else if (ctx->state == R2J_IN_STREAM_CG_CONSUMER_PEL) {
         prefix = ", ";
+    } else {
+        RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
+                        "toJsonStreamConsumerPendingEntry(): Invalid state value: %d", ctx->state);
+        return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
     }
 
     ctx->state = R2J_IN_STREAM_CG_CONSUMER_PEL;

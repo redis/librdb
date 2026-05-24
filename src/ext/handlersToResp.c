@@ -111,6 +111,7 @@ static void deletePendingEntriesList(RdbParser *p, rax **pel) {
         RdbStreamPendingEntry *entry = ri_cons.data;
         RDB_free(p, entry);
     }
+    raxStop(&ri_cons);
     /* Free the entire Rax tree */
     raxFree(*pel);
     *pel = NULL;
@@ -871,7 +872,7 @@ static RdbRes toRespStreamConsumerPendingEntry(RdbParser *p, void *userData, Rdb
 
     if ((pe = raxFind(ctx->streamCtx.groupPel, (unsigned char *)streamId, sizeof(*streamId))) == raxNotFound) {
         RDB_reportError(p, (RdbRes) RDBX_ERR_STREAM_INTEG_CHECK,
-                        "toRespStreamNewConsumer(): Cannot find consumer pending entry in group PEL");
+                        "toRespStreamConsumerPendingEntry(): Cannot find consumer pending entry in group PEL");
         return (RdbRes) RDBX_ERR_STREAM_INTEG_CHECK;
     }
 
