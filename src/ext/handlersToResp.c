@@ -21,6 +21,15 @@
 /* Max IDs per XNACK batch; mirrors AOF_REWRITE_ITEMS_PER_CMD in redis2/src/aof.c. */
 #define XNACK_BATCH_MAX 64
 
+/* Max (idx, val) pairs per ARMSET batch. Same upstream rationale as XNACK —
+ * AOF_REWRITE_ITEMS_PER_CMD = 64 in redis2/src/aof.c. */
+#define ARMSET_BATCH_MAX 64
+
+/* Small-string optimization threshold for ARMSET batch values. Values ≤ this size
+ * use inline storage (vcache), avoiding heap allocation. Common for INT/FLOAT tags
+ * (pre-stringified by the parser via ll2string / d2string, typically < 21 bytes). */
+#define ARMSET_SSO_SIZE 16
+
 typedef enum DelKeyBeforeWrite {
     DEL_KEY_BEFORE_NONE,
     DEL_KEY_BEFORE_BY_DEL_CMD,
@@ -98,9 +107,29 @@ struct RdbxToResp {
         } nackBatch;
 
     } streamCtx;
+
+    /* v14 array (RDB_TYPE_ARRAY) emission state. ARMSET is variadic:
+     * elements are batched per-key (cap = ARMSET_BATCH_MAX, matching the AOF
+     * rewrite chunking convention). ARSEEK, if needed, fires once per key on
+     * end-of-key — *after* the final ARMSET flush. */
+    struct {
+        uint64_t insertIdx; /* if == RDB_ARRAY_INSERT_IDX_NONE means "don't emit ARSEEK" */
+        uint64_t totalCount; /* total number of elements in the array */
+        uint64_t elementsLeft; /* countdown: elements remaining to process */
+        int batchCount;                            /* current batch fill */
+        struct {
+            uint64_t idx;
+            size_t valLen;
+            union {
+                char *heap;                   /* heap-alloc for valLen > ARMSET_SSO_SIZE */
+                char vcache[ARMSET_SSO_SIZE]; /* inline storage for small values */
+            } val;
+        } batch[ARMSET_BATCH_MAX];
+    } arrayCtx;
 };
 
 static RdbRes flushNackBatch(RdbxToResp *ctx);
+static RdbRes emitArseekIfNeeded(RdbxToResp *ctx);
 
 static void deletePendingEntriesList(RdbParser *p, rax **pel) {
     /* Free all entries in the Rax tree */
@@ -135,6 +164,14 @@ static void deleteRdbToRespCtx(RdbParser *p, void *context) {
     RDB_bulkCopyFree(p, ctx->streamCtx.consName);
 
     RDB_bulkCopyFree(p, ctx->streamCtx.idmpPid);
+
+    /* Free any outstanding ARMSET batch entries — e.g. if termination
+     * happened mid-key without a flush. Only heap-allocated values need freeing. */
+    for (int i = 0; i < ctx->arrayCtx.batchCount; i++) {
+        if (ctx->arrayCtx.batch[i].valLen > ARMSET_SSO_SIZE)
+            RDB_free(p, ctx->arrayCtx.batch[i].val.heap);
+    }
+    ctx->arrayCtx.batchCount = 0;
 
     /* destroy respWriter */
     if (ctx->respWriter.destroy)
@@ -1065,6 +1102,130 @@ static RdbRes toRespStreamIdmpEntry(RdbParser *p, void *userData, RdbStreamIdmpE
     return writevWrap(ctx, iov, 10, &startCmd, 1);
 }
 
+/*** v14 array (RDB_TYPE_ARRAY) ***/
+
+/* Stash insert_idx for end-of-key ARSEEK emission. No command emitted here —
+ * ARMSET is built up by toRespArrayElement; ARSEEK is fired (if needed) by
+ * toRespEndKey after the final ARMSET flush. */
+static RdbRes toRespArrayMetadata(RdbParser *p, void *userData, uint64_t count, uint64_t insertIdx) {
+    UNUSED(p);
+    RdbxToResp *ctx = userData;
+    ctx->arrayCtx.insertIdx = insertIdx;
+    ctx->arrayCtx.totalCount = count;
+    ctx->arrayCtx.elementsLeft = count;
+    ctx->arrayCtx.batchCount = 0;
+    return RDB_OK;
+}
+
+/* Batch one (idx, value) pair into the ARMSET payload. Value bytes are copied
+ * because the underlying RdbBulk is only stable until the next callback.
+ * Small-string optimization (SSO): values ≤ ARMSET_SSO_SIZE bytes use inline
+ * vcache storage, avoiding heap allocation. Common for INT/FLOAT tags
+ * (pre-stringified by the parser, typically < 21 bytes). Larger values fall
+ * back to heap allocation.
+ * Flush is triggered either when the batch is full OR when this is the last
+ * element in the array (elementsLeft reaches 0), avoiding unnecessary end-of-key flush. */
+static RdbRes toRespArrayElement(RdbParser *p, void *userData, uint64_t idx, RdbBulk value) {
+    RdbxToResp *ctx = userData;
+    size_t valLen = RDB_bulkLen(p, value);
+    int i = ctx->arrayCtx.batchCount++;
+
+    ctx->arrayCtx.batch[i].idx = idx;
+    ctx->arrayCtx.batch[i].valLen = valLen;
+
+    if (valLen <= ARMSET_SSO_SIZE) {
+        /* Small value: copy directly into inline vcache */
+        memcpy(ctx->arrayCtx.batch[i].val.vcache, value, valLen);
+    } else {
+        /* Large value: heap-allocate */
+        char *valCopy = RDB_alloc(p, valLen);
+        if (valCopy == NULL)
+            return RDB_ERR_FAIL_ALLOC;
+        memcpy(valCopy, value, valLen);
+        ctx->arrayCtx.batch[i].val.heap = valCopy;
+    }
+
+    /* Decrement elements left */
+    ctx->arrayCtx.elementsLeft--;
+
+    /* Flush when batch is full OR when this is the last element */
+    if (ctx->arrayCtx.batchCount == ARMSET_BATCH_MAX || ctx->arrayCtx.elementsLeft == 0) {
+        /* Emit ARMSET <key> <idx1> <val1> ... <idxN> <valN> command.
+         * Token count is 2 (ARMSET + key) + 2N (pairs) = 2N+2. */
+        int cnt = ctx->arrayCtx.batchCount;
+        char cmdHdr[64], keyLenStr[32];
+        char idxLenStr[ARMSET_BATCH_MAX][32], idxStr[ARMSET_BATCH_MAX][32];
+        char valLenStr[ARMSET_BATCH_MAX][32];
+        int  idxStrLen[ARMSET_BATCH_MAX];
+        /* 3 header iovs (cmdHdr, keyLen, key) + 4 per pair (idxLen, idx, valLen, val) */
+        struct iovec iov[3 + ARMSET_BATCH_MAX * 4 + 1];
+        int iovs = 0;
+
+        int cmdHdrLen = snprintf(cmdHdr, sizeof(cmdHdr), "*%d\r\n$6\r\nARMSET", 2 + cnt * 2);
+        IOV_STRING(&iov[iovs++], cmdHdr, cmdHdrLen);
+        /* key */
+        IOV_LENGTH(&iov[iovs++], ctx->keyCtx.keyLen, keyLenStr);
+        IOV_STRING(&iov[iovs++], ctx->keyCtx.key, ctx->keyCtx.keyLen);
+        /* (idx, val) pairs */
+        for (int j = 0; j < cnt; j++) {
+            /* idx is unsigned, so PRIu64 is correct */
+            idxStrLen[j] = snprintf(idxStr[j], sizeof(idxStr[j]), "%" PRIu64, ctx->arrayCtx.batch[j].idx);
+            IOV_LENGTH(&iov[iovs++], idxStrLen[j], idxLenStr[j]);
+            IOV_STRING(&iov[iovs++], idxStr[j], idxStrLen[j]);
+            IOV_LENGTH(&iov[iovs++], ctx->arrayCtx.batch[j].valLen, valLenStr[j]);
+            /* Point to vcache for small values, heap for large */
+            const char *valPtr = (ctx->arrayCtx.batch[j].valLen <= ARMSET_SSO_SIZE)
+                                 ? ctx->arrayCtx.batch[j].val.vcache
+                                 : ctx->arrayCtx.batch[j].val.heap;
+            IOV_STRING(&iov[iovs++], valPtr, ctx->arrayCtx.batch[j].valLen);
+        }
+        IOV_CONST(&iov[iovs++], "\r\n");
+
+        RdbxRespWriterStartCmd startCmd = {"ARMSET", ctx->keyCtx.key, 0};
+        IF_NOT_OK_RETURN(writevWrap(ctx, iov, iovs, &startCmd, 1));
+
+        /* Free heap-allocated values *after* writev (pointers are referenced by iov). */
+        for (int j = 0; j < cnt; j++) {
+            if (ctx->arrayCtx.batch[j].valLen > ARMSET_SSO_SIZE)
+                RDB_free(p, ctx->arrayCtx.batch[j].val.heap);
+        }
+        ctx->arrayCtx.batchCount = 0;
+
+        /* If this was the last element, emit ARSEEK immediately after the final ARMSET */
+        if (ctx->arrayCtx.elementsLeft == 0)
+            IF_NOT_OK_RETURN(emitArseekIfNeeded(ctx));
+    }
+    return RDB_OK;
+}
+
+/* Emit ARSEEK <key> <arseekArg> for the stashed insert_idx, if any. Per
+ * arseekCommand() in redis2/src/t_array.c, ARSEEK sets insert_idx = arg - 1;
+ * ARSEEK 0 clears the cursor to AR_INSERT_IDX_NONE. So to restore a stored
+ * insert_idx of v we send arg = v + 1; the largest legal stored value
+ * (UINT64_MAX - 1) is reached by arg = UINT64_MAX. The +1 happens to also
+ * map "0 stored" to "ARSEEK 1" — but we won't reach this path with NONE
+ * because the caller already guarded on insertIdx != RDB_ARRAY_INSERT_IDX_NONE. */
+static RdbRes emitArseekIfNeeded(RdbxToResp *ctx) {
+    if (ctx->arrayCtx.insertIdx == RDB_ARRAY_INSERT_IDX_NONE)
+        return RDB_OK;
+
+    uint64_t arg = ctx->arrayCtx.insertIdx + 1; /* wraps UINT64_MAX-1 → UINT64_MAX correctly */
+    char keyLenStr[32], argLenStr[32], argStr[32];
+    struct iovec iov[6];
+
+    IOV_CONST(&iov[0], "*3\r\n$6\r\nARSEEK");
+    IOV_LENGTH(&iov[1], ctx->keyCtx.keyLen, keyLenStr);
+    IOV_STRING(&iov[2], ctx->keyCtx.key, ctx->keyCtx.keyLen);
+    /* PRIu64 for uint64_t; IOV_LEN_AND_VAL uses signed */
+    int argLen = snprintf(argStr, sizeof(argStr), "%" PRIu64, arg);
+    IOV_LENGTH(&iov[3], argLen, argLenStr);
+    IOV_STRING(&iov[4], argStr, argLen);
+    IOV_CONST(&iov[5], "\r\n");
+
+    RdbxRespWriterStartCmd startCmd = {"ARSEEK", ctx->keyCtx.key, 0};
+    return writevWrap(ctx, iov, 6, &startCmd, 1);
+}
+
 /*** Handling raw (RESTORE) ***/
 /* Callback on start of serializing module aux data (alternative to toRespRestoreBegin).
  * Following this call, one or more calls will be made to toRespRestoreFrag() to
@@ -1259,7 +1420,10 @@ _LIBRDB_API RdbxToResp *RDBX_createHandlersToResp(RdbParser *p, RdbxToRespConf *
             toRespStreamNackZoneEntry,         /*handleStreamNackZoneEntry*/
             toRespStreamIdmpMeta,                                         /*handleStreamIdmpMeta*/
             toRespStreamIdmpProducer,                                     /*handleStreamIdmpProducer*/
-            toRespStreamIdmpEntry                      /*handleStreamIdmpEntry*/
+            toRespStreamIdmpEntry,                     /*handleStreamIdmpEntry*/
+        
+            toRespArrayMetadata,               /*(v14+) handleArrayMetadata*/
+            toRespArrayElement,                /*(v14+) handleArrayElement*/
     };
     RDB_createHandlersData(p, &dataCb, ctx, deleteRdbToRespCtx);
 

@@ -59,7 +59,7 @@ static void test_not_support_future_rdb_version(void **state) {
 
     RdbStatus  status;
     RdbParser *parser = RDB_createParserRdb(NULL);
-    RDB_setLogLevel(parser, RDB_LOG_ERR);
+    RDB_setLogger(parser, dummyLogger);
     assert_non_null(RDBX_createReaderFile(parser, rdbfile));
     RdbxToJsonConf r2jConf = { .level = RDB_LEVEL_DATA };
 
@@ -73,32 +73,6 @@ static void test_not_support_future_rdb_version(void **state) {
     /* verify returned error code */
     RdbRes err = RDB_getErrorCode(parser);
     assert_int_equal(err, RDB_ERR_UNSUPPORTED_RDB_VERSION);
-
-    RDB_deleteParser(parser);
-}
-
-/* Crafted minimal v14 RDB header (magic + version + single type byte) drives
- * the version check past 14, then the type dispatch must hit the placeholder
- * arm and fail with RDB_ERR_NOT_SUPPORTED_RDB_ENCODING_TYPE rather than
- * RDB_ERR_UNSUPPORTED_RDB_VERSION. STREAM_LISTPACKS_5 (27) used to be a
- * placeholder too, but is now fully supported (TASK-2); only RDB_TYPE_ARRAY
- * (28) remains a placeholder until TASK-3 lands. */
-static void test_not_support_v14_types(void **state) {
-    UNUSED(state);
-
-    const unsigned char bytes[] = { 'R','E','D','I','S','0','0','1','4', 28 };
-    const char *jsonfile = TMP_FOLDER("v14_placeholder.json");
-
-    RdbParser *parser = RDB_createParserRdb(NULL);
-    RDB_setLogLevel(parser, RDB_LOG_ERR);
-    RdbxToJsonConf r2jConf = { .level = RDB_LEVEL_DATA };
-    assert_non_null(RDBX_createHandlersToJson(parser, jsonfile, &r2jConf));
-
-    RdbStatus status = RDB_parseBuff(parser, (unsigned char *) bytes,
-                                     sizeof(bytes), 1);
-    assert_int_equal(status, RDB_STATUS_ERROR);
-    assert_int_equal(RDB_getErrorCode(parser),
-                     RDB_ERR_NOT_SUPPORTED_RDB_ENCODING_TYPE);
 
     RDB_deleteParser(parser);
 }
@@ -140,7 +114,7 @@ static void test_checksum(void **state) {
 
     /* fail on checksum error */
     parser = RDB_createParserRdb(NULL);
-    RDB_setLogLevel(parser, RDB_LOG_ERR);
+    RDB_setLogger(parser, dummyLogger);
     assert_non_null(RDBX_createReaderFile(parser, rdbfile));
     while ((status = RDB_parse(parser)) == RDB_STATUS_WAIT_MORE_DATA);
     assert_int_equal( status, RDB_STATUS_ERROR);
@@ -149,6 +123,7 @@ static void test_checksum(void **state) {
 
     /* ignore checksum error */
     parser = RDB_createParserRdb(NULL);
+    RDB_setLogger(parser, dummyLogger);
     assert_non_null(RDBX_createReaderFile(parser, rdbfile));
     RDB_IgnoreChecksum(parser);
     while ((status = RDB_parse(parser)) == RDB_STATUS_WAIT_MORE_DATA);
@@ -298,7 +273,6 @@ int group_misc(void) {
         cmocka_unit_test(__test_opcode_ram_lru),
         cmocka_unit_test(test_report_long_error),
         cmocka_unit_test(test_not_support_future_rdb_version),
-        cmocka_unit_test(test_not_support_v14_types),
     };
     return cmocka_run_group_tests(tests, NULL, NULL);
 }

@@ -158,6 +158,7 @@ typedef enum ParsingElementType {
     PE_FUNCTION,
     PE_MODULE_AUX,
     PE_STREAM_LP,
+    PE_ARRAY,
 
     /* parsing raw data types */
     PE_RAW_NEW_KEY,
@@ -183,6 +184,7 @@ typedef enum ParsingElementType {
     PE_RAW_MODULE_AUX,
     PE_RAW_STREAM_LP,
     PE_RAW_KEY_META,
+    PE_RAW_ARRAY,
 
     PE_END_OF_FILE,
     PE_MAX
@@ -202,6 +204,11 @@ typedef struct ParsingElementInfo {
 typedef struct {
     uint64_t numNodes;
 } ElementListCtx;
+
+typedef struct {
+    uint64_t count;        /* total elements */
+    uint64_t elementsLeft; /* elements remaining to read */
+} ElementArrayCtx;
 
 typedef struct {
     uint64_t left;
@@ -292,6 +299,11 @@ typedef struct {
     uint64_t idmpEntriesLeft;
 } ElementRawStreamCtx;
 
+typedef struct {
+    uint64_t count;         /* total elements */
+    uint64_t elementsLeft;  /* elements remaining to walk */
+} ElementRawArrayCtx;
+
 typedef struct ElementCtx {
     ElementKeyCtx key;
     ElementListCtx list;
@@ -300,6 +312,7 @@ typedef struct ElementCtx {
     ElementHashCtx hash;
     ElementModuleCtx module;
     ElementStreamCtx stream;
+    ElementArrayCtx array;
 
     /* raw elements context */
     ElementRawStringCtx rawString;
@@ -309,6 +322,7 @@ typedef struct ElementCtx {
     ElementRawHashCtx rawHash;
     ElementRawModuleAux rawModAux;
     ElementRawStreamCtx rawStream;
+    ElementRawArrayCtx rawArray;
 
     int state;  /* parsing-element state */
 } ElementCtx;
@@ -509,6 +523,7 @@ void subElementCallEnd(RdbParser *p, RdbBulk *bulkResult, size_t *len);
 RdbStatus rdbLoadMillisecTime(RdbParser *p, int64_t *val);
 RdbStatus rdbLoadFloatValue(RdbParser *p, float *val);
 RdbStatus rdbLoadBinaryDoubleValue(RdbParser *p, double *val);
+RdbStatus rdbLoadSignedInteger(RdbParser *p, int64_t *val);
 RdbStatus rdbLoadDoubleValue(RdbParser *p, double *val);
 RdbStatus rdbLoadDoubleValueToBuff(RdbParser *p, char *buff, int *written);
 RdbStatus rdbLoadLen(RdbParser *p, int *isencoded, uint64_t *lenptr, unsigned char* outbuff, int *outbufflen);
@@ -570,6 +585,7 @@ RdbStatus elementZsetLP(RdbParser *p);
 RdbStatus elementFunction(RdbParser *p);
 RdbStatus elementModule(RdbParser *p);
 RdbStatus elementStreamLP(RdbParser *p);
+RdbStatus elementArray(RdbParser *p);
 
 /*** Raw Parsing Elements ***/
 RdbStatus elementRawEndKey(RdbParser *p);
@@ -591,6 +607,7 @@ RdbStatus elementRawZsetZL(RdbParser *p);
 RdbStatus elementRawModule(RdbParser *p);
 RdbStatus elementRawStreamLP(RdbParser *p);
 RdbStatus elementRawKeyMeta(RdbParser *p);
+RdbStatus elementRawArray(RdbParser *p);
 
 /*** inline functions ***/
 
