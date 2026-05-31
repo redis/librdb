@@ -1128,10 +1128,7 @@ static RdbRes toRespArrayMetadata(RdbParser *p, void *userData, uint64_t count, 
 static RdbRes toRespArrayElement(RdbParser *p, void *userData, uint64_t idx, RdbBulk value) {
     RdbxToResp *ctx = userData;
     size_t valLen = RDB_bulkLen(p, value);
-    int i = ctx->arrayCtx.batchCount++;
-
-    ctx->arrayCtx.batch[i].idx = idx;
-    ctx->arrayCtx.batch[i].valLen = valLen;
+    int i = ctx->arrayCtx.batchCount;   /* commit only after alloc succeeds */
 
     if (valLen <= ARMSET_SSO_SIZE) {
         /* Small value: copy directly into inline vcache */
@@ -1145,7 +1142,10 @@ static RdbRes toRespArrayElement(RdbParser *p, void *userData, uint64_t idx, Rdb
         ctx->arrayCtx.batch[i].val.heap = valCopy;
     }
 
-    /* Decrement elements left */
+    /* Commit the slot — both val and valLen are valid for this entry. */
+    ctx->arrayCtx.batch[i].idx = idx;
+    ctx->arrayCtx.batch[i].valLen = valLen;
+    ctx->arrayCtx.batchCount++;
     ctx->arrayCtx.elementsLeft--;
 
     /* Flush when batch is full OR when this is the last element */
