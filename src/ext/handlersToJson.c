@@ -35,6 +35,7 @@ typedef enum
     R2J_IN_STREAM_CG_PEL,
     R2J_IN_STREAM_CG_CONSUMER,
     R2J_IN_STREAM_CG_CONSUMER_PEL,
+    R2J_IN_STREAM_CG_NACK,
 
     /* IDMP states */
     R2J_IN_STREAM_IDMP,
@@ -230,6 +231,9 @@ static RdbRes toJsonEndKey(RdbParser *p, void *userData) {
             break;
         case R2J_IN_STREAM_CG_CONSUMER_PEL:
             fprintf(ctx->outfile, "]}]}]}");
+            break;
+        case R2J_IN_STREAM_CG_NACK:
+            fprintf(ctx->outfile, "]}]}");
             break;
 
         /* IDMP states */
@@ -608,6 +612,8 @@ static RdbRes toJsonStreamNewCGroup(RdbParser *p, void *userData, RdbBulk grpNam
         prefix = "]}]},\n";
     } else if (ctx->state == R2J_IN_STREAM_CG_CONSUMER) {
         prefix = "}]},\n";
+    } else if (ctx->state == R2J_IN_STREAM_CG_NACK) {
+        prefix = "]},\n";
     } else {
         RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
                         "toJsonStreamNewCGroup(): Invalid state value: %d", ctx->state);
@@ -658,7 +664,7 @@ static RdbRes toJsonStreamNewConsumer(RdbParser *p, void *userData, RdbBulk cons
     }
 
     ctx->state = R2J_IN_STREAM_CG_CONSUMER;
-    fprintf(ctx->outfile, "%s\n           { \"name\": \"%s\", \"activeTime\": %llu, \"seenTime\": %llu",
+    fprintf(ctx->outfile, "%s\n           { \"name\": \"%s\", \"activeTime\": %lld, \"seenTime\": %lld",
             prefix, consName, meta->activeTime, meta->seenTime);
 
     return RDB_OK;
@@ -670,13 +676,46 @@ static RdbRes toJsonStreamConsumerPendingEntry(RdbParser *p, void *userData, Rdb
     char *prefix;
     if (ctx->state == R2J_IN_STREAM_CG_CONSUMER) {
         prefix = ",\n             \"pending\": [";
-
-    } if (ctx->state == R2J_IN_STREAM_CG_CONSUMER_PEL) {
+    } else if (ctx->state == R2J_IN_STREAM_CG_CONSUMER_PEL) {
         prefix = ", ";
+    } else {
+        RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
+                        "toJsonStreamConsumerPendingEntry(): Invalid state value: %d", ctx->state);
+        return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
     }
 
     ctx->state = R2J_IN_STREAM_CG_CONSUMER_PEL;
     fprintf(ctx->outfile, "%s\n               {\"id\":\"%" PRIu64 "-%" PRIu64 "\"}", prefix, streamId->ms, streamId->seq);
+    return RDB_OK;
+}
+
+/* v14: emit a NACKed entry ID into the per-CG "nacked" array. The array is
+ * opened on the first call within a CG (closing whatever section preceded it:
+ * the CG header, the global PEL, the consumers array, or the last consumer
+ * PEL) and closed by the next state transition (new CG / IDMP / end key). */
+static RdbRes toJsonStreamNackZoneEntry(RdbParser *p, void *userData, RdbStreamID *id, int64_t itemsLeft) {
+    UNUSED(p, itemsLeft);
+    RdbxToJson *ctx = userData;
+    const char *prefix;
+
+    if (ctx->state == R2J_IN_STREAM_CG) {
+        prefix = ",\n         \"nacked\": [\"";
+    } else if (ctx->state == R2J_IN_STREAM_CG_PEL) {
+        prefix = "],\n         \"nacked\": [\"";
+    } else if (ctx->state == R2J_IN_STREAM_CG_CONSUMER) {
+        prefix = "}],\n         \"nacked\": [\"";
+    } else if (ctx->state == R2J_IN_STREAM_CG_CONSUMER_PEL) {
+        prefix = "]}],\n         \"nacked\": [\"";
+    } else if (ctx->state == R2J_IN_STREAM_CG_NACK) {
+        prefix = ", \"";
+    } else {
+        RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
+                        "toJsonStreamNackZoneEntry(): Invalid state value: %d", ctx->state);
+        return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
+    }
+
+    fprintf(ctx->outfile, "%s%" PRIu64 "-%" PRIu64 "\"", prefix, id->ms, id->seq);
+    ctx->state = R2J_IN_STREAM_CG_NACK;
     return RDB_OK;
 }
 
@@ -698,6 +737,8 @@ static RdbRes toJsonStreamIdmpMeta(RdbParser *p, void *userData, RdbStreamIdmpMe
         prefix = "}]}],\n      \"idmp\": {";
     } else if (ctx->state == R2J_IN_STREAM_CG_CONSUMER_PEL) {
         prefix = "]}]}],\n      \"idmp\": {";
+    } else if (ctx->state == R2J_IN_STREAM_CG_NACK) {
+        prefix = "]}],\n      \"idmp\": {";
     } else if (ctx->state == R2J_IN_KEY) {
         /* No stream entries were recorded - handleStreamMetadata not registered */
         prefix = "{\n      \"idmp\": {";
@@ -843,6 +884,7 @@ RdbxToJson *RDBX_createHandlersToJson(RdbParser *p, const char *filename, RdbxTo
                 NULL,             /* handleStreamCGroupPendingEntry */
                 NULL,             /* handleStreamNewConsumer */
                 NULL,             /* handleStreamConsumerPendingEntry */
+                NULL,             /* handleStreamNackZoneEntry */
                 NULL,             /* handleStreamIdmpMeta */
                 NULL,             /* handleStreamIdmpProducer */
                 NULL,             /* handleStreamIdmpEntry */
@@ -860,6 +902,7 @@ RdbxToJson *RDBX_createHandlersToJson(RdbParser *p, const char *filename, RdbxTo
             dataCb.handleStreamCGroupPendingEntry = toJsonStreamCGroupPendingEntry;
             dataCb.handleStreamNewConsumer = toJsonStreamNewConsumer;
             dataCb.handleStreamConsumerPendingEntry = toJsonStreamConsumerPendingEntry;
+            dataCb.handleStreamNackZoneEntry = toJsonStreamNackZoneEntry;
         }
         if (ctx->conf.includeStreamIdmp) {
             dataCb.handleStreamIdmpMeta = toJsonStreamIdmpMeta;

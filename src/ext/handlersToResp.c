@@ -18,6 +18,9 @@
 
 #define KEY_CMD_ID_DBG  "_RDB_CLI_CMD_ID_"
 
+/* Max IDs per XNACK batch; mirrors AOF_REWRITE_ITEMS_PER_CMD in redis2/src/aof.c. */
+#define XNACK_BATCH_MAX 64
+
 typedef enum DelKeyBeforeWrite {
     DEL_KEY_BEFORE_NONE,
     DEL_KEY_BEFORE_BY_DEL_CMD,
@@ -83,8 +86,21 @@ struct RdbxToResp {
         RdbBulkCopy grpName, consName, idmpPid;
         int grpNameLen, consNameLen, idmpPidLen;
 
+        /* v14 NACK zone batching (mirrors AOF_REWRITE_ITEMS_PER_CMD = 64).
+         * Consecutive NACK-zone entries with the same delivery_count are
+         * emitted as a single XNACK ... FAIL IDS ... RETRYCOUNT <dc> FORCE
+         * command, matching the AOF rewrite emission in
+         * redis2/src/aof.c:rioWriteStreamNackedEntries / rewriteStreamObject. */
+        struct {
+            RdbStreamID ids[XNACK_BATCH_MAX];
+            int count;
+            uint64_t deliveryCount;
+        } nackBatch;
+
     } streamCtx;
 };
+
+static RdbRes flushNackBatch(RdbxToResp *ctx);
 
 static void deletePendingEntriesList(RdbParser *p, rax **pel) {
     /* Free all entries in the Rax tree */
@@ -95,6 +111,7 @@ static void deletePendingEntriesList(RdbParser *p, rax **pel) {
         RdbStreamPendingEntry *entry = ri_cons.data;
         RDB_free(p, entry);
     }
+    raxStop(&ri_cons);
     /* Free the entire Rax tree */
     raxFree(*pel);
     *pel = NULL;
@@ -855,7 +872,7 @@ static RdbRes toRespStreamConsumerPendingEntry(RdbParser *p, void *userData, Rdb
 
     if ((pe = raxFind(ctx->streamCtx.groupPel, (unsigned char *)streamId, sizeof(*streamId))) == raxNotFound) {
         RDB_reportError(p, (RdbRes) RDBX_ERR_STREAM_INTEG_CHECK,
-                        "toRespStreamNewConsumer(): Cannot find consumer pending entry in group PEL");
+                        "toRespStreamConsumerPendingEntry(): Cannot find consumer pending entry in group PEL");
         return (RdbRes) RDBX_ERR_STREAM_INTEG_CHECK;
     }
 
@@ -883,6 +900,95 @@ static RdbRes toRespStreamConsumerPendingEntry(RdbParser *p, void *userData, Rdb
     /* max: 2 + 2 + 1 + 3 + 21*2+1 + 2 + 4 + 3 + 21 + 2 + 10 + 3 +21 +2 + 6 + 2 +5 + 2*16 */
     IOV_STRING(&iov[iovs++], cmdTrailer, cmdTrailerLen);
     return writevWrap(ctx, iov, iovs, &startCmd, 1);
+}
+
+/* Flush the accumulated XNACK batch as one
+ *   XNACK <key> <group> FAIL IDS <n> <id1>..<idN> RETRYCOUNT <dc> FORCE
+ * command. Token count is 6 (XNACK + key + group + FAIL + IDS + N) +
+ * N (IDs) + 3 (RETRYCOUNT + dc + FORCE) = N+9, matching the AOF emission at
+ * redis2/src/aof.c:rioWriteStreamNackedEntries. No-op when batch is empty. */
+static RdbRes flushNackBatch(RdbxToResp *ctx) {
+    if (ctx->streamCtx.nackBatch.count == 0)
+        return RDB_OK;
+
+    char cmdHdr[64], keyLenStr[32], gNameLenStr[32], numIdsLenStr[32], numIdsStr[32];
+    char dcLenStr[32], dcStr[32];
+    char idLenStr[XNACK_BATCH_MAX][32], idStr[XNACK_BATCH_MAX][100];
+    int idLen[XNACK_BATCH_MAX];
+    /* 8 header iovs (cmdHdr, keyLen, key, grpLen, grp, FAIL+IDS, nLen, n)
+     * + 2 per id + 4 trailer iovs (RETRYCOUNT, dcLen, dc, FORCE) */
+    struct iovec iov[8 + XNACK_BATCH_MAX*2 + 4];
+    int iovs = 0;
+
+    int n = ctx->streamCtx.nackBatch.count;
+    int cmdHdrLen = snprintf(cmdHdr, sizeof(cmdHdr), "*%d\r\n$5\r\nXNACK", n + 9);
+    IOV_STRING(&iov[iovs++], cmdHdr, cmdHdrLen);
+    /* key */
+    IOV_LENGTH(&iov[iovs++], ctx->keyCtx.keyLen, keyLenStr);
+    IOV_STRING(&iov[iovs++], ctx->keyCtx.key, ctx->keyCtx.keyLen);
+    /* group name */
+    IOV_LENGTH(&iov[iovs++], ctx->streamCtx.grpNameLen, gNameLenStr);
+    IOV_STRING(&iov[iovs++], ctx->streamCtx.grpName, ctx->streamCtx.grpNameLen);
+    /* FAIL + IDS + numids */
+    IOV_CONST(&iov[iovs++], "\r\n$4\r\nFAIL\r\n$3\r\nIDS");
+    int numIdsValLen = ll2string(numIdsStr, sizeof(numIdsStr), n);
+    IOV_LENGTH(&iov[iovs++], numIdsValLen, numIdsLenStr);
+    IOV_STRING(&iov[iovs++], numIdsStr, numIdsValLen);
+    /* ids */
+    for (int i = 0; i < n; i++) {
+        idLen[i] = snprintf(idStr[i], sizeof(idStr[i]), "%" PRIu64 "-%" PRIu64,
+                            ctx->streamCtx.nackBatch.ids[i].ms,
+                            ctx->streamCtx.nackBatch.ids[i].seq);
+        IOV_LENGTH(&iov[iovs++], idLen[i], idLenStr[i]);
+        IOV_STRING(&iov[iovs++], idStr[i], idLen[i]);
+    }
+    /* RETRYCOUNT + dc + FORCE */
+    IOV_CONST(&iov[iovs++], "\r\n$10\r\nRETRYCOUNT");
+    int dcValLen = ll2string(dcStr, sizeof(dcStr),
+                             (long long) ctx->streamCtx.nackBatch.deliveryCount);
+    IOV_LENGTH(&iov[iovs++], dcValLen, dcLenStr);
+    IOV_STRING(&iov[iovs++], dcStr, dcValLen);
+    IOV_CONST(&iov[iovs++], "\r\n$5\r\nFORCE\r\n");
+
+    RdbxRespWriterStartCmd startCmd = {"XNACK", ctx->keyCtx.key, 0};
+    ctx->streamCtx.nackBatch.count = 0;
+    return writevWrap(ctx, iov, iovs, &startCmd, 1);
+}
+
+/* v14: emit XNACK FORCE batch for the per-CG NACK zone (unowned PEL entries).
+ * Silently dropped on targets < 8.8 (NACK metadata is informational; the stream
+ * still replays via XADD/XGROUP/XCLAIM for owned PEL entries). Consecutive IDs
+ * with the same delivery_count are batched into a single XNACK command, matching
+ * the AOF rewrite behavior at redis2/src/aof.c:2387-2422. */
+static RdbRes toRespStreamNackZoneEntry(RdbParser *p, void *userData, RdbStreamID *id, int64_t itemsLeft) {
+    RdbxToResp *ctx = userData;
+    RdbStreamPendingEntry *pe;
+
+    if (ctx->targetRedisVerVal < VER_VAL(8, 8)) /* XNACK landed in 8.8 */
+        return RDB_OK;
+
+    pe = raxFind(ctx->streamCtx.groupPel, (unsigned char *) id, sizeof(*id));
+    if (pe == raxNotFound) {
+        RDB_reportError(p, (RdbRes) RDBX_ERR_STREAM_INTEG_CHECK,
+                        "toRespStreamNackZoneEntry(): NACK-zone ID not in group PEL");
+        return (RdbRes) RDBX_ERR_STREAM_INTEG_CHECK;
+    }
+
+    /* Start new batch / flush on delivery_count change. */
+    if (ctx->streamCtx.nackBatch.count == 0) {
+        ctx->streamCtx.nackBatch.deliveryCount = pe->deliveryCount;
+    } else if (pe->deliveryCount != ctx->streamCtx.nackBatch.deliveryCount) {
+        IF_NOT_OK_RETURN(flushNackBatch(ctx));
+        ctx->streamCtx.nackBatch.deliveryCount = pe->deliveryCount;
+    }
+
+    ctx->streamCtx.nackBatch.ids[ctx->streamCtx.nackBatch.count++] = *id;
+
+    /* Flush when batch reaches AOF_REWRITE_ITEMS_PER_CMD or this is the last */
+    if (ctx->streamCtx.nackBatch.count == XNACK_BATCH_MAX || itemsLeft == 0)
+        return flushNackBatch(ctx);
+
+    return RDB_OK;
 }
 
 /* Emit XCFGSET command to configure IDMP settings for the stream.
@@ -1150,6 +1256,7 @@ _LIBRDB_API RdbxToResp *RDBX_createHandlersToResp(RdbParser *p, RdbxToRespConf *
             toRespStreamCGroupPendingEntry,     /*handleStreamCGroupPendingEntry*/
             toRespStreamNewConsumer,                /*handleStreamNewConsumer*/
             toRespStreamConsumerPendingEntry, /*handleStreamConsumerPendingEntry*/
+            toRespStreamNackZoneEntry,         /*handleStreamNackZoneEntry*/
             toRespStreamIdmpMeta,                                         /*handleStreamIdmpMeta*/
             toRespStreamIdmpProducer,                                     /*handleStreamIdmpProducer*/
             toRespStreamIdmpEntry                      /*handleStreamIdmpEntry*/

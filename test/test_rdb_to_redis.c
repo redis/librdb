@@ -451,6 +451,22 @@ static void test_rdb_to_redis_idmp(void **state) {
     test_rdb_to_redis_common(DUMP_FOLDER("stream_v13_idmp.rdb"), 1, NULL, NULL);
 }
 
+/* Live round-trip for the v14 stream fixture (NACK zone). Mirrors the v13
+ * IDMP test: replay through live Redis, SAVE, re-parse, and compare JSON
+ * against the source. The standard `rdb_to_json` config used here sets
+ * includeStreamMeta=0 (PEL details are not part of the JSON comparison), so
+ * delivery_count preservation is not directly asserted here — that invariant
+ * is already covered at the unit level by `test_r2r_v14_stream_target_88` in
+ * test_rdb_to_resp.c (byte-exact RESP comparison against a reference that
+ * pins RETRYCOUNT). What this test adds: live confirmation that XADD /
+ * XGROUP / XCLAIM / XCFGSET / XNACK are all accepted by the target without
+ * errors, and stream entries round-trip cleanly via both data-level (no
+ * RESTORE) and raw-level (RESTORE) paths. */
+static void test_rdb_to_redis_v14_xnack(void **state) {
+    UNUSED(state);
+    test_rdb_to_redis_common(DUMP_FOLDER("stream_v14_xnack.rdb"), 1, NULL, NULL);
+}
+
 /* Test RDB v13 key metadata (RDB_OPCODE_KEY_META) parsing.
  * This test relies on test_keymeta module within redis repo, if available.
  * The test creates keys with module metadata, saves RDB, then parses it.
@@ -473,9 +489,11 @@ static void test_rdb_to_redis_key_meta(void **state) {
 
     /* setup redis server with debug command enabled */
     setupRedisServer("--enable-debug-command yes", 0);
-    
-    /* Register all 7 metadata classes once at the beginning. Can do it since debug 
-     * command is enabled. In a real module it must be registered via OnLoad */
+
+    /* Authorize runtime registration. In a real module it must be registered via OnLoad */
+    sendRedisCmd("DEBUG enable-keymeta-runtime-registration 1", -1, NULL);
+
+    /* Register all 7 metadata classes once at the beginning. */
     for (int i = 0; i < 7; i++) {
         char regCmd[128];
         snprintf(regCmd, sizeof(regCmd),
@@ -841,6 +859,7 @@ int group_rdb_to_redis(void) {
             /* stream */
             cmocka_unit_test_setup(test_rdb_to_redis_stream, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_idmp, setupTest),
+            cmocka_unit_test_setup(test_rdb_to_redis_v14_xnack, setupTest),
 
             /* expired keys */
             cmocka_unit_test_setup(test_rdb_to_redis_set_expired, setupTest),

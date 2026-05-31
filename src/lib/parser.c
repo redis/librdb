@@ -610,6 +610,7 @@ _LIBRDB_API int RDB_handleByLevel(RdbParser *p, RdbDataType type, RdbHandlersLev
             p->handleTypeObjByLevel[RDB_TYPE_STREAM_LISTPACKS_2] = lvl;
             p->handleTypeObjByLevel[RDB_TYPE_STREAM_LISTPACKS_3] = lvl;
             p->handleTypeObjByLevel[RDB_TYPE_STREAM_LISTPACKS_4] = lvl;
+            p->handleTypeObjByLevel[RDB_TYPE_STREAM_LISTPACKS_5] = lvl;
             break;
         case RDB_DATA_TYPE_FUNCTION:
             p->handleTypeObjByLevel[RDB_OPCODE_FUNCTION2] = lvl;
@@ -672,6 +673,7 @@ static inline RdbDataType getDataType(int opcode) {
         case RDB_TYPE_STREAM_LISTPACKS_2:
         case RDB_TYPE_STREAM_LISTPACKS_3:
         case RDB_TYPE_STREAM_LISTPACKS_4:
+        case RDB_TYPE_STREAM_LISTPACKS_5:
             return RDB_DATA_TYPE_STREAM;
         default:
             return RDB_DATA_TYPE_MAX;
@@ -1596,7 +1598,16 @@ RdbStatus elementNextRdbType(RdbParser *p) {
         case RDB_TYPE_STREAM_LISTPACKS:
         case RDB_TYPE_STREAM_LISTPACKS_2:
         case RDB_TYPE_STREAM_LISTPACKS_3:
-        case RDB_TYPE_STREAM_LISTPACKS_4:   return nextParsingElementKeyValue(p, PE_RAW_STREAM_LP, PE_STREAM_LP);
+        case RDB_TYPE_STREAM_LISTPACKS_4:
+        case RDB_TYPE_STREAM_LISTPACKS_5:   return nextParsingElementKeyValue(p, PE_RAW_STREAM_LP, PE_STREAM_LP);
+
+        /* v14 placeholder — full handler lands in TASK-3 (RDB_TYPE_ARRAY).
+         * Until then, error out cleanly so tests can assert on the error code. */
+        case RDB_TYPE_ARRAY:
+            RDB_reportError(p, RDB_ERR_NOT_SUPPORTED_RDB_ENCODING_TYPE,
+                            "RDB type %d (v14) is not yet supported by this build",
+                            p->currOpcode);
+            return RDB_STATUS_ERROR;
 
         case RDB_OPCODE_MODULE_AUX:         if (p->handleTypeObjByLevel[RDB_OPCODE_MODULE_AUX] == RDB_LEVEL_RAW)
                                                 return nextParsingElement(p, PE_RAW_MODULE_AUX);
@@ -2366,6 +2377,9 @@ RdbStatus elementStreamLP(RdbParser *p) {
         ST_LOAD_NUM_CONSUMERS,        /*   Load the number of consumers                                           */
         ST_LOAD_NEXT_CONSUMER,        /*   While more consumers to load                                           */
         ST_LOAD_NEXT_CONSUMER_PEL,    /*       Load the PEL about entries owned by next consumer                  */
+        /* NACK zone states for RDB_TYPE_STREAM_LISTPACKS_5 (v14+) */
+        ST_LOAD_NACK_ZONE_COUNT,      /*   Load NACK zone entry count (per CG)                                    */
+        ST_LOAD_NACK_ZONE_ENTRY,      /*     Load each NACK zone stream ID                                        */
         /* IDMP states for RDB_TYPE_STREAM_LISTPACKS_4 */
         ST_LOAD_IDMP_CONFIG,          /* Load IDMP config (duration, max_entries, num_producers)                  */
         ST_LOAD_IDMP_NEXT_PRODUCER,   /*   Load producer PID and entries                                          */
@@ -2539,7 +2553,11 @@ RdbStatus elementStreamLP(RdbParser *p) {
 
             case ST_LOAD_NEXT_CONSUMER:
                 if (p->elmCtx.stream.consumersLeft == 0) {
-                    updateElementState(p, ST_LOAD_NEXT_CONS_GROUP, 0);
+                    /* v14+: per-CG NACK zone follows the consumers section. */
+                    if (p->currOpcode >= RDB_TYPE_STREAM_LISTPACKS_5)
+                        updateElementState(p, ST_LOAD_NACK_ZONE_COUNT, 0);
+                    else
+                        updateElementState(p, ST_LOAD_NEXT_CONS_GROUP, 0);
                     break;
                 }
                 BulkInfo *bConsName;
@@ -2584,8 +2602,41 @@ RdbStatus elementStreamLP(RdbParser *p) {
                 }
                 if (p->elmCtx.stream.consumersLeft)
                     updateElementState(p, ST_LOAD_NEXT_CONSUMER, 0);
+                else if (p->currOpcode >= RDB_TYPE_STREAM_LISTPACKS_5)
+                    updateElementState(p, ST_LOAD_NACK_ZONE_COUNT, 0);
                 else
                     updateElementState(p, ST_LOAD_NEXT_CONS_GROUP, 0);
+                break;
+
+            /* NACK zone states for RDB_TYPE_STREAM_LISTPACKS_5 (v14+).
+             * The NACK zone is per-CG: count + count * 16-byte stream
+             * IDs. We surface each ID via handleStreamNackZoneEntry; handlers
+             * that need delivery_count / delivery_time maintain their own map
+             * keyed on the IDs already emitted via handleStreamCGroupPendingEntry. */
+            case ST_LOAD_NACK_ZONE_COUNT:
+                IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &ctx->stream.nackedLeft, NULL, NULL));
+                /*** ENTER SAFE STATE ***/
+                updateElementState(p, ST_LOAD_NACK_ZONE_ENTRY, 0); /* fall-thru */
+
+            case ST_LOAD_NACK_ZONE_ENTRY:
+                while (ctx->stream.nackedLeft) {
+                    BulkInfo *binfoStreamID;
+                    RdbStreamID id;
+                    IF_NOT_OK_RETURN(rdbLoad(p, sizeof(RdbStreamID), RQ_ALLOC, NULL, &binfoStreamID));
+
+                    /*** ENTER SAFE STATE ***/
+
+                    streamDecodeID(binfoStreamID->ref, &id);
+
+                    CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_DATA,
+                                     rdbData.handleStreamNackZoneEntry,
+                                     &id, (int64_t)(ctx->stream.nackedLeft - 1));
+                    
+                    ctx->stream.nackedLeft--;
+
+                    updateElementState(p, ST_LOAD_NACK_ZONE_ENTRY, 0);
+                }
+                updateElementState(p, ST_LOAD_NEXT_CONS_GROUP, 0);
                 break;
 
             /* IDMP (Idempotent Message Producer) states for RDB_TYPE_STREAM_LISTPACKS_4 */

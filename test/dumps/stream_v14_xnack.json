@@ -1,0 +1,24 @@
+    "mystream":{
+      "entries":[ 
+        { "id":"1779170191996-0", "items":{"field1":"value1"} },
+        { "id":"1779170191998-0", "items":{"field2":"value2"} },
+        { "id":"1779170192000-0", "items":{"field3":"value3"} },
+        { "id":"1779170192001-0", "items":{"field4":"value4"} }],
+      "length": 4, 
+      "entriesAdded": 4, 
+      "firstID": "1779170191996-0", 
+      "lastID": "1779170192001-0", 
+      "maxDelEntryID": "0-0",
+      "groups": [
+        {"name": "mygroup", "lastid": "1779170192001-0", "entriesRead": 4,
+         "pending": [ 
+           { "sent": 1779170192004, "id":"1779170191996-0", "count": 1 }, 
+           { "sent": 0, "id":"1779170191998-0", "count": 1 }, 
+           { "sent": 0, "id":"1779170192000-0", "count": 1 }, 
+           { "sent": 1779170192004, "id":"1779170192001-0", "count": 1 }],
+         "consumers": [
+           { "name": "consumer1", "activeTime": 1779170192004, "seenTime": 1779170192004,
+             "pending": [
+               {"id":"1779170191996-0"}, 
+               {"id":"1779170192001-0"}]}],
+         "nacked": ["1779170191998-0", "1779170192000-0"]}]}

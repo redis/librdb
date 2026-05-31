@@ -503,6 +503,19 @@ static void test_r2j_stream_v13_idmp(void **state) {
     testRdbToJsonCommon(DUMP_FOLDER("stream_v13_idmp.rdb"), DUMP_FOLDER("stream_v13.json"), &r2jConf);
 }
 
+/* Test RDB v14 stream with NACK zone (RDB_TYPE_STREAM_LISTPACKS_5). The fixture
+ * has 4 entries; consumer group "mygroup" has 2 owned PEL entries (head + tail)
+ * and 2 NACK-zone (unowned) entries in the middle. The JSON output must include
+ * a "nacked" array with the NACKed IDs in on-disk order. */
+static void test_r2j_stream_v14_xnack(void **state) {
+    UNUSED(state);
+    RdbxToJsonConf r2jConf = DEF_CONF(RDB_LEVEL_DATA);
+    r2jConf.includeAuxField = 0;
+    r2jConf.includeStreamMeta = 1;
+    r2jConf.includeStreamIdmp = 0;
+    testRdbToJsonCommon(DUMP_FOLDER("stream_v14_xnack.rdb"), DUMP_FOLDER("stream_v14_xnack.json"), &r2jConf);
+}
+
 static void test_r2j_cluster_slot_info(void **state) {
     UNUSED(state);
     RdbxToJsonConf r2jConf = DEF_CONF(RDB_LEVEL_DATA);
@@ -591,6 +604,7 @@ int group_rdb_to_json(void) {
         /* stream */
         cmocka_unit_test(test_r2j_stream_data),
         cmocka_unit_test(test_r2j_stream_v13_idmp),
+        cmocka_unit_test(test_r2j_stream_v14_xnack),
 
         /* misc */
         cmocka_unit_test(test_r2j_multiple_lists_and_strings_data),
