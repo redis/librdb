@@ -114,7 +114,6 @@ struct RdbxToResp {
      * end-of-key — *after* the final ARMSET flush. */
     struct {
         uint64_t insertIdx; /* if == RDB_ARRAY_INSERT_IDX_NONE means "don't emit ARSEEK" */
-        uint64_t totalCount; /* total number of elements in the array */
         uint64_t elementsLeft; /* countdown: elements remaining to process */
         int batchCount;                            /* current batch fill */
         struct {
@@ -1104,14 +1103,12 @@ static RdbRes toRespStreamIdmpEntry(RdbParser *p, void *userData, RdbStreamIdmpE
 
 /*** v14 array (RDB_TYPE_ARRAY) ***/
 
-/* Stash insert_idx for end-of-key ARSEEK emission. No command emitted here —
- * ARMSET is built up by toRespArrayElement; ARSEEK is fired (if needed) by
- * toRespEndKey after the final ARMSET flush. */
+/* Initialize array state. ARMSET batches are built by toRespArrayElement,
+ * which emits ARSEEK (if insertIdx != NONE) after the final batch. */
 static RdbRes toRespArrayMetadata(RdbParser *p, void *userData, uint64_t count, uint64_t insertIdx) {
     UNUSED(p);
     RdbxToResp *ctx = userData;
     ctx->arrayCtx.insertIdx = insertIdx;
-    ctx->arrayCtx.totalCount = count;
     ctx->arrayCtx.elementsLeft = count;
     ctx->arrayCtx.batchCount = 0;
     return RDB_OK;

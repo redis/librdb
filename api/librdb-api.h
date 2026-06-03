@@ -208,7 +208,7 @@ typedef struct RdbStreamIdmpEntry {
 /* Sentinel for RDB_TYPE_ARRAY metadata's insert_idx when the array was saved
  * with insert_idx_flag == 0 (no insert cursor). Mirrors AR_INSERT_IDX_NONE in
  * redis/src/sparsearray.h. */
-#define RDB_ARRAY_INSERT_IDX_NONE ((uint64_t)~0ULL)
+#define RDB_ARRAY_INSERT_IDX_NONE UINT64_MAX
 
 /* misc function pointer typedefs */
 typedef RdbStatus (*RdbReaderFunc) (void *readerData, void *buf, size_t len);
