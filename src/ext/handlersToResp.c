@@ -1104,7 +1104,8 @@ static RdbRes toRespStreamIdmpEntry(RdbParser *p, void *userData, RdbStreamIdmpE
 /*** v14 array (RDB_TYPE_ARRAY) ***/
 
 /* Initialize array state. ARMSET batches are built by toRespArrayElement,
- * which emits ARSEEK (if insertIdx != NONE) after the final batch. */
+ * which emits ARSEEK (if insertIdx != NONE) after the final batch.
+ * No version guard — best-effort; unsupported targets (< 8.8) fail naturally. */
 static RdbRes toRespArrayMetadata(RdbParser *p, void *userData, uint64_t count, uint64_t insertIdx) {
     UNUSED(p);
     RdbxToResp *ctx = userData;
