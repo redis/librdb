@@ -1342,6 +1342,131 @@ RdbStatus elementRawKeyMeta(RdbParser *p) {
     }
 }
 
+/* Walk RDB_TYPE_ARRAY at raw level, aggregating every byte for RESTORE.
+ *
+ * The raw path doesn't interpret element values, but it still must read each
+ * (idx, type_tag, payload) tuple because there is no aggregate length prefix
+ * — only the per-element walk advances the byte counter to the end of the
+ * key's value. */
+RdbStatus elementRawArray(RdbParser *p) {
+    enum RAW_ARRAY_STATES {
+        ST_RAW_ARRAY_HEADER = 0,         /* read count + insert_idx_flag (+ optional insert_idx) */
+        ST_RAW_ARRAY_NEXT_ELEMENT,       /* read idx + type_tag + (INT/FLOAT payload) or dispatch to sub-element */
+        ST_RAW_ARRAY_STR_RETURN,         /* return from PE_RAW_STRING sub-element (SDS / SMALLSTR) */
+    };
+
+    ElementRawArrayCtx *arCtx = &p->elmCtx.rawArray;
+    RawContext *rawCtx = &p->rawCtx;
+
+    switch (p->elmCtx.state) {
+
+        case ST_RAW_ARRAY_HEADER: {
+            uint64_t count, insertFlag;
+            int headerLen = 0;
+
+            /* worst case: 3 * 9-byte length prefixes */
+            IF_NOT_OK_RETURN(aggMakeRoom(p, 32));
+
+            IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &count,
+                                        (unsigned char *) rawCtx->at, &headerLen));
+            IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &insertFlag,
+                                        (unsigned char *) rawCtx->at + headerLen, &headerLen));
+
+            if (count == 0) {
+                RDB_reportError(p, RDB_ERR_ARRAY_INVALID_STATE,
+                                "elementRawArray(): array count == 0 is invalid");
+                return RDB_STATUS_ERROR;
+            }
+            if (insertFlag > 1) {
+                RDB_reportError(p, RDB_ERR_ARRAY_INVALID_STATE,
+                                "elementRawArray(): invalid insert_idx_flag %llu",
+                                (unsigned long long) insertFlag);
+                return RDB_STATUS_ERROR;
+            }
+
+            if (insertFlag == 1) {
+                uint64_t insertIdx;
+                IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &insertIdx,
+                                            (unsigned char *) rawCtx->at + headerLen, &headerLen));
+            }
+
+            /*** ENTER SAFE STATE ***/
+
+            IF_NOT_OK_RETURN(cbHandleBegin(p, DATA_SIZE_UNKNOWN_AHEAD));
+            IF_NOT_OK_RETURN(aggUpdateWritten(p, headerLen));
+
+            arCtx->elementsLeft = count;
+            updateElementState(p, ST_RAW_ARRAY_NEXT_ELEMENT, 0);
+        } /* fall-thru */
+
+        case ST_RAW_ARRAY_NEXT_ELEMENT: {
+            uint64_t idx, typeTag;
+            int idxEncoded = 0;
+            int written = 0;
+
+            if (arCtx->elementsLeft == 0)
+                return nextParsingElement(p, PE_RAW_END_KEY); /* done */
+
+            /* worst case: 2 * 9-byte length prefixes + 8-byte INT/FLOAT payload = 26 */
+            IF_NOT_OK_RETURN(aggMakeRoom(p, 32));
+            IF_NOT_OK_RETURN(rdbLoadLen(p, &idxEncoded, &idx,
+                                        (unsigned char *) rawCtx->at, &written));
+            if (idxEncoded || idx == ((uint64_t)~0ULL)) {
+                RDB_reportError(p, RDB_ERR_ARRAY_INVALID_STATE,
+                                "elementRawArray(): invalid array index %llu (encoded=%d)",
+                                (unsigned long long) idx, idxEncoded);
+                return RDB_STATUS_ERROR;
+            }
+            IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &typeTag,
+                                        (unsigned char *) rawCtx->at + written, &written));
+
+            switch (typeTag) {
+                case AR_RDB_TAG_INT:
+                case AR_RDB_TAG_FLOAT: {
+                    /* Both carry 8 raw bytes (int64 LE / IEEE 754 double).
+                     * Read inline and defer aggUpdateWritten until both the
+                     * idx+type_tag and the payload have been consumed — that
+                     * way a WAIT_MORE_DATA during the 8-byte read replays the
+                     * whole case (length-prefix reads come from the bulk-pool
+                     * with the same data) and aggUpdateWritten fires exactly
+                     * once on the successful path. */
+                    BulkInfo *binfo;
+                    IF_NOT_OK_RETURN(rdbLoad(p, sizeof(int64_t), RQ_ALLOC_REF,
+                                             rawCtx->at + written, &binfo));
+                    /*** ENTER SAFE STATE ***/
+                    IF_NOT_OK_RETURN(aggUpdateWritten(p, written + sizeof(int64_t)));
+                    arCtx->elementsLeft--;
+                    return updateElementState(p, ST_RAW_ARRAY_NEXT_ELEMENT, 0);
+                }
+                case AR_RDB_TAG_SDS:
+                case AR_RDB_TAG_SMALLSTR:
+                    /*** ENTER SAFE STATE ***/
+                    IF_NOT_OK_RETURN(aggUpdateWritten(p, written));
+                    return subElementCall(p, PE_RAW_STRING, ST_RAW_ARRAY_STR_RETURN);
+                default:
+                    RDB_reportError(p, RDB_ERR_ARRAY_INVALID_STATE,
+                                    "elementRawArray(): unknown array element type_tag %llu",
+                                    (unsigned long long) typeTag);
+                    return RDB_STATUS_ERROR;
+            }
+        }
+
+        case ST_RAW_ARRAY_STR_RETURN: {
+            /*** ENTER SAFE STATE (no rdb read) ***/
+            size_t len;
+            unsigned char *unused;
+            subElementCallEnd(p, (char **) &unused, &len);
+            arCtx->elementsLeft--;
+            return updateElementState(p, ST_RAW_ARRAY_NEXT_ELEMENT, 1);
+        }
+
+        default:
+            RDB_reportError(p, RDB_ERR_ARRAY_INVALID_STATE,
+                            "elementRawArray(): invalid parsing element state: %d", p->elmCtx.state);
+            return RDB_STATUS_ERROR;
+    }
+}
+
 /*** various functions ***/
 
 static inline RdbStatus cbHandleFrag(RdbParser *p, BulkInfo *binfo) {

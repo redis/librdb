@@ -42,6 +42,8 @@ typedef enum
     R2J_IN_STREAM_IDMP_PRODUCER,
     R2J_IN_STREAM_IDMP_ENTRY,
 
+    R2J_IN_ARRAY, /*(v14+)*/
+
 } RdbxToJsonState;
 
 struct RdbxToJson {
@@ -254,6 +256,10 @@ static RdbRes toJsonEndKey(RdbParser *p, void *userData) {
         case R2J_IN_HASH:
         case R2J_IN_ZSET:
             fprintf(ctx->outfile, "}");
+            break;
+        case R2J_IN_ARRAY:
+            /* close elements array + wrapper object */
+            fprintf(ctx->outfile, "]}");
             break;
         case R2J_IN_KEY:
         case R2J_IN_STRING:
@@ -805,6 +811,46 @@ static RdbRes toJsonStreamIdmpEntry(RdbParser *p, void *userData, RdbStreamIdmpE
     return RDB_OK;
 }
 
+static RdbRes toJsonArrayMetadata(RdbParser *p, void *userData, uint64_t count, uint64_t insertIdx) {
+    UNUSED(p, count);
+    RdbxToJson *ctx = userData;
+
+    if (unlikely(ctx->state != R2J_IN_KEY)) {
+        RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
+                        "toJsonArrayMetadata(): Invalid state value: %d", ctx->state);
+        return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
+    }
+
+    fprintf(ctx->outfile, "{");
+    if (insertIdx != RDB_ARRAY_INSERT_IDX_NONE)
+        fprintf(ctx->outfile, "\"insert_idx\":\"%" PRIu64 "\",", insertIdx);
+    fprintf(ctx->outfile, "\"elements\":[");
+
+    /* state stays R2J_IN_KEY until the first element arrives — that lets
+     * toJsonArrayElement omit the leading comma on the first record without
+     * a separate "first-element" flag. */
+    return RDB_OK;
+}
+
+static RdbRes toJsonArrayElement(RdbParser *p, void *userData, uint64_t idx, RdbBulk value) {
+    RdbxToJson *ctx = userData;
+
+    if (ctx->state == R2J_IN_ARRAY) {
+        fprintf(ctx->outfile, ",");
+    } else if (ctx->state != R2J_IN_KEY) {
+        RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
+                        "toJsonArrayElement(): Invalid state value: %d", ctx->state);
+        return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
+    }
+
+    fprintf(ctx->outfile, "{\"idx\":\"%" PRIu64 "\",\"val\":", idx);
+    outputQuotedEscaping(ctx, value, RDB_bulkLen(p, value));
+    fprintf(ctx->outfile, "}");
+
+    ctx->state = R2J_IN_ARRAY;
+    return RDB_OK;
+}
+
 /*** Handling struct ***/
 
 static RdbRes toJsonStruct(RdbParser *p, void *userData, RdbBulk value) {
@@ -888,6 +934,10 @@ RdbxToJson *RDBX_createHandlersToJson(RdbParser *p, const char *filename, RdbxTo
                 NULL,             /* handleStreamIdmpMeta */
                 NULL,             /* handleStreamIdmpProducer */
                 NULL,             /* handleStreamIdmpEntry */
+
+                /*array (v14+):*/
+                toJsonArrayMetadata, /* handleArrayMetadata */
+                toJsonArrayElement,  /* handleArrayElement */
         };
 
         if (ctx->conf.includeAuxField)

@@ -161,6 +161,16 @@ static RdbRes filterStreamIdmpEntry(RdbParser *p, void *userData, RdbStreamIdmpE
     return ((RdbxFilter *) userData)->cbReturnValue;
 }
 
+static RdbRes filterArrayMetadata(RdbParser *p, void *userData, uint64_t count, uint64_t insertIdx) {
+    UNUSED(p, count, insertIdx);
+    return ((RdbxFilter *) userData)->cbReturnValue;
+}
+
+static RdbRes filterArrayElement(RdbParser *p, void *userData, uint64_t idx, RdbBulk value) {
+    UNUSED(p, idx, value);
+    return ((RdbxFilter *) userData)->cbReturnValue;
+}
+
 /*** Handling struct ***/
 
 static RdbRes filterListLP(RdbParser *p, void *userData, RdbBulk listpack) {
@@ -306,6 +316,10 @@ static void defaultFilterDataCb(RdbHandlersDataCallbacks *dataCb) {
         filterStreamIdmpMeta,               /*handleStreamIdmpMeta*/
         filterStreamIdmpProducer,           /*handleStreamIdmpProducer*/
         filterStreamIdmpEntry,              /*handleStreamIdmpEntry*/
+
+        /*array (sparse-array, v14+):*/
+        filterArrayMetadata,                /*handleArrayMetadata*/
+        filterArrayElement,                 /*handleArrayElement*/
     };
     *dataCb = defDataCb;
 }
