@@ -1,3 +1,21 @@
+## [Unreleased]
+
+### New Features
+- **RDB v14 Support — Stream XNACK (`RDB_TYPE_STREAM_LISTPACKS_5`)**:
+  parse and emit the per-consumer-group NACK zone added in Redis 8.8.
+  - New callback `handleStreamNackZoneEntry` on
+    `RdbHandlersDataCallbacks`, fired once per NACKed stream ID after
+    the consumers section of each consumer group.
+- **RDB v14 Support — Array (`RDB_TYPE_ARRAY`)**: parse and emit the
+  new top-level type added in Redis 8.8.
+  - API additions (all additive, ABI-compatible):
+    `RDB_DATA_TYPE_ARRAY` enum value, `handleArrayMetadata` /
+    `handleArrayElement` callbacks on `RdbHandlersDataCallbacks`,
+    `RDB_ARRAY_INSERT_IDX_NONE` sentinel (= `UINT64_MAX`), and
+    `RDB_ERR_ARRAY_INVALID_STATE` error code.
+
+---
+
 ## [2.2.0] - 2026-03-01
 
 ### New Features

@@ -156,6 +156,9 @@ static void printKeyFmt(RdbxToPrint *ctx, RdbBulk string) {
                         case RDB_DATA_TYPE_FUNCTION:
                             fprintf(ctx->outfile, "function");
                             break;
+                        case RDB_DATA_TYPE_ARRAY:
+                            fprintf(ctx->outfile, "array");
+                            break;
                         default:
                             fprintf(ctx->outfile, "unknown");
                     }
@@ -299,6 +302,13 @@ static RdbRes toPrintStreamItem(RdbParser *p, void *userData, RdbStreamID *id, R
     return RDB_OK;
 }
 
+static RdbRes toPrintArrayElement(RdbParser *p, void *userData, uint64_t idx, RdbBulk value) {
+    UNUSED(p, idx, value);
+    RdbxToPrint *ctx = userData;
+    ctx->keyCtx.items++;
+    return RDB_OK;
+}
+
 /*** API ***/
 
 RdbxToPrint *RDBX_createHandlersToPrint(RdbParser *p,
@@ -333,9 +343,14 @@ RdbxToPrint *RDBX_createHandlersToPrint(RdbParser *p,
             NULL,              /*handleStreamCGroupPendingEntry*/
             NULL,              /*handleStreamNewConsumer*/
             NULL,              /*handleStreamConsumerPendingEntry*/
+            NULL,              /*handleStreamNackZoneEntry*/
             NULL,              /*handleStreamIdmpMeta*/
             NULL,              /*handleStreamIdmpProducer*/
             NULL,              /*handleStreamIdmpEntry*/
+
+            /*array (v14+):*/
+            NULL, /*handleArrayMetadata*/
+            toPrintArrayElement,  /*handleArrayElement*/
     };
 
     if (auxFmt)

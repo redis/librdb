@@ -247,6 +247,15 @@ static void test_r2r_stream(void **state) {
     runWithAndWithoutRestore("stream_v11.rdb");
 }
 
+/* v14 stream fixture exercised through both data-level (no RESTORE) and
+ * raw-level (with RESTORE) paths. The raw path exercises the new NACK-zone
+ * byte walk in parserRaw.c — any miscount of count + count×16 bytes would
+ * surface as a CRC mismatch when the RESTORE payload is reconstructed. */
+static void test_r2r_stream_v14_xnack(void **state) {
+    UNUSED(state);
+    runWithAndWithoutRestore("stream_v14_xnack.rdb");
+}
+
 static void test_r2r_misc_with_stream(void **state) {
     UNUSED(state);
     runWithAndWithoutRestore("misc_with_stream.rdb");
@@ -316,6 +325,88 @@ static void test_r2r_v13_stream_target_84(void **state) {
     free(f1);
 }
 
+/* Target 8.6: the v14 NACK zone is silently dropped (XNACK landed in 8.8).
+ * Stream contents (XADD/XSETID/XGROUP CREATE/XCLAIM for owned PEL entries) and
+ * the IDMP XCFGSET (≥ 8.6) are still emitted intact. */
+static void test_r2r_v14_stream_target_86(void **state) {
+    size_t fileLen;
+    UNUSED(state);
+    RdbxToRespConf r2rConf = { .dstRedisVersion = "8.6" };
+    char *f1 = readFile(DUMP_FOLDER("stream_v14_xnack_target_ver_8.6.resp"), &fileLen, NULL);
+    testRdbToRespCommon("stream_v14_xnack.rdb", &r2rConf, f1, fileLen, M_ENTIRE, 1);
+    free(f1);
+}
+
+/* Target 8.8: the v14 NACK zone is emitted as a single batched
+ * XNACK <key> <group> FAIL IDS <n> <id..> RETRYCOUNT <dc> FORCE, mirroring
+ * the AOF rewrite emission at redis2/src/aof.c:2200-2422. The fixture's two
+ * NACK-zone entries share delivery_count = 1, so they collapse into one
+ * XNACK call in pel_time_head..pel_nack_tail order. */
+static void test_r2r_v14_stream_target_88(void **state) {
+    size_t fileLen;
+    UNUSED(state);
+    RdbxToRespConf r2rConf = { .dstRedisVersion = "8.8" };
+    char *f1 = readFile(DUMP_FOLDER("stream_v14_xnack_target_ver_8.8.resp"), &fileLen, NULL);
+    testRdbToRespCommon("stream_v14_xnack.rdb", &r2rConf, f1, fileLen, M_ENTIRE, 1);
+    free(f1);
+}
+
+/* v14 RDB_TYPE_ARRAY at data level: ARMSET emits all (idx, val) pairs in a
+ * single variadic command (≤ ARMSET_BATCH_MAX per batch). Verifies the exact
+ * RESP shape for the mixed-types fixture, which carries one element of each
+ * AR_RDB_TAG_* (INT/FLOAT/SDS/SMALLSTR) so INT/FLOAT canonicalization
+ * (ll2string / d2string) is exercised. */
+static void test_r2r_array_v14_target_88_data_level(void **state) {
+    UNUSED(state);
+    /* *10\r\n  (= 2 + 2 * 4 elements)
+     * $6\r\nARMSET\r\n  $3\r\narr\r\n
+     * $1\r\n0\r\n  $43\r\n<long SDS>\r\n
+     * $1\r\n1\r\n  $2\r\n42\r\n
+     * $1\r\n2\r\n  $3\r\n1.5\r\n
+     * $1\r\n3\r\n  $3\r\nabc\r\n */
+    char expResp[] =
+        "*10\r\n$6\r\nARMSET\r\n$3\r\narr\r\n"
+        "$1\r\n0\r\n$43\r\nthis_is_a_long_sds_string_value_long_enough\r\n"
+        "$1\r\n1\r\n$2\r\n42\r\n"
+        "$1\r\n2\r\n$3\r\n1.5\r\n"
+        "$1\r\n3\r\n$3\r\nabc\r\n";
+
+    RdbxToRespConf r2rConf = { .dstRedisVersion = "8.8" };
+    /* No --support-restore → data-level path, ARMSET emission. */
+    testRdbToRespCommon("array_v14_mixed_types.rdb", &r2rConf,
+                        expResp, sizeof(expResp) - 1, M_ENTIRE, 1);
+}
+
+/* v14 RDB_TYPE_ARRAY at raw level: with --support-restore and a matching
+ * destination version, the parser emits RESTORE rather than ARMSET. The exact
+ * payload bytes vary by fixture, so this test only asserts the RESTORE prefix
+ * (same convention as runWithAndWithoutRestore for older types). */
+static void test_r2r_array_v14_target_88_restore(void **state) {
+    UNUSED(state);
+    unsigned char restorePrefix[] = {
+        0x2a, 0x34, 0x0d, 0x0a,  /* *4\r\n */
+        0x24, 0x37, 0x0d, 0x0a,  /* $7\r\n */
+        0x52, 0x45, 0x53, 0x54,  /* REST */
+        0x4f, 0x52, 0x45, 0x0d,  /* ORE\r */
+        0x0a,                    /* \n   */
+    };
+    RdbxToRespConf r2rConf = { .supportRestore = 1, .dstRedisVersion = "8.8" };
+    testRdbToRespCommon("array_v14_basic.rdb", &r2rConf,
+                        (char *) restorePrefix, sizeof(restorePrefix), M_PREFIX, 1);
+}
+
+/* v14 ARSEEK boundary: stored insert_idx = UINT64_MAX - 1. arseekCommand sets
+ * insert_idx = arg - 1, so to restore the stored value we send arg = UINT64_MAX
+ * (18446744073709551615). Match-as-suffix to keep the test focused on the
+ * ARSEEK tail and avoid coupling to the ARMSET portion. */
+static void test_r2r_array_v14_insert_idx_boundary(void **state) {
+    UNUSED(state);
+    char expSuffix[] = "*3\r\n$6\r\nARSEEK\r\n$3\r\narr\r\n$20\r\n18446744073709551615\r\n";
+    RdbxToRespConf r2rConf = { .dstRedisVersion = "8.8" };
+    testRdbToRespCommon("array_v14_insert_idx_boundary.rdb", &r2rConf,
+                        expSuffix, sizeof(expSuffix) - 1, M_SUFFIX, 1);
+}
+
 /*************************** group_rdb_to_resp *******************************/
 int group_rdb_to_resp(void) {
     const struct CMUnitTest tests[] = {
@@ -355,9 +446,16 @@ int group_rdb_to_resp(void) {
             cmocka_unit_test(test_r2r_module),
             /* stream */
             cmocka_unit_test(test_r2r_stream),
+            cmocka_unit_test(test_r2r_stream_v14_xnack),
             cmocka_unit_test(test_r2r_v11_stream_target_62_and_72),
             cmocka_unit_test(test_r2r_v13_stream_target_86),
             cmocka_unit_test(test_r2r_v13_stream_target_84),
+            cmocka_unit_test(test_r2r_v14_stream_target_86),
+            cmocka_unit_test(test_r2r_v14_stream_target_88),
+            /* array (RDB_TYPE_ARRAY, v14+) */
+            cmocka_unit_test(test_r2r_array_v14_target_88_data_level),
+            cmocka_unit_test(test_r2r_array_v14_target_88_restore),
+            cmocka_unit_test(test_r2r_array_v14_insert_idx_boundary),
             /* misc */
             cmocka_unit_test(test_r2r_misc_with_stream),
             cmocka_unit_test(test_r2r_multiple_lists_and_strings),

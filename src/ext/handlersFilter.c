@@ -141,6 +141,11 @@ static RdbRes filterStreamConsumerPendingEntry(RdbParser *p, void *userData, Rdb
     return ((RdbxFilter *) userData)->cbReturnValue;
 }
 
+static RdbRes filterStreamNackZoneEntry(RdbParser *p, void *userData, RdbStreamID *id, int64_t itemsLeft) {
+    UNUSED(p, id, itemsLeft);
+    return ((RdbxFilter *) userData)->cbReturnValue;
+}
+
 static RdbRes filterStreamIdmpMeta(RdbParser *p, void *userData, RdbStreamIdmpMeta *meta) {
     UNUSED(p, meta);
     return ((RdbxFilter *) userData)->cbReturnValue;
@@ -153,6 +158,16 @@ static RdbRes filterStreamIdmpProducer(RdbParser *p, void *userData, RdbStreamId
 
 static RdbRes filterStreamIdmpEntry(RdbParser *p, void *userData, RdbStreamIdmpEntry *entry) {
     UNUSED(p, entry);
+    return ((RdbxFilter *) userData)->cbReturnValue;
+}
+
+static RdbRes filterArrayMetadata(RdbParser *p, void *userData, uint64_t count, uint64_t insertIdx) {
+    UNUSED(p, count, insertIdx);
+    return ((RdbxFilter *) userData)->cbReturnValue;
+}
+
+static RdbRes filterArrayElement(RdbParser *p, void *userData, uint64_t idx, RdbBulk value) {
+    UNUSED(p, idx, value);
     return ((RdbxFilter *) userData)->cbReturnValue;
 }
 
@@ -297,9 +312,14 @@ static void defaultFilterDataCb(RdbHandlersDataCallbacks *dataCb) {
         filterStreamCGroupPendingEntry,     /*handleStreamCGroupPendingEntry*/
         filterStreamNewConsumer,            /*handleStreamNewConsumer*/
         filterStreamConsumerPendingEntry,   /*handleStreamConsumerPendingEntry*/
+        filterStreamNackZoneEntry,          /*handleStreamNackZoneEntry*/
         filterStreamIdmpMeta,               /*handleStreamIdmpMeta*/
         filterStreamIdmpProducer,           /*handleStreamIdmpProducer*/
         filterStreamIdmpEntry,              /*handleStreamIdmpEntry*/
+
+        /*array (sparse-array, v14+):*/
+        filterArrayMetadata,                /*handleArrayMetadata*/
+        filterArrayElement,                 /*handleArrayElement*/
     };
     *dataCb = defDataCb;
 }

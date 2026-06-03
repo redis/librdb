@@ -115,8 +115,8 @@ static void printUsage(int shortUsage) {
     printf("\t-s, --show-progress <MBytes>  Show progress to STDOUT after every <MBytes> processed\n");
     printf("\t-k, --key <REGEX>             Include only keys that match REGEX\n");
     printf("\t-K  --no-key <REGEX>          Exclude all keys that match REGEX\n");
-    printf("\t-t, --type <TYPE>             Include only selected TYPE {str|list|set|zset|hash|module|func}\n");
-    printf("\t-T, --no-type <TYPE>          Exclude TYPE {str|list|set|zset|hash|module|func}\n");
+    printf("\t-t, --type <TYPE>             Include only selected TYPE {str|list|set|zset|hash|array|stream|module|func}\n");
+    printf("\t-T, --no-type <TYPE>          Exclude TYPE {str|list|set|zset|hash|array|stream|module|func}\n");
     printf("\t-d, --dbnum <DBNUM>           Include only selected db number\n");
     printf("\t-D, --no-dbnum <DBNUM>        Exclude DB number\n");
     printf("\t-e, --expired                 Include only expired keys\n");
@@ -449,9 +449,10 @@ int matchRdbDataType(const char *dataTypeStr) {
     if (!strcmp(dataTypeStr, "module")) return RDB_DATA_TYPE_MODULE;
     if (!strcmp(dataTypeStr, "stream")) return RDB_DATA_TYPE_STREAM;
     if (!strcmp(dataTypeStr, "func")) return RDB_DATA_TYPE_FUNCTION;
+    if (!strcmp(dataTypeStr, "array")) return RDB_DATA_TYPE_ARRAY;
 
     loggerWrap(RDB_LOG_ERR,
-        "Invalid TYPE argument (%s). Valid values: str, list, set, zset, hash, module, stream, func",
+        "Invalid TYPE argument (%s). Valid values: str, list, set, zset, hash, array, module, stream, func",
         dataTypeStr);
     exit(1);
 }

@@ -36,7 +36,9 @@
 #define RDB_TYPE_HASH_METADATA      24        /* Hash with HFEs. Attach min TTL at start */
 #define RDB_TYPE_HASH_LISTPACK_EX   25        /* Hash LP with HFEs. Attach min TTL at start */
 #define RDB_TYPE_STREAM_LISTPACKS_4 26        /* Stream with IDMP support */
-#define RDB_TYPE_MAX                27
+#define RDB_TYPE_STREAM_LISTPACKS_5 27        /* Stream with XNACK / NACK zone (v14) */
+#define RDB_TYPE_ARRAY              28        /* Sparse array (v14) */
+#define RDB_TYPE_MAX                29
 
 
 /* Special RDB opcodes (saved/loaded with rdbSaveType/rdbLoadType). */
@@ -112,4 +114,11 @@
 #define RDB_MODULE_OPCODE_STRING 5  /* String. */
 
 #define UNINIT_STREAM_ENTRIES_READ (-2)
+
+/* RDB type tags for array elements */
+#define AR_RDB_TAG_SDS      0
+#define AR_RDB_TAG_INT      1
+#define AR_RDB_TAG_FLOAT    2
+#define AR_RDB_TAG_SMALLSTR 3
+
 #endif /*DEFINES_H*/

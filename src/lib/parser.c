@@ -90,6 +90,8 @@ struct ParsingElementInfo peInfo[PE_MAX] = {
         [PE_MODULE_AUX]       = {elementModule, "elementModule(aux)", "Parsing silently Module Auxiliary data"},
         /* stream */
         [PE_STREAM_LP]        = {elementStreamLP, "elementStreamLP", "Parsing stream Listpack"},
+        /* array (sparse-array, v14+) */
+        [PE_ARRAY]            = {elementArray, "elementArray", "Parsing sparse array"},
 
         /*** parsing raw data (RDB_LEVEL_RAW) ***/
 
@@ -125,6 +127,8 @@ struct ParsingElementInfo peInfo[PE_MAX] = {
         [PE_RAW_STREAM_LP]    = {elementRawStreamLP, "elementRawStreamLP", "Parsing raw stream Listpack"},
         /* key metadata (RDB v13) */
         [PE_RAW_KEY_META]     = {elementRawKeyMeta, "elementRawKeyMeta", "Parsing raw key metadata"},
+        /* sparse array (RDB v14) */
+        [PE_RAW_ARRAY]        = {elementRawArray, "elementRawArray", "Parsing raw sparse array"},
 
         /* Redis Enterprise only */
         [__PE_SLOT_NUM]         = {__elementSlotNum, "elementSlotNum", "Parse cluster slot number (Redis Ent.)"},
@@ -615,9 +619,13 @@ _LIBRDB_API int RDB_handleByLevel(RdbParser *p, RdbDataType type, RdbHandlersLev
             p->handleTypeObjByLevel[RDB_TYPE_STREAM_LISTPACKS_2] = lvl;
             p->handleTypeObjByLevel[RDB_TYPE_STREAM_LISTPACKS_3] = lvl;
             p->handleTypeObjByLevel[RDB_TYPE_STREAM_LISTPACKS_4] = lvl;
+            p->handleTypeObjByLevel[RDB_TYPE_STREAM_LISTPACKS_5] = lvl;
             break;
         case RDB_DATA_TYPE_FUNCTION:
             p->handleTypeObjByLevel[RDB_OPCODE_FUNCTION2] = lvl;
+            break;
+        case RDB_DATA_TYPE_ARRAY:
+            p->handleTypeObjByLevel[RDB_TYPE_ARRAY] = lvl;
             break;
         default:
             return 1;
@@ -677,7 +685,11 @@ static inline RdbDataType getDataType(int opcode) {
         case RDB_TYPE_STREAM_LISTPACKS_2:
         case RDB_TYPE_STREAM_LISTPACKS_3:
         case RDB_TYPE_STREAM_LISTPACKS_4:
+        case RDB_TYPE_STREAM_LISTPACKS_5:
             return RDB_DATA_TYPE_STREAM;
+
+        case RDB_TYPE_ARRAY:
+            return RDB_DATA_TYPE_ARRAY;
         default:
             return RDB_DATA_TYPE_MAX;
     }
@@ -1601,7 +1613,10 @@ RdbStatus elementNextRdbType(RdbParser *p) {
         case RDB_TYPE_STREAM_LISTPACKS:
         case RDB_TYPE_STREAM_LISTPACKS_2:
         case RDB_TYPE_STREAM_LISTPACKS_3:
-        case RDB_TYPE_STREAM_LISTPACKS_4:   return nextParsingElementKeyValue(p, PE_RAW_STREAM_LP, PE_STREAM_LP);
+        case RDB_TYPE_STREAM_LISTPACKS_4:
+        case RDB_TYPE_STREAM_LISTPACKS_5:   return nextParsingElementKeyValue(p, PE_RAW_STREAM_LP, PE_STREAM_LP); /*(v14+)*/
+        /* array */    
+        case RDB_TYPE_ARRAY:                return nextParsingElementKeyValue(p, PE_RAW_ARRAY, PE_ARRAY); /*(v14+)*/
 
         case RDB_OPCODE_MODULE_AUX:         if (p->handleTypeObjByLevel[RDB_OPCODE_MODULE_AUX] == RDB_LEVEL_RAW)
                                                 return nextParsingElement(p, PE_RAW_MODULE_AUX);
@@ -2371,6 +2386,9 @@ RdbStatus elementStreamLP(RdbParser *p) {
         ST_LOAD_NUM_CONSUMERS,        /*   Load the number of consumers                                           */
         ST_LOAD_NEXT_CONSUMER,        /*   While more consumers to load                                           */
         ST_LOAD_NEXT_CONSUMER_PEL,    /*       Load the PEL about entries owned by next consumer                  */
+        /* NACK zone states for RDB_TYPE_STREAM_LISTPACKS_5 (v14+) */
+        ST_LOAD_NACK_ZONE_COUNT,      /*   Load NACK zone entry count (per CG)                                    */
+        ST_LOAD_NACK_ZONE_ENTRY,      /*     Load each NACK zone stream ID                                        */
         /* IDMP states for RDB_TYPE_STREAM_LISTPACKS_4 */
         ST_LOAD_IDMP_CONFIG,          /* Load IDMP config (duration, max_entries, num_producers)                  */
         ST_LOAD_IDMP_NEXT_PRODUCER,   /*   Load producer PID and entries                                          */
@@ -2544,7 +2562,11 @@ RdbStatus elementStreamLP(RdbParser *p) {
 
             case ST_LOAD_NEXT_CONSUMER:
                 if (p->elmCtx.stream.consumersLeft == 0) {
-                    updateElementState(p, ST_LOAD_NEXT_CONS_GROUP, 0);
+                    /* v14+: per-CG NACK zone follows the consumers section. */
+                    if (p->currOpcode >= RDB_TYPE_STREAM_LISTPACKS_5)
+                        updateElementState(p, ST_LOAD_NACK_ZONE_COUNT, 0);
+                    else
+                        updateElementState(p, ST_LOAD_NEXT_CONS_GROUP, 0);
                     break;
                 }
                 BulkInfo *bConsName;
@@ -2589,8 +2611,41 @@ RdbStatus elementStreamLP(RdbParser *p) {
                 }
                 if (p->elmCtx.stream.consumersLeft)
                     updateElementState(p, ST_LOAD_NEXT_CONSUMER, 0);
+                else if (p->currOpcode >= RDB_TYPE_STREAM_LISTPACKS_5)
+                    updateElementState(p, ST_LOAD_NACK_ZONE_COUNT, 0);
                 else
                     updateElementState(p, ST_LOAD_NEXT_CONS_GROUP, 0);
+                break;
+
+            /* NACK zone states for RDB_TYPE_STREAM_LISTPACKS_5 (v14+).
+             * The NACK zone is per-CG: count + count * 16-byte stream
+             * IDs. We surface each ID via handleStreamNackZoneEntry; handlers
+             * that need delivery_count / delivery_time maintain their own map
+             * keyed on the IDs already emitted via handleStreamCGroupPendingEntry. */
+            case ST_LOAD_NACK_ZONE_COUNT:
+                IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &ctx->stream.nackedLeft, NULL, NULL));
+                /*** ENTER SAFE STATE ***/
+                updateElementState(p, ST_LOAD_NACK_ZONE_ENTRY, 0); /* fall-thru */
+
+            case ST_LOAD_NACK_ZONE_ENTRY:
+                while (ctx->stream.nackedLeft) {
+                    BulkInfo *binfoStreamID;
+                    RdbStreamID id;
+                    IF_NOT_OK_RETURN(rdbLoad(p, sizeof(RdbStreamID), RQ_ALLOC, NULL, &binfoStreamID));
+
+                    /*** ENTER SAFE STATE ***/
+
+                    streamDecodeID(binfoStreamID->ref, &id);
+
+                    CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_DATA,
+                                     rdbData.handleStreamNackZoneEntry,
+                                     &id, (int64_t)(ctx->stream.nackedLeft - 1));
+                    
+                    ctx->stream.nackedLeft--;
+
+                    updateElementState(p, ST_LOAD_NACK_ZONE_ENTRY, 0);
+                }
+                updateElementState(p, ST_LOAD_NEXT_CONS_GROUP, 0);
                 break;
 
             /* IDMP (Idempotent Message Producer) states for RDB_TYPE_STREAM_LISTPACKS_4 */
@@ -2698,6 +2753,111 @@ RdbStatus elementStreamLP(RdbParser *p) {
     return RDB_STATUS_OK;
 }
 
+RdbStatus elementArray(RdbParser *p) {
+    ElementCtx *ctx = &p->elmCtx;
+    enum ARRAY_STATES {
+        ST_ARRAY_HEADER = 0, /* Read count, insert_idx_flag, optional insert_idx */
+        ST_ARRAY_NEXT_ELEMENT /* Read each (idx, type_tag, payload) tuple */
+    };
+
+    switch (ctx->state) {
+        case ST_ARRAY_HEADER: {
+            uint64_t count, insertFlag, insertIdx = RDB_ARRAY_INSERT_IDX_NONE;
+
+            IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &count, NULL, NULL));
+            if (count == 0) {
+                RDB_reportError(p, RDB_ERR_ARRAY_INVALID_STATE,
+                                "elementArray(): array count == 0 is invalid");
+                return RDB_STATUS_ERROR;
+            }
+            IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &insertFlag, NULL, NULL));
+            if (unlikely(insertFlag > 1)) {
+                RDB_reportError(p, RDB_ERR_ARRAY_INVALID_STATE,
+                                "elementArray(): invalid insert_idx_flag %llu",
+                                (unsigned long long) insertFlag);
+                return RDB_STATUS_ERROR;
+            }
+            if (insertFlag == 1) {
+                IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &insertIdx, NULL, NULL));
+            }
+
+            /*** ENTER SAFE STATE ***/
+
+            ctx->array.count = count;
+            ctx->array.elementsLeft = count;
+            ctx->key.numItemsHint = count;
+
+            CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_DATA,
+                             rdbData.handleArrayMetadata, count, insertIdx);
+
+            updateElementState(p, ST_ARRAY_NEXT_ELEMENT, 0); /* fall-thru */
+        }
+
+        case ST_ARRAY_NEXT_ELEMENT:
+            while (ctx->array.elementsLeft) {
+                uint64_t idx, typeTag;
+                int idxEncoded = 0;
+                BulkInfo *binfoValue;
+
+                IF_NOT_OK_RETURN(rdbLoadLen(p, &idxEncoded, &idx, NULL, NULL));
+                if (idxEncoded || idx == ((uint64_t)~0ULL)) {
+                    RDB_reportError(p, RDB_ERR_ARRAY_INVALID_STATE,
+                                    "elementArray(): invalid array index %llu (encoded=%d)",
+                                    (unsigned long long) idx, idxEncoded);
+                    return RDB_STATUS_ERROR;
+                }
+                IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &typeTag, NULL, NULL));
+
+                switch (typeTag) {
+                    case AR_RDB_TAG_INT: {
+                        int64_t ival;
+                        char buf[LONG_STR_SIZE];
+                        int len;
+                        IF_NOT_OK_RETURN(rdbLoadSignedInteger(p, &ival));
+                        len = ll2string(buf, sizeof(buf), (long long) ival);
+                        IF_NOT_OK_RETURN(allocFromCache(p, len, RQ_ALLOC_APP_BULK, NULL, &binfoValue));
+                        memcpy(binfoValue->ref, buf, len);
+                        break;
+                    }
+                    case AR_RDB_TAG_FLOAT: {
+                        double dval;
+                        char buf[MAX_D2STRING_CHARS];
+                        int len;
+                        IF_NOT_OK_RETURN(rdbLoadBinaryDoubleValue(p, &dval));
+                        len = d2string(buf, sizeof(buf), dval);
+                        IF_NOT_OK_RETURN(allocFromCache(p, len, RQ_ALLOC_APP_BULK, NULL, &binfoValue));
+                        memcpy(binfoValue->ref, buf, len);
+                        break;
+                    }
+                    case AR_RDB_TAG_SDS:
+                    case AR_RDB_TAG_SMALLSTR:
+                        IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC_APP_BULK, NULL, &binfoValue));
+                        break;
+                    default:
+                        RDB_reportError(p, RDB_ERR_ARRAY_INVALID_STATE,
+                                        "elementArray(): unknown array element type_tag %llu",
+                                        (unsigned long long) typeTag);
+                        return RDB_STATUS_ERROR;
+                }
+
+                /*** ENTER SAFE STATE ***/
+
+                registerAppBulkForNextCb(p, binfoValue);
+                CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_DATA,
+                                 rdbData.handleArrayElement, idx, binfoValue->ref);
+
+                ctx->array.elementsLeft--;
+                updateElementState(p, ST_ARRAY_NEXT_ELEMENT, 0);
+            }
+            return nextParsingElement(p, PE_END_KEY);
+
+        default:
+            RDB_reportError(p, RDB_ERR_ARRAY_INVALID_STATE,
+                            "elementArray(): invalid parsing element state: %d", ctx->state);
+            return RDB_STATUS_ERROR;
+    }
+}
+
 /*** Loaders from RDB ***/
 
 /* This function loads a time from the RDB file. The reason for conditional
@@ -2733,6 +2893,18 @@ RdbStatus rdbLoadBinaryDoubleValue(RdbParser *p, double *val) {
     BulkInfo *binfo;
     IF_NOT_OK_RETURN(rdbLoad(p, sizeof(*val), RQ_ALLOC, NULL, &binfo));
     *val = *((double*) binfo->ref);
+    memrev64ifbe(val);
+    return RDB_STATUS_OK;
+}
+
+/* Read a signed 64-bit integer stored as 8 little-endian bytes. Mirrors
+ * rdbLoadSignedInteger() in redis/src/rdb.c — same on-disk encoding as
+ * rdbLoadBinaryDoubleValue (raw 8 bytes with endian swap on BE). Used by
+ * RDB_TYPE_ARRAY (v14+) for AR_RDB_TAG_INT elements. */
+RdbStatus rdbLoadSignedInteger(RdbParser *p, int64_t *val) {
+    BulkInfo *binfo;
+    IF_NOT_OK_RETURN(rdbLoad(p, sizeof(*val), RQ_ALLOC, NULL, &binfo));
+    *val = *((int64_t*) binfo->ref);
     memrev64ifbe(val);
     return RDB_STATUS_OK;
 }

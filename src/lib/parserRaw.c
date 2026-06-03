@@ -841,6 +841,9 @@ RdbStatus elementRawStreamLP(RdbParser *p) {
         ST_LOAD_NUM_CONSUMERS,             /*   Load number of consumers of current CG                                 */
         ST_LOAD_NEXT_CONSUMER,             /*     Load next consumer                                                   */
         ST_LOAD_NEXT_CONSUMER_STR_RETURN,  /*     Complete loading consumer name. Load consumer PEL.                   */
+        /* NACK zone states for RDB_TYPE_STREAM_LISTPACKS_5 (v14+) */
+        ST_LOAD_NACK_ZONE_COUNT,           /*   Load NACK zone entry count (per CG)                                    */
+        ST_LOAD_NACK_ZONE_BODY,            /*     Load NACK zone body (count * 16 bytes)                               */
         /* IDMP states for RDB_TYPE_STREAM_LISTPACKS_4 */
         ST_LOAD_IDMP_CONFIG,               /* Load IDMP config (duration, max_entries, num_producers)                  */
         ST_LOAD_IDMP_NEXT_PRODUCER,        /*   Load next producer PID                                          */
@@ -937,8 +940,9 @@ RdbStatus elementRawStreamLP(RdbParser *p) {
         case ST_LOAD_NEXT_CG_IS_MORE:
             /*** ENTER SAFE STATE (no rdb read)***/
             if (unlikely(!(streamCtx->cgroupsLeft))) {
-                /* if no more consumer-groups to load, check for IDMP data */
-                if (p->currOpcode == RDB_TYPE_STREAM_LISTPACKS_4)
+                /* if no more consumer-groups to load, check for IDMP data
+                 * (present in RDB_TYPE_STREAM_LISTPACKS_4 and above) */
+                if (p->currOpcode >= RDB_TYPE_STREAM_LISTPACKS_4)
                     return updateElementState(p, ST_LOAD_IDMP_CONFIG, 1);
 
                 /* Legacy stream format */
@@ -1019,7 +1023,10 @@ RdbStatus elementRawStreamLP(RdbParser *p) {
                 streamCtx->consumersLeft--;
                 /* call raw string as sub-element to read consumer name */
                 return subElementCall(p, PE_RAW_STRING, ST_LOAD_NEXT_CONSUMER_STR_RETURN);
-            }  else {
+            } else if (p->currOpcode >= RDB_TYPE_STREAM_LISTPACKS_5) {
+                /* v14+: per-CG NACK zone follows the consumers section. */
+                return updateElementState(p, ST_LOAD_NACK_ZONE_COUNT, 0);
+            } else {
                 return updateElementState(p, ST_LOAD_NEXT_CG_IS_MORE, 0);
             }
 
@@ -1057,6 +1064,37 @@ RdbStatus elementRawStreamLP(RdbParser *p) {
 
             return updateElementState(p, ST_LOAD_NEXT_CONSUMER, 0);
         }
+
+        case ST_LOAD_NACK_ZONE_COUNT: { /* NACK zone for RDB_TYPE_STREAM_LISTPACKS_5 (v14+) */
+            int written = 0;
+            aggMakeRoom(p, LONG_STR_SIZE);
+            IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &streamCtx->nackedLeft,
+                                        (unsigned char *) rawCtx->at, &written));
+            /*** ENTER SAFE STATE ***/
+            IF_NOT_OK_RETURN(aggUpdateWritten(p, written));
+
+            if (streamCtx->nackedLeft == 0)
+                return updateElementState(p, ST_LOAD_NEXT_CG_IS_MORE, 0);
+
+            /* Advance state before falling through, so that a WAIT_MORE_DATA
+             * during the body doesn't bounce us back to the COUNT state on
+             * retry (the length bytes are already consumed). */
+            updateElementState(p, ST_LOAD_NACK_ZONE_BODY, 0);
+        } /* fall-thru */
+
+        case ST_LOAD_NACK_ZONE_BODY:
+            while (streamCtx->nackedLeft) {
+                BulkInfo *binfo;
+                IF_NOT_OK_RETURN(aggMakeRoom(p, sizeof(RdbStreamID)));
+                IF_NOT_OK_RETURN(rdbLoad(p, sizeof(RdbStreamID), RQ_ALLOC_REF, rawCtx->at, &binfo));
+
+                /*** ENTER SAFE STATE ***/
+
+                IF_NOT_OK_RETURN(aggUpdateWritten(p, sizeof(RdbStreamID)));
+                streamCtx->nackedLeft--;
+                updateElementState(p, ST_LOAD_NACK_ZONE_BODY, 0);
+            }
+            return updateElementState(p, ST_LOAD_NEXT_CG_IS_MORE, 0);
 
         case ST_LOAD_IDMP_CONFIG: { /* IDMP states for RDB_TYPE_STREAM_LISTPACKS_4 */
             int written = 0;
@@ -1301,6 +1339,131 @@ RdbStatus elementRawKeyMeta(RdbParser *p) {
                     "elementRawKeyMeta(): Invalid parsing element state: %d.", p->elmCtx.state);
                 return RDB_STATUS_ERROR;
         }
+    }
+}
+
+/* Walk RDB_TYPE_ARRAY at raw level, aggregating every byte for RESTORE.
+ *
+ * The raw path doesn't interpret element values, but it still must read each
+ * (idx, type_tag, payload) tuple because there is no aggregate length prefix
+ * — only the per-element walk advances the byte counter to the end of the
+ * key's value. */
+RdbStatus elementRawArray(RdbParser *p) {
+    enum RAW_ARRAY_STATES {
+        ST_RAW_ARRAY_HEADER = 0,         /* read count + insert_idx_flag (+ optional insert_idx) */
+        ST_RAW_ARRAY_NEXT_ELEMENT,       /* read idx + type_tag + (INT/FLOAT payload) or dispatch to sub-element */
+        ST_RAW_ARRAY_STR_RETURN,         /* return from PE_RAW_STRING sub-element (SDS / SMALLSTR) */
+    };
+
+    ElementRawArrayCtx *arCtx = &p->elmCtx.rawArray;
+    RawContext *rawCtx = &p->rawCtx;
+
+    switch (p->elmCtx.state) {
+
+        case ST_RAW_ARRAY_HEADER: {
+            uint64_t count, insertFlag;
+            int headerLen = 0;
+
+            /* worst case: 3 * 9-byte length prefixes */
+            IF_NOT_OK_RETURN(aggMakeRoom(p, 32));
+
+            IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &count,
+                                        (unsigned char *) rawCtx->at, &headerLen));
+            IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &insertFlag,
+                                        (unsigned char *) rawCtx->at + headerLen, &headerLen));
+
+            if (count == 0) {
+                RDB_reportError(p, RDB_ERR_ARRAY_INVALID_STATE,
+                                "elementRawArray(): array count == 0 is invalid");
+                return RDB_STATUS_ERROR;
+            }
+            if (insertFlag > 1) {
+                RDB_reportError(p, RDB_ERR_ARRAY_INVALID_STATE,
+                                "elementRawArray(): invalid insert_idx_flag %llu",
+                                (unsigned long long) insertFlag);
+                return RDB_STATUS_ERROR;
+            }
+
+            if (insertFlag == 1) {
+                uint64_t insertIdx;
+                IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &insertIdx,
+                                            (unsigned char *) rawCtx->at + headerLen, &headerLen));
+            }
+
+            /*** ENTER SAFE STATE ***/
+
+            IF_NOT_OK_RETURN(cbHandleBegin(p, DATA_SIZE_UNKNOWN_AHEAD));
+            IF_NOT_OK_RETURN(aggUpdateWritten(p, headerLen));
+
+            arCtx->elementsLeft = count;
+            updateElementState(p, ST_RAW_ARRAY_NEXT_ELEMENT, 0);
+        } /* fall-thru */
+
+        case ST_RAW_ARRAY_NEXT_ELEMENT: {
+            uint64_t idx, typeTag;
+            int idxEncoded = 0;
+            int written = 0;
+
+            if (arCtx->elementsLeft == 0)
+                return nextParsingElement(p, PE_RAW_END_KEY); /* done */
+
+            /* worst case: 2 * 9-byte length prefixes + 8-byte INT/FLOAT payload = 26 */
+            IF_NOT_OK_RETURN(aggMakeRoom(p, 32));
+            IF_NOT_OK_RETURN(rdbLoadLen(p, &idxEncoded, &idx,
+                                        (unsigned char *) rawCtx->at, &written));
+            if (idxEncoded || idx == ((uint64_t)~0ULL)) {
+                RDB_reportError(p, RDB_ERR_ARRAY_INVALID_STATE,
+                                "elementRawArray(): invalid array index %llu (encoded=%d)",
+                                (unsigned long long) idx, idxEncoded);
+                return RDB_STATUS_ERROR;
+            }
+            IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &typeTag,
+                                        (unsigned char *) rawCtx->at + written, &written));
+
+            switch (typeTag) {
+                case AR_RDB_TAG_INT:
+                case AR_RDB_TAG_FLOAT: {
+                    /* Both carry 8 raw bytes (int64 LE / IEEE 754 double).
+                     * Read inline and defer aggUpdateWritten until both the
+                     * idx+type_tag and the payload have been consumed — that
+                     * way a WAIT_MORE_DATA during the 8-byte read replays the
+                     * whole case (length-prefix reads come from the bulk-pool
+                     * with the same data) and aggUpdateWritten fires exactly
+                     * once on the successful path. */
+                    BulkInfo *binfo;
+                    IF_NOT_OK_RETURN(rdbLoad(p, sizeof(int64_t), RQ_ALLOC_REF,
+                                             rawCtx->at + written, &binfo));
+                    /*** ENTER SAFE STATE ***/
+                    IF_NOT_OK_RETURN(aggUpdateWritten(p, written + sizeof(int64_t)));
+                    arCtx->elementsLeft--;
+                    return updateElementState(p, ST_RAW_ARRAY_NEXT_ELEMENT, 0);
+                }
+                case AR_RDB_TAG_SDS:
+                case AR_RDB_TAG_SMALLSTR:
+                    /*** ENTER SAFE STATE ***/
+                    IF_NOT_OK_RETURN(aggUpdateWritten(p, written));
+                    return subElementCall(p, PE_RAW_STRING, ST_RAW_ARRAY_STR_RETURN);
+                default:
+                    RDB_reportError(p, RDB_ERR_ARRAY_INVALID_STATE,
+                                    "elementRawArray(): unknown array element type_tag %llu",
+                                    (unsigned long long) typeTag);
+                    return RDB_STATUS_ERROR;
+            }
+        }
+
+        case ST_RAW_ARRAY_STR_RETURN: {
+            /*** ENTER SAFE STATE (no rdb read) ***/
+            size_t len;
+            unsigned char *unused;
+            subElementCallEnd(p, (char **) &unused, &len);
+            arCtx->elementsLeft--;
+            return updateElementState(p, ST_RAW_ARRAY_NEXT_ELEMENT, 1);
+        }
+
+        default:
+            RDB_reportError(p, RDB_ERR_ARRAY_INVALID_STATE,
+                            "elementRawArray(): invalid parsing element state: %d", p->elmCtx.state);
+            return RDB_STATUS_ERROR;
     }
 }
 

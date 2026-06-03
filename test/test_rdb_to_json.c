@@ -503,6 +503,61 @@ static void test_r2j_stream_v13_idmp(void **state) {
     testRdbToJsonCommon(DUMP_FOLDER("stream_v13_idmp.rdb"), DUMP_FOLDER("stream_v13.json"), &r2jConf);
 }
 
+/* Test RDB v14 stream with NACK zone (RDB_TYPE_STREAM_LISTPACKS_5). The fixture
+ * has 4 entries; consumer group "mygroup" has 2 owned PEL entries (head + tail)
+ * and 2 NACK-zone (unowned) entries in the middle. The JSON output must include
+ * a "nacked" array with the NACKed IDs in on-disk order. */
+static void test_r2j_stream_v14_xnack(void **state) {
+    UNUSED(state);
+    RdbxToJsonConf r2jConf = DEF_CONF(RDB_LEVEL_DATA);
+    r2jConf.includeAuxField = 0;
+    r2jConf.includeStreamMeta = 1;
+    r2jConf.includeStreamIdmp = 0;
+    testRdbToJsonCommon(DUMP_FOLDER("stream_v14_xnack.rdb"), DUMP_FOLDER("stream_v14_xnack.json"), &r2jConf);
+}
+
+/* RDB v14 array (RDB_TYPE_ARRAY) JSON emission. Each fixture exercises
+ * a different code path of the schema in docs/rdb-v14-support-plan.md §6 T-4:
+ *   - basic           : single-type elements, no insert_idx
+ *   - mixed_types     : all four AR_RDB_TAG_* payloads (INT/FLOAT/SDS/SMALLSTR)
+ *   - with_insert_idx : insert_idx present and mid-range (49)
+ *   - insert_idx_boundary : insert_idx == UINT64_MAX - 1 (stringified, no precision loss)
+ *   - insert_idx_none : insert_idx_flag == 0 → key omitted from JSON */
+static void test_r2j_array_v14_basic(void **state) {
+    UNUSED(state);
+    RdbxToJsonConf r2jConf = DEF_CONF(RDB_LEVEL_DATA);
+    r2jConf.includeAuxField = 0;
+    testRdbToJsonCommon(DUMP_FOLDER("array_v14_basic.rdb"), DUMP_FOLDER("array_v14_basic.json"), &r2jConf);
+}
+
+static void test_r2j_array_v14_mixed_types(void **state) {
+    UNUSED(state);
+    RdbxToJsonConf r2jConf = DEF_CONF(RDB_LEVEL_DATA);
+    r2jConf.includeAuxField = 0;
+    testRdbToJsonCommon(DUMP_FOLDER("array_v14_mixed_types.rdb"), DUMP_FOLDER("array_v14_mixed_types.json"), &r2jConf);
+}
+
+static void test_r2j_array_v14_with_insert_idx(void **state) {
+    UNUSED(state);
+    RdbxToJsonConf r2jConf = DEF_CONF(RDB_LEVEL_DATA);
+    r2jConf.includeAuxField = 0;
+    testRdbToJsonCommon(DUMP_FOLDER("array_v14_with_insert_idx.rdb"), DUMP_FOLDER("array_v14_with_insert_idx.json"), &r2jConf);
+}
+
+static void test_r2j_array_v14_insert_idx_boundary(void **state) {
+    UNUSED(state);
+    RdbxToJsonConf r2jConf = DEF_CONF(RDB_LEVEL_DATA);
+    r2jConf.includeAuxField = 0;
+    testRdbToJsonCommon(DUMP_FOLDER("array_v14_insert_idx_boundary.rdb"), DUMP_FOLDER("array_v14_insert_idx_boundary.json"), &r2jConf);
+}
+
+static void test_r2j_array_v14_insert_idx_none(void **state) {
+    UNUSED(state);
+    RdbxToJsonConf r2jConf = DEF_CONF(RDB_LEVEL_DATA);
+    r2jConf.includeAuxField = 0;
+    testRdbToJsonCommon(DUMP_FOLDER("array_v14_insert_idx_none.rdb"), DUMP_FOLDER("array_v14_insert_idx_none.json"), &r2jConf);
+}
+
 static void test_r2j_cluster_slot_info(void **state) {
     UNUSED(state);
     RdbxToJsonConf r2jConf = DEF_CONF(RDB_LEVEL_DATA);
@@ -591,6 +646,14 @@ int group_rdb_to_json(void) {
         /* stream */
         cmocka_unit_test(test_r2j_stream_data),
         cmocka_unit_test(test_r2j_stream_v13_idmp),
+        cmocka_unit_test(test_r2j_stream_v14_xnack),
+
+        /* array (RDB_TYPE_ARRAY, v14+) */
+        cmocka_unit_test(test_r2j_array_v14_basic),
+        cmocka_unit_test(test_r2j_array_v14_mixed_types),
+        cmocka_unit_test(test_r2j_array_v14_with_insert_idx),
+        cmocka_unit_test(test_r2j_array_v14_insert_idx_boundary),
+        cmocka_unit_test(test_r2j_array_v14_insert_idx_none),
 
         /* misc */
         cmocka_unit_test(test_r2j_multiple_lists_and_strings_data),

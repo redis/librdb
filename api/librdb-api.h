@@ -97,6 +97,7 @@ typedef enum RdbRes {
     RDB_ERR_MAX_RAW_LEN_EXCEEDED_FOR_KEY,
     RDB_ERR_EXCLUSIVE_RAW_HANDLERS,
     RDB_ERR_MODULE_INVALID_WHEN_OPCODE,
+    RDB_ERR_ARRAY_INVALID_STATE,
 
     /*** api-ext error codes (see file: rp-ext-api.h) ***/
     _RDB_ERR_EXTENSION_FIRST = 0x1000,
@@ -203,6 +204,11 @@ typedef struct RdbStreamIdmpEntry {
     RdbBulk iid;             /* Idempotent ID (binary, typically 16 bytes for IDMPAUTO) */
     RdbStreamID streamId;    /* Associated stream entry ID */
 } RdbStreamIdmpEntry;
+
+/* Sentinel for RDB_TYPE_ARRAY metadata's insert_idx when the array was saved
+ * with insert_idx_flag == 0 (no insert cursor). Mirrors AR_INSERT_IDX_NONE in
+ * redis/src/sparsearray.h. */
+#define RDB_ARRAY_INSERT_IDX_NONE UINT64_MAX
 
 /* misc function pointer typedefs */
 typedef RdbStatus (*RdbReaderFunc) (void *readerData, void *buf, size_t len);
@@ -343,6 +349,7 @@ typedef struct RdbHandlersDataCallbacks {
      *     handleStreamCGroupPendingEntry(entry)              [per group PEL entry]
      *     handleStreamNewConsumer(consName, meta)            [per consumer]
      *       handleStreamConsumerPendingEntry(id)             [per consumer PEL entry]
+     *     handleStreamNackZoneEntry(id, itemsLeft)           [per NACKed entry, v14+]
      *   handleStreamIdmpMeta(meta)                           [once, if IDMP enabled]
      *     handleStreamIdmpProducer(producer)                 [per producer]
      *       handleStreamIdmpEntry(entry)                     [per IID mapping]
@@ -359,12 +366,27 @@ typedef struct RdbHandlersDataCallbacks {
     RdbRes (*handleStreamNewConsumer)(RdbParser *p, void *userData, RdbBulk consName, RdbStreamConsumerMeta *meta);
     /* Callback to handle a pending entry within a consumer */
     RdbRes (*handleStreamConsumerPendingEntry)(RdbParser *p, void *userData, RdbStreamID *streamId);
+    /* Callback to handle a NACK-zone entry (RDB_TYPE_STREAM_LISTPACKS_5, v14+) */
+    RdbRes (*handleStreamNackZoneEntry)(RdbParser *p, void *userData, RdbStreamID *id, int64_t itemsLeft);
     /* Callback to handle IDMP (Idempotent Message Producer) metadata for a stream */
     RdbRes (*handleStreamIdmpMeta)(RdbParser *p, void *userData, RdbStreamIdmpMeta *meta);
     /* Callback to handle start of a new IDMP producer */
     RdbRes (*handleStreamIdmpProducer)(RdbParser *p, void *userData, RdbStreamIdmpProducer *producer);
     /* Callback to handle an IDMP entry (iid -> stream_id mapping) */
     RdbRes (*handleStreamIdmpEntry)(RdbParser *p, void *userData, RdbStreamIdmpEntry *entry);
+
+    /****************************************************************
+     * Array cb (RDB_TYPE_ARRAY, v14+) - invoked in this order per array key:
+     *   handleArrayMetadata(count, insertIdx)              [once]
+     *   handleArrayElement(idx, value)                     [repeated count times, ascending idx]
+     *
+     * insertIdx == RDB_ARRAY_INSERT_IDX_NONE means the array was saved with no
+     * insert cursor. Otherwise it carries the persisted insert_idx value.
+     ****************************************************************/
+    /* Callback to handle metadata for an array */
+    RdbRes (*handleArrayMetadata)(RdbParser *p, void *userData, uint64_t count, uint64_t insertIdx);
+    /* Callback to handle a single array element */
+    RdbRes (*handleArrayElement)(RdbParser *p, void *userData, uint64_t idx, RdbBulk value);
 
 } RdbHandlersDataCallbacks;
 
@@ -664,6 +686,7 @@ typedef enum RdbDataType {
     RDB_DATA_TYPE_MODULE,
     RDB_DATA_TYPE_STREAM,
     RDB_DATA_TYPE_FUNCTION,
+    RDB_DATA_TYPE_ARRAY,   /* Sparse array (RDB v14+, RDB_TYPE_ARRAY) */
     RDB_DATA_TYPE_MAX
 } RdbDataType;
 

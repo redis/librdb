@@ -59,7 +59,7 @@ static void test_not_support_future_rdb_version(void **state) {
 
     RdbStatus  status;
     RdbParser *parser = RDB_createParserRdb(NULL);
-    RDB_setLogLevel(parser, RDB_LOG_ERR);
+    RDB_setLogger(parser, dummyLogger);
     assert_non_null(RDBX_createReaderFile(parser, rdbfile));
     RdbxToJsonConf r2jConf = { .level = RDB_LEVEL_DATA };
 
@@ -114,7 +114,7 @@ static void test_checksum(void **state) {
 
     /* fail on checksum error */
     parser = RDB_createParserRdb(NULL);
-    RDB_setLogLevel(parser, RDB_LOG_ERR);
+    RDB_setLogger(parser, dummyLogger);
     assert_non_null(RDBX_createReaderFile(parser, rdbfile));
     while ((status = RDB_parse(parser)) == RDB_STATUS_WAIT_MORE_DATA);
     assert_int_equal( status, RDB_STATUS_ERROR);
@@ -123,6 +123,7 @@ static void test_checksum(void **state) {
 
     /* ignore checksum error */
     parser = RDB_createParserRdb(NULL);
+    RDB_setLogger(parser, dummyLogger);
     assert_non_null(RDBX_createReaderFile(parser, rdbfile));
     RDB_IgnoreChecksum(parser);
     while ((status = RDB_parse(parser)) == RDB_STATUS_WAIT_MORE_DATA);
