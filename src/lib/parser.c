@@ -38,6 +38,11 @@
 
 #define DONE_FILL_BULK SIZE_MAX
 
+/* Git commit hash. Defined by Makefile */
+#ifndef LIBRDB_GIT_COMMIT
+#define LIBRDB_GIT_COMMIT "unknown"
+#endif
+
 struct ParsingElementInfo peInfo[PE_MAX] = {
         [PE_RDB_HEADER]       = {elementRdbHeader, "elementRdbHeader", "Start parsing RDB header"},
         [PE_NEXT_RDB_TYPE]    = {elementNextRdbType, "elementNextRdbType", "Parsing next RDB type"},
@@ -893,7 +898,7 @@ static void attachDebugHandlers(RdbParser *p) {
 static RdbStatus finalizeConfig(RdbParser *p, int isParseFromBuff) {
     assert(p->state == RDB_STATE_CONFIGURING);
 
-    RDB_log(p, RDB_LOG_INF, "Finalizing parser configuration");
+    RDB_log(p, RDB_LOG_INF, "Finalizing parser configuration (commit: %s)", LIBRDB_GIT_COMMIT);
 
     crc64_init_thread_safe();
 
