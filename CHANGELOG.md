@@ -1,4 +1,4 @@
-## [Unreleased]
+## [2.3.0] - 2026-06-03
 
 ### New Features
 - **RDB v14 Support — Stream XNACK (`RDB_TYPE_STREAM_LISTPACKS_5`)**:
