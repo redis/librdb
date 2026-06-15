@@ -440,6 +440,32 @@ static void test_r2j_single_string_raw(void **state) {
     testRdbToJsonCommon(DUMP_FOLDER("single_key.rdb"), DUMP_FOLDER("single_key_raw.json"), &r2jConf);
 }
 
+/* Dump 'string_utf8_v12.rdb' holds keys whose names describe their payload,
+ * covering all UTF-8 lengths, their first/last code points, JSON specials,
+ * control chars and invalid byte cases. With PLAIN encoding every non-ASCII
+ * byte is escaped as \u00XX (lossless byte dump) - "Müller" -> "MÃ¼ller". */
+static void test_r2j_string_utf8_plain_enc(void **state) {
+    UNUSED(state);
+    RdbxToJsonConf r2jConf = DEF_CONF(RDB_LEVEL_DATA);
+    r2jConf.includeAuxField = 0;
+    r2jConf.encoding = RDBX_CONV_JSON_ENC_PLAIN;
+    testRdbToJsonCommon(DUMP_FOLDER("string_utf8_v12.rdb"),
+                        DUMP_FOLDER("string_utf8_v12_plain.json"), &r2jConf);
+}
+
+/* With UTF8 encoding, valid UTF-8 sequences pass through verbatim while any byte
+ * that isn't part of a well-formed sequence falls back to \u00XX escaping. The
+ * 'valid_then_bad_mid' and 'mixed_recovery' keys verify decoding resumes safely
+ * for the rest of the string after an invalid byte. */
+static void test_r2j_string_utf8_utf8_enc(void **state) {
+    UNUSED(state);
+    RdbxToJsonConf r2jConf = DEF_CONF(RDB_LEVEL_DATA);
+    r2jConf.includeAuxField = 0;
+    r2jConf.encoding = RDBX_CONV_JSON_ENC_UTF8;
+    testRdbToJsonCommon(DUMP_FOLDER("string_utf8_v12.rdb"),
+                        DUMP_FOLDER("string_utf8_v12_utf8.json"), &r2jConf);
+}
+
 static void test_r2j_multiple_dbs (void **state) {
     UNUSED(state);
     RdbxToJsonConf r2jConf = DEF_CONF(RDB_LEVEL_DATA);
@@ -572,6 +598,8 @@ int group_rdb_to_json(void) {
         cmocka_unit_test(test_r2j_single_string_data),
         cmocka_unit_test(test_r2j_single_string_struct),
         cmocka_unit_test(test_r2j_single_string_raw),
+        cmocka_unit_test(test_r2j_string_utf8_plain_enc),
+        cmocka_unit_test(test_r2j_string_utf8_utf8_enc),
 
         /* list */
         cmocka_unit_test(test_r2j_single_list_data),

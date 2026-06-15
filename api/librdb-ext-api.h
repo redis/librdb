@@ -85,6 +85,7 @@ _LIBRDB_API RdbxReaderFileDesc *RDBX_createReaderFileDesc(RdbParser *p, int fd, 
 
 typedef enum RdbxToJsonEnc {
     RDBX_CONV_JSON_ENC_PLAIN,
+    RDBX_CONV_JSON_ENC_UTF8,
     RDBX_CONV_JSON_ENC_BASE64
 } RdbxToJsonEnc;
 

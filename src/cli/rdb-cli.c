@@ -131,12 +131,13 @@ static void printUsage(int shortUsage) {
     printf("FORMAT_OPTIONS ('json'):\n");
     printf("\t-i, --include <EXTRAS>        To include: {aux-val|func|stream-meta|db-info}\n");
     printf("\t-m, --meta-prefix <PREFIX>    To distinct EXTRAS from actual data, Prefix it (Default:\"__\")\n");
+    printf("\t-e, --encoding <ENC>          Encoding: {plain|utf8} plain escapes non-ASCII as \\u00XX (Default: plain)\n");
     printf("\t-f, --flatten                 Print flatten json, without DBs Parenthesis\n");
     printf("\t-o, --output <FILE>           Specify the output file. If not specified, output to stdout\n\n");
 
     printf("FORMAT_OPTIONS ('redis'):\n");
-    printf("\t-h, --hostname <HOSTNAME>     Specify the server hostname (default: 127.0.0.1)\n");
-    printf("\t-p, --port <PORT>             Specify the server port (default: 6379)\n");
+    printf("\t-h, --hostname <HOSTNAME>     Specify the server hostname (Default: 127.0.0.1)\n");
+    printf("\t-p, --port <PORT>             Specify the server port (Default: 6379)\n");
     printf("\t-l, --pipeline-depth <VALUE>  Number of pending commands before blocking for responses\n");
     printf("\t-u, --user <USER>             Redis username for authentication\n");
     printf("\t-P, --password <PWD>          Redis password for authentication (or use LIBRDB_AUTH env var)\n");
@@ -180,10 +181,11 @@ static void printUsage(int shortUsage) {
 
 static RdbRes formatJson(RdbParser *parser, int argc, char **argv) {
     extern const char *jsonMetaPrefix;
-    const char *includeArg;
+    const char *includeArg, *encodingArg;
     const char *output = NULL;/*default:stdout*/
     int includeDbInfo=0, includeStreamMeta=0, includeFunc=0, includeAuxField=0,
         flatten=0;
+    RdbxToJsonEnc encoding = RDBX_CONV_JSON_ENC_PLAIN;
 
     /* parse specific command options */
     for (int at = 1; at < argc; ++at) {
@@ -191,6 +193,13 @@ static RdbRes formatJson(RdbParser *parser, int argc, char **argv) {
         if (getOptArg(argc, argv, &at, "-o", "--output", NULL, &output)) continue;
         if (getOptArg(argc, argv, &at, "-f", "--flatten", &flatten, NULL)) continue;
         if (getOptArg(argc, argv, &at, "-m", "--meta-prefix", NULL, &jsonMetaPrefix)) continue;
+
+        if (getOptArg(argc, argv, &at, "-e", "--encoding", NULL, &encodingArg)) {
+            if (strcmp(encodingArg, "plain") == 0) { encoding = RDBX_CONV_JSON_ENC_PLAIN; continue; }
+            if (strcmp(encodingArg, "utf8") == 0) { encoding = RDBX_CONV_JSON_ENC_UTF8; continue; }
+            loggerWrap(RDB_LOG_ERR, "Invalid argument for '--encoding': %s\n", encodingArg);
+            return RDB_ERR_GENERAL;
+        }
 
         if (getOptArg(argc, argv, &at, "-i", "--include", NULL, &includeArg)) {
             if (strcmp(includeArg, "aux-val") == 0) { includeAuxField = 1; continue; }
@@ -208,7 +217,7 @@ static RdbRes formatJson(RdbParser *parser, int argc, char **argv) {
 
     RdbxToJsonConf conf = {
             .level = RDB_LEVEL_DATA,
-            .encoding = RDBX_CONV_JSON_ENC_PLAIN,
+            .encoding = encoding,
             .flatten = flatten,
             .includeAuxField = includeAuxField,
             .includeFunc = includeFunc,
