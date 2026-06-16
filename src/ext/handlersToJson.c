@@ -79,9 +79,65 @@ static void outputPlainEscaping(RdbxToJson *ctx, char *p, size_t len) {
             case '\t': fprintf(ctx->outfile, "\\t"); break;
             case '\b': fprintf(ctx->outfile, "\\b"); break;
             default:
-                fprintf(ctx->outfile, (isprint(*p)) ? "%c" : "\\u%04x", (unsigned char)*p);
+                fprintf(ctx->outfile, (isprint((unsigned char)*p)) ? "%c" : "\\u%04x", (unsigned char)*p);
         }
         p++;
+    }
+}
+
+/* Verify that 'p' points to a well-formed UTF-8 sequence of length 'seqLen'.
+ * Validates continuation bytes and rejects overlong encodings and surrogate
+ * code points (U+D800..U+DFFF). 'seqLen' bytes are guaranteed available. */
+static int utf8SeqValid(const unsigned char *p, int seqLen) {
+    for (int i = 1; i < seqLen; ++i)
+        if ((p[i] & 0xC0) != 0x80) return 0; /* not a 10xxxxxx continuation byte */
+
+    /* Reject overlong encodings / surrogates by checking the second byte range */
+    if (seqLen == 3 && p[0] == 0xE0 && p[1] < 0xA0) return 0; /* overlong */
+    if (seqLen == 3 && p[0] == 0xED && p[1] > 0x9F) return 0; /* surrogate */
+    if (seqLen == 4 && p[0] == 0xF0 && p[1] < 0x90) return 0; /* overlong */
+    if (seqLen == 4 && p[0] == 0xF4 && p[1] > 0x8F) return 0; /* > U+10FFFF */
+    return 1;
+}
+
+/* Like outputPlainEscaping(), but valid UTF-8 multi-byte sequences are passed
+ * through verbatim instead of being escaped byte-by-byte. Bytes that are not
+ * part of a well-formed UTF-8 sequence fall back to \u00XX escaping, so binary
+ * (non-UTF-8) data still yields valid, lossless JSON. */
+static void outputUtf8Escaping(RdbxToJson *ctx, char *p, size_t len) {
+    while (len) {
+        unsigned char c = (unsigned char) *p;
+        switch (c) {
+            case '\\':
+            case '"':
+                fprintf(ctx->outfile, "\\%c", c); ++p; --len; continue;
+            case '\n': fprintf(ctx->outfile, "\\n"); ++p; --len; continue;
+            case '\f': fprintf(ctx->outfile, "\\f"); ++p; --len; continue;
+            case '\r': fprintf(ctx->outfile, "\\r"); ++p; --len; continue;
+            case '\t': fprintf(ctx->outfile, "\\t"); ++p; --len; continue;
+            case '\b': fprintf(ctx->outfile, "\\b"); ++p; --len; continue;
+        }
+
+        if (c < 0x80) { /* ASCII */
+            fprintf(ctx->outfile, (isprint(c)) ? "%c" : "\\u%04x", c);
+            ++p; --len;
+            continue;
+        }
+
+        /* the expected length (2..4) of a UTF-8 sequence given its lead byte,
+         * or 0 if 'c' is not a valid UTF-8 lead byte. Rejects the invalid/overlong
+         * lead bytes 0xC0, 0xC1 and 0xF5..0xFF. */
+        int seqLen = (c >= 0xC2 && c <= 0xDF) ? 2 : (c >= 0xE0 && c <= 0xEF) ? 3 :
+                     (c >= 0xF0 && c <= 0xF4) ? 4 : 0;
+        
+        if (seqLen && (size_t)seqLen <= len && utf8SeqValid((unsigned char *)p, seqLen)) {
+            fwrite(p, 1, seqLen, ctx->outfile); /* valid UTF-8: emit as-is */
+            p += seqLen;
+            len -= seqLen;
+        } else { /* invalid UTF-8 byte: keep it lossless and JSON-valid */
+            fprintf(ctx->outfile, "\\u%04x", c);
+            ++p; --len;
+        }
     }
 }
 
@@ -144,6 +200,7 @@ static RdbxToJson *initRdbToJsonCtx(RdbParser *p, const char *outfilename, RdbxT
 
     switch(ctx->conf.encoding) {
         case RDBX_CONV_JSON_ENC_PLAIN: ctx->encfunc = outputPlainEscaping; break;
+        case RDBX_CONV_JSON_ENC_UTF8: ctx->encfunc = outputUtf8Escaping; break;
         case RDBX_CONV_JSON_ENC_BASE64: /* TODO: support base64 */
         default: assert(0); break;
     }
