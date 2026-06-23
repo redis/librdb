@@ -53,7 +53,7 @@ struct RdbxToJson {
     char *outfileName;  /* Holds output filename or equals _STDOUT_STR */
     FILE *outfile;
 
-    void (*encfunc)(struct RdbxToJson *ctx, char *p, size_t len);
+    void (*encfunc)(FILE *out, char *p, size_t len);
 
     struct {
         RdbBulkCopy key;
@@ -66,24 +66,6 @@ struct RdbxToJson {
 };
 
 const char *jsonMetaPrefix = "__";  /* Distinct meta from data with prefix string. */
-
-static void outputPlainEscaping(RdbxToJson *ctx, char *p, size_t len) {
-    while (len--) {
-        switch (*p) {
-            case '\\':
-            case '"':
-                fprintf(ctx->outfile, "\\%c", *p); break;
-            case '\n': fprintf(ctx->outfile, "\\n"); break;
-            case '\f': fprintf(ctx->outfile, "\\f"); break;
-            case '\r': fprintf(ctx->outfile, "\\r"); break;
-            case '\t': fprintf(ctx->outfile, "\\t"); break;
-            case '\b': fprintf(ctx->outfile, "\\b"); break;
-            default:
-                fprintf(ctx->outfile, (isprint((unsigned char)*p)) ? "%c" : "\\u%04x", (unsigned char)*p);
-        }
-        p++;
-    }
-}
 
 /* Verify that 'p' points to a well-formed UTF-8 sequence of length 'seqLen'.
  * Validates continuation bytes and rejects overlong encodings and surrogate
@@ -104,22 +86,22 @@ static int utf8SeqValid(const unsigned char *p, int seqLen) {
  * through verbatim instead of being escaped byte-by-byte. Bytes that are not
  * part of a well-formed UTF-8 sequence fall back to \u00XX escaping, so binary
  * (non-UTF-8) data still yields valid, lossless JSON. */
-static void outputUtf8Escaping(RdbxToJson *ctx, char *p, size_t len) {
+static void outputUtf8Escaping(FILE *out, char *p, size_t len) {
     while (len) {
         unsigned char c = (unsigned char) *p;
         switch (c) {
             case '\\':
             case '"':
-                fprintf(ctx->outfile, "\\%c", c); ++p; --len; continue;
-            case '\n': fprintf(ctx->outfile, "\\n"); ++p; --len; continue;
-            case '\f': fprintf(ctx->outfile, "\\f"); ++p; --len; continue;
-            case '\r': fprintf(ctx->outfile, "\\r"); ++p; --len; continue;
-            case '\t': fprintf(ctx->outfile, "\\t"); ++p; --len; continue;
-            case '\b': fprintf(ctx->outfile, "\\b"); ++p; --len; continue;
+                fprintf(out, "\\%c", c); ++p; --len; continue;
+            case '\n': fprintf(out, "\\n"); ++p; --len; continue;
+            case '\f': fprintf(out, "\\f"); ++p; --len; continue;
+            case '\r': fprintf(out, "\\r"); ++p; --len; continue;
+            case '\t': fprintf(out, "\\t"); ++p; --len; continue;
+            case '\b': fprintf(out, "\\b"); ++p; --len; continue;
         }
 
         if (c < 0x80) { /* ASCII */
-            fprintf(ctx->outfile, (isprint(c)) ? "%c" : "\\u%04x", c);
+            fprintf(out, (isprint(c)) ? "%c" : "\\u%04x", c);
             ++p; --len;
             continue;
         }
@@ -131,11 +113,11 @@ static void outputUtf8Escaping(RdbxToJson *ctx, char *p, size_t len) {
                      (c >= 0xF0 && c <= 0xF4) ? 4 : 0;
         
         if (seqLen && (size_t)seqLen <= len && utf8SeqValid((unsigned char *)p, seqLen)) {
-            fwrite(p, 1, seqLen, ctx->outfile); /* valid UTF-8: emit as-is */
+            fwrite(p, 1, seqLen, out); /* valid UTF-8: emit as-is */
             p += seqLen;
             len -= seqLen;
         } else { /* invalid UTF-8 byte: keep it lossless and JSON-valid */
-            fprintf(ctx->outfile, "\\u%04x", c);
+            fprintf(out, "\\u%04x", c);
             ++p; --len;
         }
     }
@@ -143,7 +125,7 @@ static void outputUtf8Escaping(RdbxToJson *ctx, char *p, size_t len) {
 
 static void outputQuotedEscaping(RdbxToJson *ctx, char *data, size_t len) {
     fprintf(ctx->outfile, "\"");
-    ctx->encfunc(ctx, data, len);
+    ctx->encfunc(ctx->outfile, data, len);
     fprintf(ctx->outfile, "\"");
 }
 
@@ -199,7 +181,7 @@ static RdbxToJson *initRdbToJsonCtx(RdbParser *p, const char *outfilename, RdbxT
     if (conf) ctx->conf = *conf;
 
     switch(ctx->conf.encoding) {
-        case RDBX_CONV_JSON_ENC_PLAIN: ctx->encfunc = outputPlainEscaping; break;
+        case RDBX_CONV_JSON_ENC_PLAIN: ctx->encfunc = rdbxOutputPlainEscaping; break;
         case RDBX_CONV_JSON_ENC_UTF8: ctx->encfunc = outputUtf8Escaping; break;
         case RDBX_CONV_JSON_ENC_BASE64: /* TODO: support base64 */
         default: assert(0); break;
@@ -939,7 +921,7 @@ static RdbRes toJsonStreamLP(RdbParser *p, void *userData, RdbBulk nodekey, RdbB
 static RdbRes toJsonFrag(RdbParser *p, void *userData, RdbBulk frag) {
     RdbxToJson *ctx = userData;
     /* output json part */
-    ctx->encfunc(ctx, frag, RDB_bulkLen(p, frag));
+    ctx->encfunc(ctx->outfile, frag, RDB_bulkLen(p, frag));
     return RDB_OK;
 }
 

@@ -63,6 +63,7 @@ int group_rdb_to_resp(void);
 int group_examples(void);
 int group_main(void);
 int group_rdb_to_json(void);
+int group_rdb_to_mem_stat(void);
 int group_mem_management(void);
 int group_pause(void);
 int group_bulk_ops(void);

@@ -108,7 +108,7 @@ static void printUsage(int shortUsage) {
         return;
     }
     printf("[v%s] ", RDB_getLibVersion(NULL,NULL,NULL));
-    printf("Usage: rdb-cli /path/to/dump.rdb [OPTIONS] {print|json|resp|redis} [FORMAT_OPTIONS]\n");
+    printf("Usage: rdb-cli /path/to/dump.rdb [OPTIONS] {print|json|resp|redis|stat} [FORMAT_OPTIONS]\n");
     printf("OPTIONS:\n");
     printf("\t-l, --log-file <PATH>         Path to the log file or stdout (Default: './rdb-cli.log')\n");
     printf("\t-i, --ignore-checksum         Ignore RDB file checksum verification\n");
@@ -125,8 +125,13 @@ static void printUsage(int shortUsage) {
     printf("FORMAT_OPTIONS ('print'):\n");
     printf("\t-a, --aux-val <FMT>           %%f=Auxiliary-Field, %%v=Auxiliary-Value (Default: \"\") \n");
     printf("\t-k, --key <FMT>               %%d=Db %%k=Key %%v=Value %%t=Type %%e=Expiry %%r=LRU %%f=LFU\n");
-    printf("\t                              %%i=Items %%m=NumMeta (Default: \"%%d,%%k,%%v,%%t,%%e,%%i\")\n");
+    printf("\t                              %%i=Items %%m=NumMeta %%n=Encoding %%z=MemBytes(estimate) %%g=LargestElement\n");
+    printf("\t                              Specifiers accept optional width, e.g. %%-20k %%10z (Default: \"%%d,%%k,%%v,%%t,%%e,%%i\")\n");
     printf("\t-o, --output <FILE>           Specify the output file. If not specified, output to stdout\n\n");
+
+    printf("FORMAT_OPTIONS ('stat'):\n");
+    printf("\t-t, --top <N>                 Show the top N keys by estimated memory (Default: 100)\n");
+    printf("\t-n, --now <UNIX-TIME-SEC>     For expiry evaluation (Default: now)\n\n");
 
     printf("FORMAT_OPTIONS ('json'):\n");
     printf("\t-i, --include <EXTRAS>        To include: {aux-val|func|stream-meta|db-info}\n");
@@ -248,6 +253,27 @@ static RdbRes formatPrint(RdbParser *parser, int argc, char **argv) {
     }
 
     if (RDBX_createHandlersToPrint(parser, auxFmt, keyFmt, output) == NULL)
+        return RDB_ERR_GENERAL;
+
+    return RDB_OK;
+}
+
+static RdbRes formatStat(RdbParser *parser, int argc, char **argv) {
+    const char *topArg, *nowArg;
+    int topN = 0;          /* 0 => handler default (100)        */
+    long long nowSecs = 0; /* 0 => handler uses wall-clock time */
+
+    /* parse specific command options */
+    for (int at = 1; at < argc; ++at) {
+        char *opt = argv[at];
+        if (getOptArg(argc, argv, &at, "-t", "--top", NULL, &topArg)) { topN = atoi(topArg); continue; }
+        if (getOptArg(argc, argv, &at, "-n", "--now", NULL, &nowArg)) { nowSecs = atoll(nowArg); continue; }
+        loggerWrap(RDB_LOG_ERR, "Invalid 'stat' [FORMAT_OPTIONS] argument: %s\n", opt);
+        printUsage(1);
+        return RDB_ERR_GENERAL;
+    }
+
+    if (RDBX_createHandlersToStat(parser, topN, nowSecs, NULL) == NULL)
         return RDB_ERR_GENERAL;
 
     return RDB_OK;
@@ -542,6 +568,7 @@ int readCommonOptions(RdbParser *p, int argc, char* argv[], Options *options, in
         else if (strcmp(opt, "resp") == 0) { options->formatFunc = formatResp; break; }
         else if (strcmp(opt, "redis") == 0) { options->formatFunc = formatRedis; break; }
         else if (strcmp(opt, "print") == 0) { options->formatFunc = formatPrint; break; }
+        else if (strcmp(opt, "stat") == 0) { options->formatFunc = formatStat; break; }
 
         loggerWrap(RDB_LOG_ERR, "At argv[%d], unexpected OPTIONS argument: %s\n", at, opt);
         printUsage(1);

@@ -52,10 +52,32 @@ To run CLI extension of this library and let it parse RDB file to json:
 
 To generate formatted print:
 
-    rdb-cli dump.rdb print --key "db%d,%k,%v"
-    db0,key1,value1
-    db0,key2,value2
+    rdb-cli dump.rdb print --key "db=%d,key=%k,type=%t,enc=%n,bytes=%z,largest=%g,count=%i"
+    db=0,key=mylist,type=list,enc=quicklist,bytes=116 largest=2,count=2
+    db=0,key=myhash,type=hash,enc=listpack,bytes=240 largest=7,count=6
+    db=0,key=myset,type=set,enc=intset,bytes=96,largest=10,count=6
     ...
+
+To print a formatted memory-statistics report instead of per-key lines:
+
+    rdb-cli dump.rdb stat
+    Memory statistics (estimated):
+      type             keys          items  items/key   volatile   expired       memory        avg    mem%
+      zset               25           3750        150          4         0      401.1 K     16.0 K   57.9%
+      list               31            992         32          0         0      202.2 K      6.5 K   29.2%
+      string            520              -          -         12         3       47.3 K       93 B    6.8%
+      ...
+      TOTAL             696           4742                    16         3      692.3 K
+      volatile keys hold 12.4 K (1.8% of memory)
+    Top 10 keys by memory:
+            memory type        db        items   avg item      ttl  key
+            97.5 K list          0         5000       20 B     none  bigqueue
+            16.0 K zset          0          150      109 B      12d  rank:24
+      ...
+
+Modify the number of top keys shown with `--top`:
+
+    rdb-cli dump.rdb stat --top 500
 
 To generate RESP commands:
 
@@ -207,7 +229,7 @@ destruction, or when newer block replacing old one.
 
 ### rdb-cli usage
 
-    Usage: rdb-cli /path/to/dump.rdb [OPTIONS] {print|json|resp|redis} [FORMAT_OPTIONS]
+    Usage: rdb-cli /path/to/dump.rdb [OPTIONS] {print|json|resp|redis|stat} [FORMAT_OPTIONS]
     OPTIONS:
             -l, --log-file <PATH>         Path to the log file or stdout (Default: './rdb-cli.log')
             -i, --ignore-checksum         Ignore RDB file checksum verification
@@ -224,8 +246,13 @@ destruction, or when newer block replacing old one.
     FORMAT_OPTIONS ('print'):
             -a, --aux-val <FMT>           %f=Auxiliary-Field, %v=Auxiliary-Value (Default: "")
             -k, --key <FMT>               %d=Db %k=Key %v=Value %t=Type %e=Expiry %r=LRU %f=LFU
-                                          %i=Items %m=NumMeta (Default: "%d,%k,%v,%t,%e,%i")
+                                          %i=Items %m=NumMeta %n=Encoding %z=MemBytes(estimate) %g=LargestElement
+                                          Accept optional width, e.g. %-20k %10z (Default: "%d,%k,%v,%t,%e,%i")
             -o, --output <FILE>           Specify the output file. If not specified, output to stdout
+    
+    FORMAT_OPTIONS ('stat'):
+            -t, --top <N>                 Show the top N keys by estimated memory (Default: 100)
+            -n, --now <UNIX-TIME-SEC>     For expiry evaluation (Default: now)
     
     FORMAT_OPTIONS ('json'):
             -i, --include <EXTRAS>        To include: {aux-val|func|stream-meta}

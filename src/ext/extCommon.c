@@ -1,5 +1,24 @@
+#include <ctype.h>
 #include "extCommon.h"
 #include "../../deps/redis/util.h"
+
+void rdbxOutputPlainEscaping(FILE *out, char *p, size_t len) {
+    while (len--) {
+        switch (*p) {
+            case '\\':
+            case '"':
+                fprintf(out, "\\%c", *p); break;
+            case '\n': fprintf(out, "\\n"); break;
+            case '\f': fprintf(out, "\\f"); break;
+            case '\r': fprintf(out, "\\r"); break;
+            case '\t': fprintf(out, "\\t"); break;
+            case '\b': fprintf(out, "\\b"); break;
+            default:
+                fprintf(out, (isprint((unsigned char)*p)) ? "%c" : "\\u%04x", (unsigned char)*p);
+        }
+        p++;
+    }
+}
 
 /* Example:: Input: length=123  return: buf="\r\n$123\r\n" */
 void iov_length(struct iovec *iov, long long length, char *buf, int bufsize) {
