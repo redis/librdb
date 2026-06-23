@@ -130,7 +130,7 @@ static void printUsage(int shortUsage) {
     printf("\t-o, --output <FILE>           Specify the output file. If not specified, output to stdout\n\n");
 
     printf("FORMAT_OPTIONS ('stat'):\n");
-    printf("\t-t, --top <N>                 Show the top N keys by estimated memory (Default: 100)\n");
+    printf("\t-t, --top <N>                 Show the top N keys by estimated memory (Default: 10)\n");
     printf("\t-n, --now <UNIX-TIME-SEC>     For expiry evaluation (Default: now)\n\n");
 
     printf("FORMAT_OPTIONS ('json'):\n");
@@ -260,7 +260,7 @@ static RdbRes formatPrint(RdbParser *parser, int argc, char **argv) {
 
 static RdbRes formatStat(RdbParser *parser, int argc, char **argv) {
     const char *topArg, *nowArg;
-    int topN = 0;          /* 0 => handler default (100)        */
+    int topN = 0;          /* 0 => handler default (10)         */
     long long nowSecs = 0; /* 0 => handler uses wall-clock time */
 
     /* parse specific command options */

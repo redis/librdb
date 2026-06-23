@@ -251,7 +251,7 @@ destruction, or when newer block replacing old one.
             -o, --output <FILE>           Specify the output file. If not specified, output to stdout
     
     FORMAT_OPTIONS ('stat'):
-            -t, --top <N>                 Show the top N keys by estimated memory (Default: 100)
+            -t, --top <N>                 Show the top N keys by estimated memory (Default: 10)
             -n, --now <UNIX-TIME-SEC>     For expiry evaluation (Default: now)
     
     FORMAT_OPTIONS ('json'):

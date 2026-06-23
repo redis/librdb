@@ -139,7 +139,7 @@ _LIBRDB_API RdbxToPrint *RDBX_createHandlersToPrint(RdbParser *p,
  * Aggregates while parsing and, on end-of-RDB, prints a built-in, human-formatted
  * memory-statistics report (estimated):
  *   - a by-type table (keys, items, volatile, expired, memory, avg, mem%) + TOTAL row
- *   - the top `topN` keys by estimated memory (topN <= 0 => default 100)
+ *   - the top `topN` keys by estimated memory (topN <= 0 => default 10)
  *
  * `nowSecs` is the reference Unix time in seconds used to decide whether a key with
  * an expiry is already expired; pass 0 to use the current wall-clock time.
