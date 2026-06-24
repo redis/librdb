@@ -61,19 +61,22 @@ To generate formatted print:
 To print a formatted memory-statistics report instead of per-key lines:
 
     rdb-cli dump.rdb stat
-    Memory statistics (estimated):
-      type             keys          items  items/key   volatile   expired       memory        avg    mem%
-      zset               25           3750        150          4         0      401.1 K     16.0 K   57.9%
-      list               31            992         32          0         0      202.2 K      6.5 K   29.2%
-      string            520              -          -         12         3       47.3 K       93 B    6.8%
-      ...
-      TOTAL             696           4742                    16         3      692.3 K
-      volatile keys hold 12.4 K (1.8% of memory)
+    Statistics (Memory is estimated):
+    type             keys          items  items/key   volatile   expired       memory        avg    mem%
+    hash          1560278       81456780         52          0         0        6.8 G      4.6 K   74.8%
+    set           7651482       27952535          3          3         3        1.5 G      216 B   16.9%
+    list          6017862        7906342          1          0         0      719.9 M      125 B    7.7%
+    string         106018              -          -          2         2       63.5 M      628 B    0.7%
+    stream              1            948        948          0         0       22.3 K     22.3 K    0.0%
+    TOTAL        15335641      117316605                     5         5        9.1 G
+    volatile keys hold 2.0 K (0.0% of memory)
+    
     Top 10 keys by memory:
-            memory type        db        items   avg item      ttl  key
-            97.5 K list          0         5000       20 B     none  bigqueue
-            16.0 K zset          0          150      109 B      12d  rank:24
-      ...
+    memory type        db        items   avg item      ttl  key
+    61.2 M set          0      1369515       46 B     none  App:AccessGroup:001
+    57.4 M set          0      1290404       46 B     none  App:EntityIndex:All
+    38.2 M hash         0       858814       46 B     none  App:EntityMetadata:002
+    ...
 
 Modify the number of top keys shown with `--top`:
 

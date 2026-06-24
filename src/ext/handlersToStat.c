@@ -137,7 +137,7 @@ static void renderPretty(RdbxToStat *ctx) {
         totalExp   += ctx->typeAgg[t].nExpired;
     }
 
-    fprintf(o, "Memory statistics (estimated):\n");
+    fprintf(o, "Statistics (Memory is estimated):\n");
     fprintf(o, "  %-8s %12s %14s %10s %10s %9s %12s %10s %7s\n",
             "type", "keys", "items", "items/key", "volatile", "expired", "memory", "avg", "mem%");
     for (int i = 0; i < nTypes; i++) {
