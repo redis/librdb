@@ -110,7 +110,7 @@ static void test_memStat_stat_default(void **state) {
     UNUSED(state);
     /* multiple_lists_strings: 3 strings (string1, string2, lzf_compressed) + 3 lists */
     char *buf = runStat(DUMP_FOLDER("multiple_lists_strings.rdb"), 0);
-    assert_non_null(strstr(buf, "Memory statistics"));
+    assert_non_null(strstr(buf, "Statistics (Memory is estimated)"));
     assert_non_null(strstr(buf, "string"));          /* by-type rows present */
     assert_non_null(strstr(buf, "list"));
     assert_non_null(strstr(buf, "TOTAL"));
