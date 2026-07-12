@@ -168,7 +168,9 @@ _LIBRDB_API RdbxFilter *RDBX_createHandlersFilterDbNum(RdbParser *p,
                                                        int dbnum,
                                                        uint32_t exclude);
 
+/* `nowSecs` is Unix time to decide if a key is expired. Pass 0 to use current time */
 _LIBRDB_API RdbxFilter *RDBX_createHandlersFilterExpired(RdbParser *p,
+                                                         long long nowSecs,
                                                          uint32_t exclude);
 
 /****************************************************************

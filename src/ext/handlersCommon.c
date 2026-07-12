@@ -7,11 +7,14 @@
 #define _STDOUT_STR "<stdout>"
 
 /* Rough overhead constants for the in-memory size estimate (%z / statistics).
- * Approximations in the spirit of Redis `MEMORY USAGE`; see cli-dashboard.md.
- * Calibrated so large keys land within ~25% of live MEMORY USAGE. */
+ * Approximations in the spirit of Redis `MEMORY USAGE`, calibrated so large keys
+ * land within ~25% of live MEMORY USAGE. Small-key-heavy dumps skew low: unlike
+ * `MEMORY USAGE` we don't round allocations up to jemalloc size classes. */
 #define OBJ_OVERHEAD        16
 #define SDS_OVERHEAD        16
-#define META_SLOT            8  /* embedded meta slot (expire / module)       */
+#define KEYSPACE_DICTENTRY  16  /* keyspace no_value dictEntry {key,next} (Redis 7.4+) */
+#define EXPIRE_OVERHEAD     32  /* entry in the expires dict (dictEntry + int64) */
+#define META_SLOT            8  /* embedded meta slot (module, hash-field TTL)  */
 #define LP_HEADER           11
 #define LP_ELEM_OVERHEAD     3
 #define DICTENTRY_OVERHEAD  24
@@ -114,9 +117,9 @@ static uint64_t estimValueBytes(int opcode, uint64_t n, uint64_t s,
 }
 
 void rdbxComputeMemBytes(RdbxKeyCtx *kc) {
-    uint64_t meta = (kc->info.expiretime != -1 ? META_SLOT : 0) +
+    uint64_t meta = (kc->info.expiretime != -1 ? EXPIRE_OVERHEAD : 0) +
                     (uint64_t) kc->info.numMeta * META_SLOT;
-    kc->memBytes = OBJ_OVERHEAD + kc->keyLen + SDS_OVERHEAD + meta +
+    kc->memBytes = OBJ_OVERHEAD + kc->keyLen + SDS_OVERHEAD + KEYSPACE_DICTENTRY + meta +
         estimValueBytes(kc->info.opcode, kc->items, kc->numStrings,
                         kc->sumStrBytes, kc->moduleBytes, kc->isIntStr);
 }

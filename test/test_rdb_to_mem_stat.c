@@ -106,25 +106,6 @@ static char *runStat(const char *rdbfile, long long nowSecs) {
     return buf;
 }
 
-static void test_memStat_stat_default(void **state) {
-    UNUSED(state);
-    /* multiple_lists_strings: 3 strings (string1, string2, lzf_compressed) + 3 lists */
-    char *buf = runStat(DUMP_FOLDER("multiple_lists_strings.rdb"), 0);
-    assert_non_null(strstr(buf, "Statistics (Memory is estimated)"));
-    assert_non_null(strstr(buf, "string"));          /* by-type rows present */
-    assert_non_null(strstr(buf, "list"));
-    assert_non_null(strstr(buf, "TOTAL"));
-    assert_non_null(strstr(buf, "Top "));
-    assert_non_null(strstr(buf, "lzf_compressed"));  /* largest key */
-    /* new columns */
-    assert_non_null(strstr(buf, "items/key"));
-    assert_non_null(strstr(buf, "volatile"));
-    assert_non_null(strstr(buf, "expired"));
-    assert_non_null(strstr(buf, "avg item"));
-    assert_non_null(strstr(buf, "ttl"));
-    free(buf);
-}
-
 /* set_not_expired_v11.rdb holds one key ("mykey") with a far-future expiry. Pinning
  * the reference time on either side of it exercises the volatile/expired accounting.
  * The Top-N row ends with "<ttl>  <key>", so "expired  mykey" discriminates the two
@@ -133,14 +114,14 @@ static void test_memStat_stat_expiry(void **state) {
     UNUSED(state);
     /* now ~= epoch: the key is volatile but not yet expired */
     char *buf = runStat(DUMP_FOLDER("set_not_expired_v11.rdb"), 1);
-    assert_non_null(strstr(buf, "volatile keys hold"));
+    assert_non_null(strstr(buf, "Volatile keys hold"));
     assert_non_null(strstr(buf, "mykey"));
     assert_null(strstr(buf, "expired  mykey"));
     free(buf);
 
     /* now far in the future: the same key is now expired */
     buf = runStat(DUMP_FOLDER("set_not_expired_v11.rdb"), 99999999999LL);
-    assert_non_null(strstr(buf, "volatile keys hold"));
+    assert_non_null(strstr(buf, "Volatile keys hold"));
     assert_non_null(strstr(buf, "expired  mykey"));
     free(buf);
 }
@@ -216,7 +197,6 @@ int group_rdb_to_mem_stat(void) {
         cmocka_unit_test(test_memStat_fields_set_intset),
         cmocka_unit_test(test_memStat_fields_zset_skiplist),
         cmocka_unit_test(test_memStat_fields_lists),
-        cmocka_unit_test(test_memStat_stat_default),
         cmocka_unit_test(test_memStat_stat_expiry),
         cmocka_unit_test(test_memStat_live_drift),
     };

@@ -21,25 +21,27 @@ struct RdbxToStat {
     struct { uint64_t count, bytes, items, nVolatile, nExpired; } typeAgg[RDB_DATA_TYPE_MAX];
     uint64_t volatileBytes;  /* memory held by keys that carry an expiry */
     uint64_t nowMs;          /* reference time for expiry evaluation (ms) */
-    TopEntry *top; int topCap, nTop;
+    uint64_t dbKeys, dbExpires;        /* key/expiry counts of the current db */
+    uint64_t keyspaceTableBytes;       /* accumulated keyspace dict bucket arrays */
+    uint64_t expiresTableBytes;        /* accumulated expires dict bucket arrays  */
+    TopEntry *top; int topCap, nTop;  /* top-N largest keys, kept as a min-heap (see topInsert) */
 };
+
+/* Bucket-array bytes of a hashtable holding `n` entries: next-power-of-two slots
+ * (dict min 4) x pointer size, x1.5 for worst-case rehash headroom. This is the
+ * keyspace/expires overhead not attributable to any single key. */
+static uint64_t dictTableBytes(uint64_t n) {
+    if (n == 0) return 0;
+    uint64_t slots = 4;
+    while (slots < n) slots <<= 1;
+    return slots * 8 * 3 / 2;
+}
 
 /*** Statistics folding ***/
 
-static void topInsert(RdbxToStat *ctx) {
+/* Fill a top-N slot from the current key accumulator (owns a copy of the key). */
+static void topFill(RdbxToStat *ctx, TopEntry *e) {
     RdbxKeyCtx *kc = &ctx->base.keyCtx;
-    int slot = -1;
-    if (ctx->nTop < ctx->topCap) {
-        slot = ctx->nTop++;
-    } else { /* replace the current minimum if this key is bigger */
-        int mn = 0;
-        for (int i = 1; i < ctx->topCap; i++)
-            if (ctx->top[i].memBytes < ctx->top[mn].memBytes) mn = i;
-        if (kc->memBytes <= ctx->top[mn].memBytes) return;
-        RDB_free(ctx->base.p, ctx->top[mn].key);
-        slot = mn;
-    }
-    TopEntry *e = &ctx->top[slot];
     e->keyLen = kc->keyLen;
     e->key = RDB_alloc(ctx->base.p, e->keyLen + 1);
     memcpy(e->key, kc->key, e->keyLen);
@@ -51,9 +53,44 @@ static void topInsert(RdbxToStat *ctx) {
     e->dbnum = ctx->base.dbnum;
 }
 
+static void topSwap(TopEntry *a, TopEntry *b) { TopEntry t = *a; *a = *b; *b = t; }
+
+/* The top-N set is a binary min-heap keyed by memBytes, so the smallest kept key
+ * is always at the root: each new key costs O(log N) instead of an O(N) scan. */
+static void topSiftUp(TopEntry *h, int i) {
+    for (int parent; i > 0 && h[parent = (i - 1) / 2].memBytes > h[i].memBytes; i = parent)
+        topSwap(&h[parent], &h[i]);
+}
+
+static void topSiftDown(TopEntry *h, int n, int i) {
+    for (;;) {
+        int l = 2 * i + 1, r = 2 * i + 2, min = i;
+        if (l < n && h[l].memBytes < h[min].memBytes) min = l;
+        if (r < n && h[r].memBytes < h[min].memBytes) min = r;
+        if (min == i) break;
+        topSwap(&h[min], &h[i]);
+        i = min;
+    }
+}
+
+/* Streaming top-N: keep only the N largest keys in min-heap */
+static void topInsert(RdbxToStat *ctx) {
+    RdbxKeyCtx *kc = &ctx->base.keyCtx;
+    if (ctx->nTop < ctx->topCap) {          /* still filling: push and sift up */
+        topFill(ctx, &ctx->top[ctx->nTop]);
+        topSiftUp(ctx->top, ctx->nTop++);
+    } else if (kc->memBytes > ctx->top[0].memBytes) {  /* bigger than the smallest kept */
+        RDB_free(ctx->base.p, ctx->top[0].key);
+        topFill(ctx, &ctx->top[0]);
+        topSiftDown(ctx->top, ctx->nTop, 0);
+    }
+}
+
 static void foldKey(RdbxToStat *ctx) {
     RdbxKeyCtx *kc = &ctx->base.keyCtx;
     int t = kc->info.dataType;
+    ctx->dbKeys++;
+    if (kc->info.expiretime != -1) ctx->dbExpires++;
     if (t >= 0 && t < RDB_DATA_TYPE_MAX) {
         ctx->typeAgg[t].count++;
         ctx->typeAgg[t].bytes += kc->memBytes;
@@ -68,6 +105,7 @@ static void foldKey(RdbxToStat *ctx) {
     topInsert(ctx);
 }
 
+/* qsort comparator for the final output pass (over min-heap) */
 static int topCmpDesc(const void *a, const void *b) {
     uint64_t x = ((const TopEntry*)a)->memBytes, y = ((const TopEntry*)b)->memBytes;
     return (x < y) - (x > y);
@@ -139,7 +177,7 @@ static void renderPretty(RdbxToStat *ctx) {
 
     fprintf(o, "Statistics (Memory is estimated):\n");
     fprintf(o, "  %-8s %12s %14s %10s %10s %9s %12s %10s %7s\n",
-            "type", "keys", "items", "items/key", "volatile", "expired", "memory", "avg", "mem%");
+            "type", "keys", "items", "items/key", "volatile", "expired", "memory", "avg/key", "mem%");
     for (int i = 0; i < nTypes; i++) {
         int t = order[i];
         uint64_t c = ctx->typeAgg[t].count, b = ctx->typeAgg[t].bytes, it = ctx->typeAgg[t].items;
@@ -151,13 +189,19 @@ static void renderPretty(RdbxToStat *ctx) {
                 (unsigned long long) ctx->typeAgg[t].nExpired,
                 human(b), human(c ? b / c : 0), pct);
     }
-    fprintf(o, "  %-8s %12llu %14llu %10s %10llu %9llu %12s\n", "TOTAL",
+    fprintf(o, "  %-8s %12llu %14llu %10s %10llu %9llu %12s\n\n", "TOTAL",
             (unsigned long long) totalKeys, (unsigned long long) totalItems, "",
             (unsigned long long) totalVol, (unsigned long long) totalExp, human(totalBytes));
+
     if (ctx->volatileBytes) {
         double pct = totalBytes ? (ctx->volatileBytes * 100.0 / totalBytes) : 0;
-        fprintf(o, "  volatile keys hold %s (%.1f%% of memory)\n", human(ctx->volatileBytes), pct);
+        fprintf(o, "  Volatile keys hold %s (%.1f%% of memory)\n", human(ctx->volatileBytes), pct);
     }
+
+    uint64_t overhead = ctx->keyspaceTableBytes + ctx->expiresTableBytes;
+    fprintf(o, "  Estimated keyspace tables (dict overhead): %s\n", human(overhead));
+    fprintf(o, "  Estimated dataset memory: %s (objects + tables; excludes server/client/frag)\n",
+            human(totalBytes + overhead));
 
     if (ctx->nTop > 0) {
         qsort(ctx->top, ctx->nTop, sizeof(TopEntry), topCmpDesc);
@@ -166,9 +210,9 @@ static void renderPretty(RdbxToStat *ctx) {
                 "memory", "type", "db", "items", "avg item", "ttl", "key");
         for (int i = 0; i < ctx->nTop; i++) {
             TopEntry *e = &ctx->top[i];
-            fprintf(o, "  %12s %-8s %5d %12llu %10s %8s  %s\n", human(e->memBytes),
+            fprintf(o, "  %12s %-8s %5d %12s %10s %8s  %s\n", human(e->memBytes),
                     rdbxTypeName(e->info.dataType), e->dbnum,
-                    (unsigned long long) e->items,
+                    countOrDash(e->items),
                     e->items ? human(e->memBytes / e->items) : "-",
                     humanDur(e->info.expiretime, ctx->nowMs), e->key);
         }
@@ -177,9 +221,19 @@ static void renderPretty(RdbxToStat *ctx) {
 
 /*** Handling ***/
 
+/* Close out the current db: its dict tables scale with its own key count, so fold
+ * them per-db (keys arrive grouped by db) rather than off the grand total. */
+static void finalizeDb(RdbxToStat *ctx) {
+    ctx->keyspaceTableBytes += dictTableBytes(ctx->dbKeys);
+    ctx->expiresTableBytes  += dictTableBytes(ctx->dbExpires);
+    ctx->dbKeys = ctx->dbExpires = 0;
+}
+
 static RdbRes toStatNewDb(RdbParser *p, void *userData, int db) {
     UNUSED(p);
-    ((RdbxToStat *) userData)->base.dbnum = db;
+    RdbxToStat *ctx = userData;
+    finalizeDb(ctx);   /* fold the previous db (no-op on the first db) */
+    ctx->base.dbnum = db;
     return RDB_OK;
 }
 
@@ -253,7 +307,9 @@ static RdbRes toStatString(RdbParser *p, void *userData, RdbBulk string) {
 
 static RdbRes toStatEndRdb(RdbParser *p, void *userData) {
     UNUSED(p);
-    renderPretty((RdbxToStat *) userData);
+    RdbxToStat *ctx = userData;
+    finalizeDb(ctx);   /* fold the last db before rendering */
+    renderPretty(ctx);
     return RDB_OK;
 }
 
