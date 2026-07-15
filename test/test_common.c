@@ -26,6 +26,7 @@
 #define RDB_CLI_VALGRIND_CMD       "/usr/bin/valgrind --track-origins=yes --leak-check=full --leak-resolution=high --error-exitcode=1 --log-file="RDB_CLI_VALGRIND_LOG_FILE" "RDB_CLI_CMD
 
 int          useValgrind = 0;
+int          runSlowTests = 0;
 int          currRedisInst = -1;
 redisContext *redisServersStack[MAX_NUM_REDIS_INST] = {0};
 int          redisPort[MAX_NUM_REDIS_INST]= {0};
@@ -536,6 +537,14 @@ int getRedisTlsPort(void) {
 
 void setValgrind(void) {
     useValgrind = 1;
+}
+
+void setRunSlowTests(void) {
+    runSlowTests = 1;
+}
+
+int isRunSlowTests(void) {
+    return runSlowTests;
 }
 
 /* Setup Redis server with TLS enabled - returns 1 on success, 0 on failure

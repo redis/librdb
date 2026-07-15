@@ -743,38 +743,52 @@ static void test_rdb_to_redis_func_lib_replace_if_exist(void **state) {
  * the parser retries after TIMEOUT_SECONDS. Not part of CI since it takes to long */
 int countdownRetries;
 RdbParser *parser;
+
+/* Start a dummy TCP server on 127.0.0.1; returns the listening fd and fills
+ * *port. rcvbuf>0 shrinks SO_RCVBUF (so a writer blocks quickly). */
+static int startDummyServer(int *port, int rcvbuf) {
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    assert_true(fd >= 0);
+    int opt = 1;
+    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+    if (rcvbuf > 0)
+        setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &rcvbuf, sizeof(rcvbuf));
+    struct sockaddr_in a = { .sin_family = AF_INET,
+                             .sin_addr.s_addr = inet_addr("127.0.0.1"),
+                             .sin_port = htons(0) };
+    assert_int_equal(bind(fd, (struct sockaddr *)&a, sizeof(a)), 0);
+    socklen_t len = sizeof(a);
+    assert_int_equal(getsockname(fd, (struct sockaddr *)&a, &len), 0);
+    *port = ntohs(a.sin_port);
+    assert_int_equal(listen(fd, 1), 0);
+    printf("Dummy TCP server started on port %d\n", *port);
+    return fd;
+}
+
+/* Shared by the recv-side (test_rdb_tcp_timeout) and send-side
+ * (test_rdb_tcp_write_timeout) tests; each emits only its own retry message. */
 void dummyTcpTimeoutLogger(RdbLogLevel l, const char *msg) {
     UNUSED(l);
-    if (strstr(msg, "No reply from redis-server for") != NULL)
+    if (strstr(msg, "No reply from redis-server for") != NULL ||
+        strstr(msg, "Redis server not accepting writes for") != NULL)
         if (--countdownRetries == 0)
             RDB_reportError(parser, (RdbRes)12345678, "Inject error to end the test");
 }
 void test_rdb_tcp_timeout(void **state) {
     UNUSED(state);
+    if (!isRunSlowTests()) skip(); /* long-running; enable with --slow-tests */
     const int RECV_TIMEOUT_SECONDS = 10; /* socket retry timeout */
     int test_retries = 3; /* limit test to finite number of retries */
-    int server_fd, client_fd;
-    struct sockaddr_in server_addr, client_addr;
+    int client_fd;
+    struct sockaddr_in client_addr;
     socklen_t client_len = sizeof(client_addr);
 
     /* expected to retry 3 times before ending the test */
     countdownRetries = test_retries;
 
     /* Dummy TCP server that only receives messages but does not respond */
-    server_fd = socket(AF_INET, SOCK_STREAM, 0);
-    assert_true(server_fd >= 0);
-
-    int opt = 1;
-    setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_addr.s_addr = INADDR_ANY;
-    server_addr.sin_port = htons(0);
-    assert_int_equal(bind(server_fd, (struct sockaddr *)&server_addr, sizeof(server_addr)), 0);
-    socklen_t addr_len = sizeof(server_addr);
-    assert_int_equal(getsockname(server_fd, (struct sockaddr *)&server_addr, &addr_len), 0);
-    int assigned_port = ntohs(server_addr.sin_port);
-    assert_int_equal(listen(server_fd, 1), 0);
-    printf("Dummy TCP server started, waiting for client to connect...\n");
+    int assigned_port;
+    int server_fd = startDummyServer(&assigned_port, 0);
 
     parser = RDB_createParserRdb(NULL);
     RDB_setLogLevel(parser, RDB_LOG_INF);
@@ -807,6 +821,77 @@ void test_rdb_tcp_timeout(void **state) {
     int expectedTime = RECV_TIMEOUT_SECONDS * test_retries;
     printf("Elapsed time: %ld, expected time: %d\n", elapsedTime, expectedTime);
     assert_in_range(elapsedTime, expectedTime - 2, expectedTime + 2);
+
+    RDB_deleteParser(parser);
+    close(client_fd);
+    close(server_fd);
+}
+
+/* Create dummy TCP server that accepts a connection but never reads from it, so
+ * the client's send buffer fills and send() keeps timing out on SO_SNDTIMEO.
+ * Verify that redisLoaderWritev() retries on the stall (mirror of the recv side
+ * tested by test_rdb_tcp_timeout). Both the client send buffer and the server
+ * receive buffer are shrunk so a moderate key is enough to block the writer.
+ * Not part of CI since it takes too long. */
+void test_rdb_tcp_write_timeout(void **state) {
+    UNUSED(state);
+    if (!isRunSlowTests()) skip(); /* long-running; enable with --slow-tests */
+    int test_retries = 3; /* end via injected error before MAX_WRITE_STALL_RETRY (12) */
+    int client_fd, conn_fd;
+    struct sockaddr_in server_addr, client_addr;
+    socklen_t client_len = sizeof(client_addr);
+
+    /* expected to retry 3 times before ending the test */
+    countdownRetries = test_retries;
+
+    /* Dummy TCP server that accepts the connection but never reads from it.
+     * Shrink its receive buffer so the writer blocks quickly. */
+    int assigned_port;
+    int server_fd = startDummyServer(&assigned_port, 1024);
+
+    /* Client socket with a tiny send buffer, connected ourselves so we control
+     * the buffer size, then handed to librdb via RDBX_createRespToRedisFd(). */
+    conn_fd = socket(AF_INET, SOCK_STREAM, 0);
+    assert_true(conn_fd >= 0);
+    int sndbuf = 1024;
+    setsockopt(conn_fd, SOL_SOCKET, SO_SNDBUF, &sndbuf, sizeof(sndbuf));
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+    server_addr.sin_port = htons(assigned_port);
+    assert_int_equal(connect(conn_fd, (struct sockaddr *)&server_addr, sizeof(server_addr)), 0);
+
+    client_fd = accept(server_fd, (struct sockaddr *)&client_addr, &client_len);
+    assert_true(client_fd >= 0);
+    /* Intentionally never recv() from client_fd */
+
+    parser = RDB_createParserRdb(NULL);
+    RDB_setLogLevel(parser, RDB_LOG_INF);
+    RDB_setLogger(parser, dummyTcpTimeoutLogger);
+    /* A key big enough to overflow the socket buffers and block the writer */
+    assert_non_null(RDBX_createReaderFile(parser, DUMP_FOLDER("100_lists.rdb")));
+
+    RdbxToRespConf rdb2respConf = {
+            .supportRestore = 1,
+            .dstRedisVersion = getTargetRedisVersion(NULL, NULL),
+            .supportRestoreModuleAux = isSupportRestoreModuleAux()
+    };
+
+    RdbxToResp *rdbToResp;
+    RdbxRespToRedisLoader *r2r;
+    assert_non_null(rdbToResp = RDBX_createHandlersToResp(parser, &rdb2respConf));
+    assert_non_null(r2r = RDBX_createRespToRedisFd(parser, rdbToResp, NULL, conn_fd));
+
+    /* Avoid reading replies mid-stream so the writer is the one that stalls */
+    RDBX_setPipelineDepth(r2r, 1000);
+
+    /* Run parser. Expected to hit SO_SNDTIMEO and retry the write test_retries
+     * times, logging each time, before the logger injects an error to stop it. */
+    RdbStatus status;
+    while ((status = RDB_parse(parser)) == RDB_STATUS_WAIT_MORE_DATA);
+
+    /* Error code is only set after test_retries write-timeout retries, so this
+     * proves the writer retried instead of aborting on the first EAGAIN. */
+    assert_int_equal(RDB_getErrorCode(parser), 12345678);
 
     RDB_deleteParser(parser);
     close(client_fd);
@@ -910,7 +995,8 @@ int group_rdb_to_redis(void) {
             cmocka_unit_test_setup(test_rdb_to_redis_script, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_script_legacy, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_ipv6_localhost, setupTest),
-            //cmocka_unit_test_setup(test_rdb_tcp_timeout, setupTest), /* too long to run */
+            cmocka_unit_test_setup(test_rdb_tcp_timeout, setupTest),      /* slow; --slow-tests */
+            cmocka_unit_test_setup(test_rdb_tcp_write_timeout, setupTest),/* slow; --slow-tests */
     };
 
     int res = cmocka_run_group_tests(tests, NULL, NULL);
