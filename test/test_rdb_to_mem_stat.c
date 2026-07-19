@@ -80,6 +80,13 @@ static void test_memStat_fields_zset_skiplist(void **state) {
     free(buf);
 }
 
+static void test_memStat_fields_zset_listpack(void **state) {
+    UNUSED(state);
+    char *buf = runPrint(DUMP_FOLDER("zset_lp_v11.rdb"), "%k,%n,%i,%g");
+    assertKey(buf, "myzset", "myzset,listpack,24,3");
+    free(buf);
+}
+
 static void test_memStat_fields_lists(void **state) {
     UNUSED(state);
     char *buf = runPrint(DUMP_FOLDER("multiple_lists_strings.rdb"), "%k,%n,%i,%g");
@@ -91,10 +98,10 @@ static void test_memStat_fields_lists(void **state) {
 
 /*** Statistics report (deterministic, on a fixture) ***/
 
-static char *runStat(const char *rdbfile, long long nowSecs) {
+static char *runStat(const char *rdbfile, long long nowSecs, int flags) {
     RdbParser *p = RDB_createParserRdb(NULL);
     RDB_setLogLevel(p, RDB_LOG_ERR);
-    RdbxToStat *ts = RDBX_createHandlersToStat(p, 0, nowSecs, OUT);
+    RdbxToStat *ts = RDBX_createHandlersToStat(p, 0, nowSecs, flags, OUT);
     assert_non_null(ts);
     assert_non_null(RDBX_createReaderFile(p, rdbfile));
     RdbStatus s;
@@ -106,6 +113,28 @@ static char *runStat(const char *rdbfile, long long nowSecs) {
     return buf;
 }
 
+/* Golden-output regression: the whole report is deterministic (memory is librdb's
+ * own estimate derived from the RDB bytes, not a live Redis), so we pin the entire
+ * stat+histogram output on a diverse fixture. misc_with_stream.rdb spans six types
+ * (stream/string/hash/zset/set/list) and exercises every section at once: the
+ * grouped header, per-type rows with p90/p99 percentiles, the TOTAL row, volatile
+ * accounting (the far-future "rcs" key), keyspace-table overhead, the Top-N table
+ * with a formatted TTL, and multi-bucket item/memory histograms. now is pinned to
+ * 1s so the TTL renders deterministically. The expected output lives beside the
+ * fixture; regenerate it with:
+ *   ./bin/rdb-cli ./test/dumps/misc_with_stream.rdb -n 1 stat -h 0 \
+ *     > ./test/dumps/misc_with_stream_stat.expected */
+static void test_memStat_report(void **state) {
+    UNUSED(state);
+    char *expected = readFile(DUMP_FOLDER("misc_with_stream_stat.expected"), NULL, NULL);
+    assert_non_null(expected);
+    char *buf = runStat(DUMP_FOLDER("misc_with_stream.rdb"), 1,
+                        RDBX_STAT_HIST_ITEMS | RDBX_STAT_HIST_MEM);
+    assert_string_equal(buf, expected);
+    free(buf);
+    free(expected);
+}
+
 /* set_not_expired_v11.rdb holds one key ("mykey") with a far-future expiry. Pinning
  * the reference time on either side of it exercises the volatile/expired accounting.
  * The Top-N row ends with "<ttl>  <key>", so "expired  mykey" discriminates the two
@@ -113,14 +142,14 @@ static char *runStat(const char *rdbfile, long long nowSecs) {
 static void test_memStat_stat_expiry(void **state) {
     UNUSED(state);
     /* now ~= epoch: the key is volatile but not yet expired */
-    char *buf = runStat(DUMP_FOLDER("set_not_expired_v11.rdb"), 1);
+    char *buf = runStat(DUMP_FOLDER("set_not_expired_v11.rdb"), 1, 0);
     assert_non_null(strstr(buf, "Volatile keys hold"));
     assert_non_null(strstr(buf, "mykey"));
     assert_null(strstr(buf, "expired  mykey"));
     free(buf);
 
     /* now far in the future: the same key is now expired */
-    buf = runStat(DUMP_FOLDER("set_not_expired_v11.rdb"), 99999999999LL);
+    buf = runStat(DUMP_FOLDER("set_not_expired_v11.rdb"), 99999999999LL, 0);
     assert_non_null(strstr(buf, "Volatile keys hold"));
     assert_non_null(strstr(buf, "expired  mykey"));
     free(buf);
@@ -196,7 +225,9 @@ int group_rdb_to_mem_stat(void) {
         cmocka_unit_test(test_memStat_fields_hash_listpack),
         cmocka_unit_test(test_memStat_fields_set_intset),
         cmocka_unit_test(test_memStat_fields_zset_skiplist),
+        cmocka_unit_test(test_memStat_fields_zset_listpack),
         cmocka_unit_test(test_memStat_fields_lists),
+        cmocka_unit_test(test_memStat_report),
         cmocka_unit_test(test_memStat_stat_expiry),
         cmocka_unit_test(test_memStat_live_drift),
     };

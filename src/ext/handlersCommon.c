@@ -195,7 +195,7 @@ void rdbxAccountPair(RdbxKeyCtx *kc, uint64_t flen, uint64_t vlen) {
 
 void rdbxAccountZset(RdbxKeyCtx *kc, uint64_t mlen) {
     kc->items++;
-    kc->numStrings += 1;
+    kc->numStrings += 2;                              /* member + score: two listpack elements */
     kc->sumStrBytes += mlen + ZSET_SCORE_BYTES;       /* score counts for memory */
     if (mlen > kc->largest) kc->largest = mlen;       /* but not for "largest"   */
 }

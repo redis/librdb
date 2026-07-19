@@ -134,7 +134,8 @@ static void printUsage(int shortUsage) {
     printf("\t-o, --output <FILE>           Specify the output file. If not specified, output to stdout\n\n");
 
     printf("FORMAT_OPTIONS ('stat'):\n");
-    printf("\t-t, --top <N>                 Show the top N keys by estimated memory (Default: 10)\n\n");
+    printf("\t-t, --top <N>                 Show the top N keys by estimated memory (Default: 10)\n");
+    printf("\t-h, --histogram <0|1|2>       Append full per-type histograms: 0=both, 1=items/key, 2=memory/key\n\n");
 
     printf("FORMAT_OPTIONS ('json'):\n");
     printf("\t-i, --include <EXTRAS>        To include: {aux-val|func|stream-meta|db-info}\n");
@@ -264,17 +265,24 @@ static RdbRes formatPrint(RdbParser *parser, int argc, char **argv) {
 static RdbRes formatStat(RdbParser *parser, int argc, char **argv) {
     const char *topArg;
     int topN = 0;          /* 0 => handler default (10)         */
+    int flags = 0, histSet = 0, histWhich = 0;   /* histWhich: 0=all 1=items 2=memory */
 
     /* parse specific command options */
     for (int at = 1; at < argc; ++at) {
         char *opt = argv[at];
         if (getOptArg(argc, argv, &at, "-t", "--top", NULL, &topArg)) { topN = atoi(topArg); continue; }
+        if (getOptArgVal(argc, argv, &at, "-h", "--histogram", &histSet, &histWhich, 0, 2)) continue;
         loggerWrap(RDB_LOG_ERR, "Invalid 'stat' [FORMAT_OPTIONS] argument: %s\n", opt);
         printUsage(1);
         return RDB_ERR_GENERAL;
     }
 
-    if (RDBX_createHandlersToStat(parser, topN, nowSecs, NULL) == NULL)
+    if (histSet) {
+        if (histWhich != 2) flags |= RDBX_STAT_HIST_ITEMS;   /* 0=all, 1=items */
+        if (histWhich != 1) flags |= RDBX_STAT_HIST_MEM;     /* 0=all, 2=memory */
+    }
+
+    if (RDBX_createHandlersToStat(parser, topN, nowSecs, flags, NULL) == NULL)
         return RDB_ERR_GENERAL;
 
     return RDB_OK;

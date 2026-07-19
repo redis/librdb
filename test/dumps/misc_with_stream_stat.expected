@@ -1,0 +1,81 @@
+Statistics (Memory is estimated):
+                                      [     Expiry     ] [     Memory    ] [      items per key       ] [          memory per key         ]
+  type             keys         items  volatile  expired        mem   mem%    avg    p90    p99     max      avg      p90      p99      max
+  stream              5           200         0        0       2.5K  76.9%     40    208    208     200     513B     2.2K     2.2K     2.2K
+  string              3             -         1        0       248B   7.4%      -      -      -       -      82B     104B     104B     103B
+  hash                1             2         0        0       182B   5.5%      2      2      2       2     182B     176B     176B     182B
+  zset                1             1         0        0       158B   4.7%      1      1      1       1     158B     144B     144B     158B
+  set                 1             1         0        0        97B   2.9%      1      1      1       1      97B     104B     104B      97B
+  list                1             1         0        0        84B   2.5%      1      1      1       1      84B      88B      88B      84B
+  TOTAL              12           205         1        0       3.3K                                                                        
+
+  Volatile keys hold 103B (3.1% of memory)
+  Estimated keyspace tables (dict overhead): 240B
+  Estimated dataset memory: 3.5K (objects + tables; excludes server/client/frag)
+
+Top 10 keys by memory:
+        memory type        db        items   avg item      ttl  key
+          2.2K stream       0          200        11B     none  stream1
+          182B hash         0            2        91B     none  hset
+          158B zset         0            1       158B     none  zset
+          103B string       0            -          -   19694d  rcs
+           97B set          0            1        97B     none  set
+           94B string       0            -          -     none  hll
+           84B list         0            1        84B     none  list
+           66B stream       0            -          -     none  stream6
+           66B stream       0            -          -     none  stream3
+           66B stream       0            -          -     none  stream5
+
+Histograms (non-empty buckets; min = bucket lower bound, keys = key count, share = % of type, cum% = cumulative share):
+
+  stream / items per key
+           min           keys   share     cum%
+             0 :            4   80.0%    80.0%
+           192 :            1   20.0%   100.0%
+
+  stream / memory per key
+           min           keys   share     cum%
+           64B :            4   80.0%    80.0%
+          2.0K :            1   20.0%   100.0%
+
+  string / items per key
+           min           keys   share     cum%
+             0 :            3  100.0%   100.0%
+
+  string / memory per key
+           min           keys   share     cum%
+           48B :            1   33.3%    33.3%
+           80B :            1   33.3%    66.7%
+           96B :            1   33.3%   100.0%
+
+  hash / items per key
+           min           keys   share     cum%
+             2 :            1  100.0%   100.0%
+
+  hash / memory per key
+           min           keys   share     cum%
+          160B :            1  100.0%   100.0%
+
+  zset / items per key
+           min           keys   share     cum%
+             1 :            1  100.0%   100.0%
+
+  zset / memory per key
+           min           keys   share     cum%
+          128B :            1  100.0%   100.0%
+
+  set / items per key
+           min           keys   share     cum%
+             1 :            1  100.0%   100.0%
+
+  set / memory per key
+           min           keys   share     cum%
+           96B :            1  100.0%   100.0%
+
+  list / items per key
+           min           keys   share     cum%
+             1 :            1  100.0%   100.0%
+
+  list / memory per key
+           min           keys   share     cum%
+           80B :            1  100.0%   100.0%

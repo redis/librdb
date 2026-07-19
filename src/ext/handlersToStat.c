@@ -6,25 +6,53 @@
 
 #define STAT_TOPN_DEFAULT 10
 
+/* Per-type value distribution for p90/p99 reporting: a log-scale histogram with
+ * HIST_SUB sub-buckets per power of two (~19% bucket width). */
+#define HIST_LOG2_SUB  2                             /* sub-buckets per octave = 2^this (~19% bucket width) */
+#define HIST_SUB       (1 << HIST_LOG2_SUB)          /* derived: 4 sub-buckets, keeps the two in lockstep   */
+#define HIST_NBUCKETS  209                           /* 1 + HIST_SUB*52: value 0 + 52 octaves (2^0..2^51) */
+
+typedef struct Hist {
+    uint64_t bucket[HIST_NBUCKETS];
+} Hist;
+
 typedef struct TopEntry {
-    char        *key;       /* owned copy (RDB_alloc), freed on delete */
-    unsigned int keyLen;
-    RdbKeyInfo   info;
-    unsigned long items;
-    uint64_t     memBytes;
-    uint64_t     largest;
-    int          dbnum;
+    char          *key;      /* owned copy (RDB_alloc), freed on delete */
+    unsigned int   keyLen;
+    RdbKeyInfo     info;
+    unsigned long  items;
+    uint64_t       memBytes;
+    uint64_t       largest;
+    int            dbnum;
 } TopEntry;
+
+/* Per-data-type running aggregate (one instance per RDB_DATA_TYPE_*). */
+typedef struct TypeAgg {
+    uint64_t count;
+    uint64_t bytes;
+    uint64_t items;
+    uint64_t nVolatile;
+    uint64_t nExpired;
+    uint64_t maxItems;
+    uint64_t maxMem;
+    Hist     itemsHist;
+    Hist     memHist;
+} TypeAgg;
 
 struct RdbxToStat {
     RdbxHandlersBase base;   /* MUST be first (shared callbacks cast userData) */
-    struct { uint64_t count, bytes, items, nVolatile, nExpired; } typeAgg[RDB_DATA_TYPE_MAX];
-    uint64_t volatileBytes;  /* memory held by keys that carry an expiry */
-    uint64_t nowMs;          /* reference time for expiry evaluation (ms) */
-    uint64_t dbKeys, dbExpires;        /* key/expiry counts of the current db */
-    uint64_t keyspaceTableBytes;       /* accumulated keyspace dict bucket arrays */
-    uint64_t expiresTableBytes;        /* accumulated expires dict bucket arrays  */
-    TopEntry *top; int topCap, nTop;  /* top-N largest keys, kept as a min-heap (see topInsert) */
+    int histFlags;                /* RDBX_STAT_HIST_* : which per-type histograms to append */
+    uint64_t volatileBytes;       /* memory held by keys that carry an expiry */
+    uint64_t nowMs;               /* reference time for expiry evaluation (ms) */
+    uint64_t dbKeys;
+    uint64_t dbExpires;           /* key/expiry counts of the current db */
+    uint64_t keyspaceTableBytes;  /* accumulated keyspace dict bucket arrays */
+    uint64_t expiresTableBytes;   /* accumulated expires dict bucket arrays  */
+    TopEntry *top; 
+    int topCap;
+    int nTop;  /* top-N largest keys, kept as a min-heap (see heapTopInsert) */
+    
+    TypeAgg typeAgg[RDB_DATA_TYPE_MAX]; /* Aggregate statistics per type */
 };
 
 /* Bucket-array bytes of a hashtable holding `n` entries: next-power-of-two slots
@@ -37,10 +65,59 @@ static uint64_t dictTableBytes(uint64_t n) {
     return slots * 8 * 3 / 2;
 }
 
+/*** Per-type value distribution (p90 / p99) ***/
+
+static int hbit(uint64_t v) {   /* index of highest set bit; v >= 1 */
+#if defined(__GNUC__) || defined(__clang__)
+    return 63 - __builtin_clzll(v);
+#else
+    int r = 0; while (v >>= 1) r++; return r;
+#endif
+}
+
+/* Record one sample; small integers land in exact buckets, larger values in
+ * log buckets (HIST_SUB sub-buckets per octave). */
+static void histAdd(Hist *h, uint64_t v) {
+    int idx;
+    if (v == 0) idx = 0;
+    else {
+        int hi = hbit(v), shift = hi - HIST_LOG2_SUB;
+        uint64_t mant = (shift >= 0) ? (v >> shift) : (v << -shift);
+        idx = 1 + hi * HIST_SUB + (int) (mant & (HIST_SUB - 1));
+        if (idx >= HIST_NBUCKETS) idx = HIST_NBUCKETS - 1;
+    }
+    h->bucket[idx]++;
+}
+
+static uint64_t histLow(int idx) {   /* bucket lower edge */
+    int k = idx - 1, oct = k / HIST_SUB, sub = k % HIST_SUB;
+    uint64_t base = 1ULL << oct;
+    return base + (uint64_t) sub * base / HIST_SUB;
+}
+
+/* Representative value: midpoint of the bucket's [lower, next-lower) span.
+ * Exact for small integers; within ~half a bucket (~10%) for large values. */
+static uint64_t histRep(int idx) {
+    if (idx == 0) return 0;
+    uint64_t lo = histLow(idx);
+    return lo + (histLow(idx + 1) - lo) / 2;
+}
+
+/* Nearest-rank percentile (pct in 1..100) over `total` recorded samples. */
+static uint64_t histPct(const Hist *h, uint64_t total, unsigned pct) {
+    if (total == 0) return 0;
+    uint64_t rank = (total * pct + 99) / 100, cum = 0;
+    for (int i = 0; i < HIST_NBUCKETS; i++) {
+        cum += h->bucket[i];
+        if (cum >= rank) return histRep(i);
+    }
+    return histRep(HIST_NBUCKETS - 1);
+}
+
 /*** Statistics folding ***/
 
 /* Fill a top-N slot from the current key accumulator (owns a copy of the key). */
-static void topFill(RdbxToStat *ctx, TopEntry *e) {
+static void heapTopFill(RdbxToStat *ctx, TopEntry *e) {
     RdbxKeyCtx *kc = &ctx->base.keyCtx;
     e->keyLen = kc->keyLen;
     e->key = RDB_alloc(ctx->base.p, e->keyLen + 1);
@@ -53,40 +130,40 @@ static void topFill(RdbxToStat *ctx, TopEntry *e) {
     e->dbnum = ctx->base.dbnum;
 }
 
-static void topSwap(TopEntry *a, TopEntry *b) { TopEntry t = *a; *a = *b; *b = t; }
+static void heapTopSwap(TopEntry *a, TopEntry *b) { TopEntry t = *a; *a = *b; *b = t; }
 
 /* The top-N set is a binary min-heap keyed by memBytes, so the smallest kept key
  * is always at the root: each new key costs O(log N) instead of an O(N) scan. */
-static void topSiftUp(TopEntry *h, int i) {
+static void heapTopShiftUp(TopEntry *h, int i) {
     for (int parent; i > 0 && h[parent = (i - 1) / 2].memBytes > h[i].memBytes; i = parent)
-        topSwap(&h[parent], &h[i]);
+        heapTopSwap(&h[parent], &h[i]);
 }
 
-static void topSiftDown(TopEntry *h, int n, int i) {
+static void heapTopShiftDown(TopEntry *h, int n, int i) {
     for (;;) {
         int l = 2 * i + 1, r = 2 * i + 2, min = i;
         if (l < n && h[l].memBytes < h[min].memBytes) min = l;
         if (r < n && h[r].memBytes < h[min].memBytes) min = r;
         if (min == i) break;
-        topSwap(&h[min], &h[i]);
+        heapTopSwap(&h[min], &h[i]);
         i = min;
     }
 }
 
 /* Streaming top-N: keep only the N largest keys in min-heap */
-static void topInsert(RdbxToStat *ctx) {
+static void heapTopInsert(RdbxToStat *ctx) {
     RdbxKeyCtx *kc = &ctx->base.keyCtx;
     if (ctx->nTop < ctx->topCap) {          /* still filling: push and sift up */
-        topFill(ctx, &ctx->top[ctx->nTop]);
-        topSiftUp(ctx->top, ctx->nTop++);
+        heapTopFill(ctx, &ctx->top[ctx->nTop]);
+        heapTopShiftUp(ctx->top, ctx->nTop++);
     } else if (kc->memBytes > ctx->top[0].memBytes) {  /* bigger than the smallest kept */
         RDB_free(ctx->base.p, ctx->top[0].key);
-        topFill(ctx, &ctx->top[0]);
-        topSiftDown(ctx->top, ctx->nTop, 0);
+        heapTopFill(ctx, &ctx->top[0]);
+        heapTopShiftDown(ctx->top, ctx->nTop, 0);
     }
 }
 
-static void foldKey(RdbxToStat *ctx) {
+static void aggregateKey(RdbxToStat *ctx) {
     RdbxKeyCtx *kc = &ctx->base.keyCtx;
     int t = kc->info.dataType;
     ctx->dbKeys++;
@@ -95,6 +172,12 @@ static void foldKey(RdbxToStat *ctx) {
         ctx->typeAgg[t].count++;
         ctx->typeAgg[t].bytes += kc->memBytes;
         ctx->typeAgg[t].items += kc->items;
+        if (kc->items > ctx->typeAgg[t].maxItems) 
+            ctx->typeAgg[t].maxItems = kc->items;
+        if (kc->memBytes > ctx->typeAgg[t].maxMem)   
+            ctx->typeAgg[t].maxMem   = kc->memBytes;
+        histAdd(&ctx->typeAgg[t].itemsHist, kc->items);
+        histAdd(&ctx->typeAgg[t].memHist, kc->memBytes);
         if (kc->info.expiretime != -1) {
             ctx->typeAgg[t].nVolatile++;
             ctx->volatileBytes += kc->memBytes;
@@ -102,7 +185,7 @@ static void foldKey(RdbxToStat *ctx) {
                 ctx->typeAgg[t].nExpired++;
         }
     }
-    topInsert(ctx);
+    heapTopInsert(ctx);
 }
 
 /* qsort comparator for the final output pass (over min-heap) */
@@ -114,13 +197,29 @@ static int topCmpDesc(const void *a, const void *b) {
 /* Human-readable byte size. Rotating buffers so several calls in one fprintf
  * (e.g. memory + avg) don't alias. */
 static const char *human(uint64_t b) {
-    static char ring[4][24]; static int r = 0;
-    char *s = ring[r++ & 3];
+    static char ring[8][24]; static int r = 0;
+    char *s = ring[r++ & 7];
     const char *u[] = {"B", "K", "M", "G", "T"};
     double v = (double) b; int i = 0;
     while (v >= 1024 && i < 4) { v /= 1024; i++; }
-    if (i == 0) snprintf(s, 24, "%llu B", (unsigned long long) b);
-    else        snprintf(s, 24, "%.1f %s", v, u[i]);
+    if (i == 0) 
+        snprintf(s, 24, "%lluB", (unsigned long long) b);
+    else
+        snprintf(s, 24, "%.1f%s", v, u[i]);
+    
+    return s;
+}
+
+/* Human-readable count (base 1000), or "-" when zero. */
+static const char *humanCount(uint64_t n) {
+    static char ring[8][24]; static int r = 0;
+    char *s = ring[r++ & 7];
+    const char *u[] = {"", "K", "M", "B", "T"};
+    double v = (double) n; int i = 0;
+    if (n == 0) return "-";
+    while (v >= 1000 && i < 4) { v /= 1000; i++; }
+    if (i == 0) snprintf(s, 24, "%llu", (unsigned long long) n);
+    else        snprintf(s, 24, "%.1f%s", v, u[i]);
     return s;
 }
 
@@ -147,6 +246,40 @@ static const char *humanDur(long long expiretimeMs, uint64_t nowMs) {
     return buf;
 }
 
+/* Optional appendix (--histogram): every non-empty bucket of every per-type
+ * histogram, so the full items/memory distribution can be inspected. Buckets are
+ * labelled by their lower bound (exact for small values, coarse for large). */
+static void renderHistograms(RdbxToStat *ctx, const int *order, int nTypes) {
+    FILE *o = ctx->base.outfile;
+    fprintf(o, "\nHistograms (non-empty buckets; min = bucket lower bound, keys = key count, "
+               "share = %% of type, cum%% = cumulative share):\n");
+    for (int idx = 0; idx < nTypes; idx++) {
+        int t = order[idx];
+        uint64_t total = ctx->typeAgg[t].count;   /* every key is recorded once */
+        for (int which = 0; which < 2; which++) {
+            int want = which ? RDBX_STAT_HIST_MEM : RDBX_STAT_HIST_ITEMS;
+            if (!(ctx->histFlags & want)) continue;
+            const Hist *h = which ? &ctx->typeAgg[t].memHist : &ctx->typeAgg[t].itemsHist;
+            int any = 0;
+            for (int i = 0; i < HIST_NBUCKETS && !any; i++) any = (h->bucket[i] != 0);
+            if (!any) continue;
+            fprintf(o, "\n  %s / %s per key\n", rdbxTypeName(t), which ? "memory" : "items");
+            fprintf(o, "    %10s   %12s  %6s  %7s\n", "min", "keys", "share", "cum%");
+            uint64_t cum = 0;
+            for (int i = 0; i < HIST_NBUCKETS; i++) {
+                if (!h->bucket[i]) continue;
+                cum += h->bucket[i];
+                const char *label = (i == 0) ? "0"
+                    : (which ? human(histLow(i)) : humanCount(histLow(i)));
+                double pct  = total ? (h->bucket[i] * 100.0 / total) : 0;
+                double cpct = total ? (cum * 100.0 / total) : 0;
+                fprintf(o, "    %10s : %12llu  %5.1f%%  %6.1f%%\n",
+                        label, (unsigned long long) h->bucket[i], pct, cpct);
+            }
+        }
+    }
+}
+
 /* Built-in formatted statistics report: a by-type table (sorted by memory, with
  * a TOTAL row) followed by the largest-by-memory keys. */
 static void renderPretty(RdbxToStat *ctx) {
@@ -164,7 +297,9 @@ static void renderPretty(RdbxToStat *ctx) {
     for (int i = 0; i < nTypes; i++)
         for (int j = i + 1; j < nTypes; j++)
             if (ctx->typeAgg[order[j]].bytes > ctx->typeAgg[order[i]].bytes) {
-                int tmp = order[i]; order[i] = order[j]; order[j] = tmp;
+                int tmp = order[i]; 
+                order[i] = order[j]; 
+                order[j] = tmp;
             }
 
     uint64_t totalItems = 0, totalVol = 0, totalExp = 0;
@@ -176,22 +311,35 @@ static void renderPretty(RdbxToStat *ctx) {
     }
 
     fprintf(o, "Statistics (Memory is estimated):\n");
-    fprintf(o, "  %-8s %12s %14s %10s %10s %9s %12s %10s %7s\n",
-            "type", "keys", "items", "items/key", "volatile", "expired", "memory", "avg/key", "mem%");
+    /* Two-line header: each bracketed group label spans its columns exactly. The
+     * 38-space pad, the single spaces between brackets, and the bracket widths all
+     * track the row format below -- keep them in sync if column widths change. */
+    fprintf(o, "%38s[     Expiry     ] [     Memory    ] [      items per key       ] [          memory per key         ]\n", "");
+    fprintf(o, "  %-8s %12s %13s %9s %8s %10s %6s %6s %6s %6s %7s %8s %8s %8s %8s\n",
+            "type", "keys", "items", "volatile", "expired", "mem", "mem%",
+            "avg", "p90", "p99", "max", "avg", "p90", "p99", "max");
     for (int i = 0; i < nTypes; i++) {
         int t = order[i];
         uint64_t c = ctx->typeAgg[t].count, b = ctx->typeAgg[t].bytes, it = ctx->typeAgg[t].items;
         double pct = totalBytes ? (b * 100.0 / totalBytes) : 0;
-        fprintf(o, "  %-8s %12llu %14s %10s %10llu %9llu %12s %10s %6.1f%%\n",
+        fprintf(o, "  %-8s %12llu %13s %9llu %8llu %10s %5.1f%% %6s %6s %6s %7s %8s %8s %8s %8s\n",
                 rdbxTypeName(t), (unsigned long long) c, countOrDash(it),
-                countOrDash(c ? it / c : 0),
                 (unsigned long long) ctx->typeAgg[t].nVolatile,
                 (unsigned long long) ctx->typeAgg[t].nExpired,
-                human(b), human(c ? b / c : 0), pct);
+                human(b), pct,
+                humanCount(c ? it / c : 0),
+                humanCount(histPct(&ctx->typeAgg[t].itemsHist, c, 90)),
+                humanCount(histPct(&ctx->typeAgg[t].itemsHist, c, 99)),
+                humanCount(ctx->typeAgg[t].maxItems),
+                human(c ? b / c : 0),
+                human(histPct(&ctx->typeAgg[t].memHist, c, 90)),
+                human(histPct(&ctx->typeAgg[t].memHist, c, 99)),
+                human(ctx->typeAgg[t].maxMem));
     }
-    fprintf(o, "  %-8s %12llu %14llu %10s %10llu %9llu %12s\n\n", "TOTAL",
-            (unsigned long long) totalKeys, (unsigned long long) totalItems, "",
-            (unsigned long long) totalVol, (unsigned long long) totalExp, human(totalBytes));
+    fprintf(o, "  %-8s %12llu %13llu %9llu %8llu %10s %6s %6s %6s %6s %7s %8s %8s %8s %8s\n\n", "TOTAL",
+            (unsigned long long) totalKeys, (unsigned long long) totalItems,
+            (unsigned long long) totalVol, (unsigned long long) totalExp,
+            human(totalBytes), "", "", "", "", "", "", "", "", "");
 
     if (ctx->volatileBytes) {
         double pct = totalBytes ? (ctx->volatileBytes * 100.0 / totalBytes) : 0;
@@ -217,6 +365,8 @@ static void renderPretty(RdbxToStat *ctx) {
                     humanDur(e->info.expiretime, ctx->nowMs), e->key);
         }
     }
+
+    if (ctx->histFlags) renderHistograms(ctx, order, nTypes);
 }
 
 /*** Handling ***/
@@ -290,7 +440,7 @@ static RdbRes toStatEndKey(RdbParser *p, void *userData) {
 
     if (ctx->base.keyCtx.skip == 0) {  /* aggregate types (strings handled at value) */
         rdbxComputeMemBytes(&ctx->base.keyCtx);
-        foldKey(ctx);
+        aggregateKey(ctx);
     }
     RDB_bulkCopyFree(p, ctx->base.keyCtx.key);
     ctx->base.keyCtx.key = NULL;
@@ -300,7 +450,7 @@ static RdbRes toStatEndKey(RdbParser *p, void *userData) {
 static RdbRes toStatString(RdbParser *p, void *userData, RdbBulk string) {
     RdbxToStat *ctx = userData;
     rdbxKeyCtxSetString(&ctx->base.keyCtx, string, RDB_bulkLen(p, string));
-    foldKey(ctx);
+    aggregateKey(ctx);
     ctx->base.keyCtx.skip = 1;   /* fully handled here; don't re-handle at endKey */
     return RDB_OK;
 }
@@ -324,7 +474,7 @@ static void deleteStatCtx(RdbParser *p, void *data) {
 /*** API ***/
 
 RdbxToStat *RDBX_createHandlersToStat(RdbParser *p, int topN, long long nowSecs,
-                                      const char *outFilename) {
+                                      int flags, const char *outFilename) {
     RdbxToStat *ctx = RDB_alloc(p, sizeof(RdbxToStat));
     memset(ctx, 0, sizeof(RdbxToStat));
     if (rdbxBaseInit(p, &ctx->base, outFilename)) {
@@ -332,6 +482,7 @@ RdbxToStat *RDBX_createHandlersToStat(RdbParser *p, int topN, long long nowSecs,
         return NULL;
     }
     ctx->nowMs = (uint64_t) (nowSecs > 0 ? nowSecs : time(NULL)) * 1000ULL;
+    ctx->histFlags = flags & (RDBX_STAT_HIST_ITEMS | RDBX_STAT_HIST_MEM);
     ctx->topCap = (topN > 0) ? topN : STAT_TOPN_DEFAULT;
     ctx->top = RDB_alloc(p, sizeof(TopEntry) * ctx->topCap);
     ctx->nTop = 0;
