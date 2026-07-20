@@ -50,6 +50,7 @@ void teardownRedisServer(void);
 void cleanup_json_sign_service(void);
 int isSetRedisServer(void);
 char *sendRedisCmd(const char *cmd, int expRetType, char *expRsp);
+void sendRedisCmdLoop(const char *cmdFmt, int n); /* send cmd n times, substituting index 0..n-1 into %d */
 int isSupportRestoreModuleAux(void);
 
 /* TLS Support */

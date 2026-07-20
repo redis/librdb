@@ -321,6 +321,17 @@ char *sendRedisCmd(const char *cmd, int expRetType, char *expRsp) {
     return rspbuf;
 }
 
+/* Send 'cmdFmt' to Redis 'n' times, substituting the iteration index (0..n-1)
+ * into each '%d' in the command, up to two (e.g. "HSET h f%d v%d"). The index is
+ * always passed twice; commands with fewer '%d' just ignore the extra arg. */
+void sendRedisCmdLoop(const char *cmdFmt, int n) {
+    char buf[4096];
+    for (int i = 0; i < n; i++) {
+        snprintf(buf, sizeof(buf), cmdFmt, i, i);
+        sendRedisCmd(buf, -1, NULL);
+    }
+}
+
 void setRedisInstallFolder(const char *path) {
     redisInstallFolder = path;
 }

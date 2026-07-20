@@ -163,25 +163,6 @@ static long long memUsage(const char *key) {
     return atoll(sendRedisCmd(cmd, REDIS_REPLY_INTEGER, NULL));
 }
 
-static void fillN(const char *cmd, const char *key, int n) {
-    char buf[16384];
-    int off = snprintf(buf, sizeof(buf), "%s %s", cmd, key);
-    for (int i = 0; i < n; i++) off += snprintf(buf + off, sizeof(buf) - off, " e%d", i);
-    sendRedisCmd(buf, -1, NULL);
-}
-static void fillHash(const char *key, int n) {
-    char buf[16384];
-    int off = snprintf(buf, sizeof(buf), "HSET %s", key);
-    for (int i = 0; i < n; i++) off += snprintf(buf + off, sizeof(buf) - off, " f%d v%d", i, i);
-    sendRedisCmd(buf, -1, NULL);
-}
-static void fillZset(const char *key, int n) {
-    char buf[16384];
-    int off = snprintf(buf, sizeof(buf), "ZADD %s", key);
-    for (int i = 0; i < n; i++) off += snprintf(buf + off, sizeof(buf) - off, " %d m%d", i, i);
-    sendRedisCmd(buf, -1, NULL);
-}
-
 static void test_memStat_live_drift(void **state) {
     UNUSED(state);
     if (!isSetRedisServer()) { printf("    (skipped: no live Redis server)\n"); return; }
@@ -193,10 +174,14 @@ static void test_memStat_live_drift(void **state) {
     sendRedisCmd("FLUSHALL", -1, NULL);
     sendRedisCmd("SET str_raw aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
                  "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", -1, NULL); keys[n++] = "str_raw";
-    fillN("RPUSH", "list_ql", 300);   keys[n++] = "list_ql";
-    fillN("SADD", "set_ht", 300);     keys[n++] = "set_ht";
-    fillHash("hash_ht", 300);         keys[n++] = "hash_ht";
-    fillZset("zset_sl", 300);         keys[n++] = "zset_sl";
+    /* String elements on purpose: integer members would collapse the set into an
+     * intset and int-encode the list's listpack (compact encodings the estimate
+     * doesn't model), whereas the names ("_ht"/"_ql") and the estimate target the
+     * hashtable/quicklist encodings that string elements produce. */
+    sendRedisCmdLoop("RPUSH list_ql e%d", 300);    keys[n++] = "list_ql";
+    sendRedisCmdLoop("SADD set_ht e%d", 300);      keys[n++] = "set_ht";
+    sendRedisCmdLoop("HSET hash_ht f%d v%d", 300); keys[n++] = "hash_ht";
+    sendRedisCmdLoop("ZADD zset_sl %d m%d", 300);  keys[n++] = "zset_sl";
 
     for (int i = 0; i < n; i++) expected[i] = memUsage(keys[i]);
     sendRedisCmd("SAVE", -1, "OK");
