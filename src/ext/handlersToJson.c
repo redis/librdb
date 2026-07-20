@@ -27,28 +27,41 @@ typedef enum
     R2J_IN_HASH,
     R2J_IN_ZSET,
 
-    /* Possible states in R2J_IN_STREAM */
-    R2J_IN_STREAM,
-    R2J_IN_STREAM_ENTRIES,
-    R2J_IN_STREAM_ENTRIES_PAIRS,
-    R2J_IN_STREAM_CG,
-    R2J_IN_STREAM_CG_PEL,
-    R2J_IN_STREAM_CG_CONSUMER,
-    R2J_IN_STREAM_CG_CONSUMER_PEL,
-    R2J_IN_STREAM_CG_NACK,
-
-    /* IDMP states */
-    R2J_IN_STREAM_IDMP,
-    R2J_IN_STREAM_IDMP_PRODUCER,
-    R2J_IN_STREAM_IDMP_ENTRY,
+    R2J_IN_STREAM,  /* value is a stream; ctx->streamState tracks the phase within it */
 
     R2J_IN_ARRAY, /*(v14+)*/
 
 } RdbxToJsonState;
 
+/* Sub-state while state == R2J_IN_STREAM. The stream is emitted in phases:
+ * its entries, then metadata scalars, then the groups/idmp subtree (whose
+ * nesting is tracked by the container stack, not by these values). */
+typedef enum
+{
+    R2J_STREAM_ENTRIES,       /* between entries (entries array open)          */
+    R2J_STREAM_ENTRY_FIELDS,  /* mid-entry, appending field:value to "items"   */
+    R2J_STREAM_META,          /* entries closed, awaiting groups/idmp          */
+    R2J_STREAM_SUBTREE,       /* inside the groups/idmp subtree (stack-tracked)*/
+} RdbxStreamState;
+
+/* Nesting levels of a key's value containers, outer (small) to inner (large).
+ * Only the ordinal matters: jUnwindTo(level) closes every open container whose
+ * level is >= the requested one, so toJsonEndKey just unwinds to 0. Siblings
+ * that never coexist on the stack (e.g. "entries"/"groups"/"idmp", or a group's
+ * "pending"/"consumers"/"nacked") share a level. */
+enum {
+    JLVL1_VALUE = 1,                       /* the key's top-level container: list/set/hash/zset/array/stream object */
+    JLVL2_ENTRIES = 2, JLVL2_GROUPS = 2, JLVL2_IDMP = 2, /* direct children of the value */
+    JLVL3_GROUP = 3,  JLVL3_PRODUCERS = 3,
+    JLVL4_GPEL = 4,   JLVL4_NACKED = 4, JLVL4_CONSUMERS = 4, JLVL4_PRODUCER = 4,
+    JLVL5_CONSUMER = 5, JLVL5_PENTRIES = 5,
+    JLVL6_CPEL = 6,
+};
+
 struct RdbxToJson {
     RdbxToJsonConf conf;
     RdbxToJsonState state;
+    RdbxStreamState streamState;  /* phase within a stream; valid while state == R2J_IN_STREAM */
 
     char *outfileName;  /* Holds output filename or equals _STDOUT_STR */
     FILE *outfile;
@@ -63,7 +76,42 @@ struct RdbxToJson {
     unsigned int count_keys;
     unsigned int count_functions;
     unsigned int count_db;
+
+    /* Stack of open JSON containers for the current key's value. Each opener
+     * records the string that closes it (a literal, e.g. "]" or "]}"); the
+     * opening bracket itself is part of the caller's own output. jUnwindTo()
+     * pops and prints closers on demand, so toJsonEndKey just unwinds to 0.
+     * Depth is bounded by the deepest nesting (stream: object > groups > group >
+     * consumers > consumer > pel). */
+    struct { int level; const char *close; } stack[8];
+    int stackTop;
 };
+
+/* Record an open container without printing anything - only its closer string. */
+static void jPush(RdbxToJson *ctx, int level, const char *close) {
+    ctx->stack[ctx->stackTop].level = level;
+    ctx->stack[ctx->stackTop].close = close;
+    ctx->stackTop++;
+}
+
+/* Open a container: print its opening text (bracket, and any separator/label
+ * that precedes it) and record the matching closer for later jUnwindTo(). Any
+ * formatted body is printed by the caller afterwards. */
+static void jOpen(RdbxToJson *ctx, int level, const char *open, const char *close) {
+    fputs(open, ctx->outfile);
+    jPush(ctx, level, close);
+}
+
+/* Level of the innermost open container, or 0 if the stack is empty. */
+static int jTop(RdbxToJson *ctx) {
+    return ctx->stackTop ? ctx->stack[ctx->stackTop - 1].level : 0;
+}
+
+/* Close (pop + print) every open container whose level is >= `level`. */
+static void jUnwindTo(RdbxToJson *ctx, int level) {
+    while (ctx->stackTop && ctx->stack[ctx->stackTop - 1].level >= level)
+        fputs(ctx->stack[--ctx->stackTop].close, ctx->outfile);
+}
 
 const char *jsonMetaPrefix = "__";  /* Distinct meta from data with prefix string. */
 
@@ -271,56 +319,19 @@ static RdbRes toJsonAuxField(RdbParser *p, void *userData, RdbBulk auxkey, RdbBu
 static RdbRes toJsonEndKey(RdbParser *p, void *userData) {
     RdbxToJson *ctx = userData;
 
-    /* output json part */
+    /* Close whatever containers this key's value left open. For scalars and
+     * empty values (KEY/STRING) the stack is empty and this is a no-op. */
     switch(ctx->state) {
-        case R2J_IN_STREAM:
-            fprintf(ctx->outfile, "\n   }");
-            break;
-        case R2J_IN_STREAM_ENTRIES:
-            fprintf(ctx->outfile, "\n   ]}");
-            break;
-        case R2J_IN_STREAM_CG:
-            fprintf(ctx->outfile, "}]}");
-            break;
-        case R2J_IN_STREAM_CG_PEL:
-            fprintf(ctx->outfile, "]}]}");
-            break;
-        case R2J_IN_STREAM_CG_CONSUMER:
-            fprintf(ctx->outfile, "}]}]}");
-            break;
-        case R2J_IN_STREAM_CG_CONSUMER_PEL:
-            fprintf(ctx->outfile, "]}]}]}");
-            break;
-        case R2J_IN_STREAM_CG_NACK:
-            fprintf(ctx->outfile, "]}]}");
-            break;
-
-        /* IDMP states */
-        case R2J_IN_STREAM_IDMP:
-            fprintf(ctx->outfile, "}}");
-            break;
-        case R2J_IN_STREAM_IDMP_PRODUCER:
-            fprintf(ctx->outfile, "}]}}");
-            break;
-        case R2J_IN_STREAM_IDMP_ENTRY:
-            fprintf(ctx->outfile, "]}]}}");
-            break;
-
-        case R2J_IN_LIST:
-        case R2J_IN_SET:
-            fprintf(ctx->outfile, "]");
-            break;
-        case R2J_IN_HASH:
-        case R2J_IN_ZSET:
-            fprintf(ctx->outfile, "}");
-            break;
-        case R2J_IN_ARRAY:
-            /* close elements array + wrapper object */
-            fprintf(ctx->outfile, "]}");
-            break;
         case R2J_IN_KEY:
         case R2J_IN_STRING:
-            break; /* do nothing */
+        case R2J_IN_LIST:
+        case R2J_IN_SET:
+        case R2J_IN_HASH:
+        case R2J_IN_ZSET:
+        case R2J_IN_ARRAY:
+        case R2J_IN_STREAM:
+            jUnwindTo(ctx, 0);
+            break;
         default:
             RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
                             "toJsonEndKey(): Invalid state value: %d", ctx->state);
@@ -350,6 +361,7 @@ static RdbRes toJsonNewKey(RdbParser *p, void *userData, RdbBulk key, RdbKeyInfo
 
     /* update new state */
     ctx->state = R2J_IN_KEY;
+    ctx->stackTop = 0; /* fresh container stack per key */
 
     /* output json part */
     fprintf(ctx->outfile, "%s    ", (++ctx->count_keys == 1) ? "" : ",\n");
@@ -462,7 +474,7 @@ static RdbRes toJsonList(RdbParser *p, void *userData, RdbBulk item) {
     if (ctx->state == R2J_IN_KEY) {
 
         /* output json part */
-        fprintf(ctx->outfile, "[");
+        jOpen(ctx, JLVL1_VALUE, "[", /*close:*/"]");
         outputQuotedEscaping(ctx, item, RDB_bulkLen(p, item));
 
         /* update new state */
@@ -491,7 +503,7 @@ static RdbRes toJsonSet(RdbParser *p, void *userData, RdbBulk member) {
     if (ctx->state == R2J_IN_KEY) {
 
         /* output json part */
-        fprintf(ctx->outfile, "[");
+        jOpen(ctx, JLVL1_VALUE, "[", /*close:*/"]");
         outputQuotedEscaping(ctx, member, RDB_bulkLen(p, member));
 
         /* update new state */
@@ -528,7 +540,7 @@ static RdbRes toJsonZset(RdbParser *p, void *userData, RdbBulk member, double sc
 
     if (ctx->state == R2J_IN_KEY) {
         /* output json part */
-        fprintf(ctx->outfile, "{");
+        jOpen(ctx, JLVL1_VALUE, "{", /*close:*/"}");
         outputQuotedEscaping(ctx, member, RDB_bulkLen(p, member));
         fprintf(ctx->outfile, ":\"%.*s\"", len, scoreStr);
 
@@ -561,7 +573,7 @@ static RdbRes toJsonHash(RdbParser *p, void *userData, RdbBulk field,
     if (ctx->state == R2J_IN_KEY) {
 
         /* output json part */
-        fprintf(ctx->outfile, "{");
+        jOpen(ctx, JLVL1_VALUE, "{", /*close:*/"}");
         outputQuotedEscaping(ctx, field, RDB_bulkLen(p, field));
         fprintf(ctx->outfile, ":");
         outputQuotedEscaping(ctx, value, RDB_bulkLen(p, value));
@@ -610,20 +622,24 @@ static RdbRes toJsonFunction(RdbParser *p, void *userData, RdbBulk func) {
 static RdbRes toJsonStreamItem(RdbParser *p, void *userData, RdbStreamID *id, RdbBulk field, RdbBulk value, int64_t itemsLeft) {
     RdbxToJson *ctx = userData;
 
-    if ( (ctx->state == R2J_IN_KEY) || (ctx->state == R2J_IN_STREAM_ENTRIES)) {
-        /* start of stream array of entries */
-        if (ctx->state == R2J_IN_KEY)
-            fprintf(ctx->outfile, "{\n      \"entries\":[");
+    if ( (ctx->state == R2J_IN_KEY) ||
+         (ctx->state == R2J_IN_STREAM && ctx->streamState == R2J_STREAM_ENTRIES) ) {
+        /* first field of a new entry */
+        int firstEntry = (ctx->state == R2J_IN_KEY);
+        if (firstEntry) {
+            jOpen(ctx, JLVL1_VALUE, "{", /*close:*/"}");  /* stream object */
+            jOpen(ctx, JLVL2_ENTRIES, "\n      \"entries\":[", "]"); /* entries array */
+            ctx->state = R2J_IN_STREAM;
+        }
 
         /* output another stream entry */
         fprintf(ctx->outfile, "%c\n        { \"id\":\"%" PRIu64 "-%" PRIu64 "\", ",
-                (ctx->state == R2J_IN_STREAM_ENTRIES) ? ',' : ' ',
-                id->ms, id->seq );
+                firstEntry ? ' ' : ',', id->ms, id->seq );
         fprintf(ctx->outfile, "\"items\":{");
         outputQuotedEscaping(ctx, field, RDB_bulkLen(p, field));
         fprintf(ctx->outfile, ":");
         outputQuotedEscaping(ctx, value, RDB_bulkLen(p, value));
-    } else if (ctx->state == R2J_IN_STREAM_ENTRIES_PAIRS) {
+    } else if (ctx->state == R2J_IN_STREAM && ctx->streamState == R2J_STREAM_ENTRY_FIELDS) {
         outputQuotedEscaping(ctx, field, RDB_bulkLen(p, field));
         fprintf(ctx->outfile, ":");
         outputQuotedEscaping(ctx, value, RDB_bulkLen(p, value));
@@ -635,10 +651,10 @@ static RdbRes toJsonStreamItem(RdbParser *p, void *userData, RdbStreamID *id, Rd
 
     if (itemsLeft) {
         fprintf(ctx->outfile, ", ");
-        ctx->state = R2J_IN_STREAM_ENTRIES_PAIRS;
+        ctx->streamState = R2J_STREAM_ENTRY_FIELDS;
     } else {
         fprintf(ctx->outfile, "} }");
-        ctx->state = R2J_IN_STREAM_ENTRIES;
+        ctx->streamState = R2J_STREAM_ENTRIES;
     }
     return RDB_OK;
 }
@@ -646,15 +662,19 @@ static RdbRes toJsonStreamItem(RdbParser *p, void *userData, RdbStreamID *id, Rd
 static RdbRes toJsonStreamMetadata(RdbParser *p, void *userData, RdbStreamMeta *meta) {
     RdbxToJson *ctx = userData;
 
-    if (ctx->state == R2J_IN_KEY) /* no entries recorded. place empty array */
-        fprintf(ctx->outfile, "{\n      \"entries\":[");
-    else if (ctx->state != R2J_IN_STREAM_ENTRIES) {
+    if (ctx->state == R2J_IN_KEY) {  /* no entries recorded - emit empty array */
+        jOpen(ctx, JLVL1_VALUE, "{", "}");      /* stream object */
+        fprintf(ctx->outfile, "\n      \"entries\":[]");
+        ctx->state = R2J_IN_STREAM;
+    } else if (ctx->state == R2J_IN_STREAM && ctx->streamState == R2J_STREAM_ENTRIES) {
+        jUnwindTo(ctx, JLVL2_ENTRIES);          /* close the entries array */
+    } else {
         RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
                         "toJsonStreamMetadata(): Invalid state value: %d", ctx->state);
         return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
     }
-    ctx->state = R2J_IN_STREAM;
-    fprintf(ctx->outfile, "],\n      \"length\": %" PRIu64 ", ", meta->length);
+    ctx->streamState = R2J_STREAM_META;
+    fprintf(ctx->outfile, ",\n      \"length\": %" PRIu64 ", ", meta->length);
     fprintf(ctx->outfile, "\n      \"entriesAdded\": %" PRIu64 ", ", meta->entriesAdded);
     fprintf(ctx->outfile, "\n      \"firstID\": \"%" PRIu64 "-%" PRIu64 "\", ", meta->firstID.ms, meta->firstID.seq);
     fprintf(ctx->outfile, "\n      \"lastID\": \"%" PRIu64 "-%" PRIu64 "\", ", meta->lastID.ms, meta->lastID.seq);
@@ -664,207 +684,185 @@ static RdbRes toJsonStreamMetadata(RdbParser *p, void *userData, RdbStreamMeta *
 
 static RdbRes toJsonStreamNewCGroup(RdbParser *p, void *userData, RdbBulk grpName, RdbStreamGroupMeta *meta) {
     RdbxToJson *ctx = userData;
-    char *prefix;
-    if (ctx->state == R2J_IN_STREAM) {
-        prefix = ",\n      \"groups\": [\n";
-    } else if (ctx->state == R2J_IN_STREAM_CG) {
-        prefix = "},\n";
-    } else if (ctx->state == R2J_IN_STREAM_CG_PEL) {
-        prefix = "]},\n";
-    } else if (ctx->state == R2J_IN_STREAM_CG_CONSUMER_PEL) {
-        prefix = "]}]},\n";
-    } else if (ctx->state == R2J_IN_STREAM_CG_CONSUMER) {
-        prefix = "}]},\n";
-    } else if (ctx->state == R2J_IN_STREAM_CG_NACK) {
-        prefix = "]},\n";
+
+    if (ctx->state == R2J_IN_STREAM && ctx->streamState == R2J_STREAM_META) {
+        /* first group: open the "groups" array */
+        jOpen(ctx, JLVL2_GROUPS, ",\n      \"groups\": [\n", "]");
+    } else if (ctx->state == R2J_IN_STREAM && ctx->streamState == R2J_STREAM_SUBTREE) {
+        /* sibling group: close the previous group and whatever it left open */
+        jUnwindTo(ctx, JLVL3_GROUP);
+        fprintf(ctx->outfile, ",\n");
     } else {
         RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
                         "toJsonStreamNewCGroup(): Invalid state value: %d", ctx->state);
         return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
     }
-    fprintf(ctx->outfile, "%s        {\"name\": \"%s\", \"lastid\": \"%" PRIu64 "-%" PRIu64 "\", \"entriesRead\": %" PRIu64,
-            prefix, grpName, meta->lastId.ms, meta->lastId.seq, meta->entriesRead);
 
-    ctx->state = R2J_IN_STREAM_CG;
+    jOpen(ctx, JLVL3_GROUP, "        {", "}");
+    fprintf(ctx->outfile, "\"name\": \"%s\", \"lastid\": \"%" PRIu64 "-%" PRIu64 "\", \"entriesRead\": %" PRIu64,
+            grpName, meta->lastId.ms, meta->lastId.seq, meta->entriesRead);
+
+    ctx->streamState = R2J_STREAM_SUBTREE;
     return RDB_OK;
 }
 
 static RdbRes toJsonStreamCGroupPendingEntry(RdbParser *p, void *userData, RdbStreamPendingEntry *pe) {
-    char *prefix;
     RdbxToJson *ctx = userData;
-    if (ctx->state == R2J_IN_STREAM_CG) {
-        ctx->state = R2J_IN_STREAM_CG_PEL;
-        prefix = ",\n         \"pending\": [ ";
-    } else if (ctx->state == R2J_IN_STREAM_CG_PEL) {
-        prefix = ", ";
-    } else {
+
+    if (ctx->state != R2J_IN_STREAM || ctx->streamState != R2J_STREAM_SUBTREE) {
         RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
                         "toJsonStreamCGroupPendingEntry(): Invalid state value: %d", ctx->state);
         return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
     }
-    fprintf(ctx->outfile, "%s\n           { \"sent\": %" PRIu64 ", \"id\":\"%" PRIu64 "-%" PRIu64 "\", \"count\": %" PRIu64 " }",
-            prefix, pe->deliveryTime, pe->id.ms, pe->id.seq, pe->deliveryCount);
+
+    if (jTop(ctx) == JLVL4_GPEL)
+        fprintf(ctx->outfile, ", ");                   /* another entry in the open PEL */
+    else
+        jOpen(ctx, JLVL4_GPEL, ",\n         \"pending\": [ ", "]"); /* open the group's "pending" array */
+
+    fprintf(ctx->outfile, "\n           { \"sent\": %" PRIu64 ", \"id\":\"%" PRIu64 "-%" PRIu64 "\", \"count\": %" PRIu64 " }",
+            pe->deliveryTime, pe->id.ms, pe->id.seq, pe->deliveryCount);
     return RDB_OK;
 }
 
 static RdbRes toJsonStreamNewConsumer(RdbParser *p, void *userData, RdbBulk consName, RdbStreamConsumerMeta *meta) {
     RdbxToJson *ctx = userData;
-    char *prefix ="";
 
-    if (ctx->state == R2J_IN_STREAM_CG) {
-        prefix = ",\n         \"consumers\"";
-    } else if (ctx->state == R2J_IN_STREAM_CG_PEL) {
-        /* close pending entries array */
-        prefix = "],\n         \"consumers\": [";
-    } else if (ctx->state == R2J_IN_STREAM_CG_CONSUMER) {
-        prefix = "}, ";
-    } else if (ctx->state == R2J_IN_STREAM_CG_CONSUMER_PEL) {
-        prefix = "]}, "; /* take care to close previous cons + cons PEL */
-    } else {
+    if (ctx->state != R2J_IN_STREAM || ctx->streamState != R2J_STREAM_SUBTREE) {
         RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
                         "toJsonStreamNewConsumer(): Invalid state value: %d", ctx->state);
         return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
     }
 
-    ctx->state = R2J_IN_STREAM_CG_CONSUMER;
-    fprintf(ctx->outfile, "%s\n           { \"name\": \"%s\", \"activeTime\": %lld, \"seenTime\": %lld",
-            prefix, consName, meta->activeTime, meta->seenTime);
+    if (jTop(ctx) == JLVL5_CONSUMER || jTop(ctx) == JLVL6_CPEL) {
+        /* sibling consumer: close the previous consumer (and its PEL) */
+        jUnwindTo(ctx, JLVL5_CONSUMER);
+        fprintf(ctx->outfile, ", ");
+    } else {
+        /* first consumer: close the global PEL if open, then open "consumers" */
+        jUnwindTo(ctx, JLVL4_CONSUMERS);
+        jOpen(ctx, JLVL4_CONSUMERS, ",\n         \"consumers\": [", "]");
+    }
+
+    jOpen(ctx, JLVL5_CONSUMER, "\n           { ", "}");
+    fprintf(ctx->outfile, "\"name\": \"%s\", \"activeTime\": %lld, \"seenTime\": %lld",
+            consName, meta->activeTime, meta->seenTime);
 
     return RDB_OK;
 }
 
 static RdbRes toJsonStreamConsumerPendingEntry(RdbParser *p, void *userData, RdbStreamID *streamId) {
-    UNUSED(p);
     RdbxToJson *ctx = userData;
-    char *prefix;
-    if (ctx->state == R2J_IN_STREAM_CG_CONSUMER) {
-        prefix = ",\n             \"pending\": [";
-    } else if (ctx->state == R2J_IN_STREAM_CG_CONSUMER_PEL) {
-        prefix = ", ";
-    } else {
+
+    if (ctx->state != R2J_IN_STREAM || ctx->streamState != R2J_STREAM_SUBTREE) {
         RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
                         "toJsonStreamConsumerPendingEntry(): Invalid state value: %d", ctx->state);
         return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
     }
 
-    ctx->state = R2J_IN_STREAM_CG_CONSUMER_PEL;
-    fprintf(ctx->outfile, "%s\n               {\"id\":\"%" PRIu64 "-%" PRIu64 "\"}", prefix, streamId->ms, streamId->seq);
+    if (jTop(ctx) == JLVL6_CPEL)
+        fprintf(ctx->outfile, ", ");                   /* another id in the open consumer PEL */
+    else
+        jOpen(ctx, JLVL6_CPEL, ",\n             \"pending\": [", "]"); /* open the consumer's "pending" array */
+
+    fprintf(ctx->outfile, "\n               {\"id\":\"%" PRIu64 "-%" PRIu64 "\"}", streamId->ms, streamId->seq);
     return RDB_OK;
 }
 
 /* v14: emit a NACKed entry ID into the per-CG "nacked" array. The array is
  * opened on the first call within a CG (closing whatever section preceded it:
- * the CG header, the global PEL, the consumers array, or the last consumer
- * PEL) and closed by the next state transition (new CG / IDMP / end key). */
+ * the global PEL or the consumers array) and closed by the next state
+ * transition (new CG / IDMP / end key). */
 static RdbRes toJsonStreamNackZoneEntry(RdbParser *p, void *userData, RdbStreamID *id, int64_t itemsLeft) {
-    UNUSED(p, itemsLeft);
+    UNUSED(itemsLeft);
     RdbxToJson *ctx = userData;
-    const char *prefix;
 
-    if (ctx->state == R2J_IN_STREAM_CG) {
-        prefix = ",\n         \"nacked\": [\"";
-    } else if (ctx->state == R2J_IN_STREAM_CG_PEL) {
-        prefix = "],\n         \"nacked\": [\"";
-    } else if (ctx->state == R2J_IN_STREAM_CG_CONSUMER) {
-        prefix = "}],\n         \"nacked\": [\"";
-    } else if (ctx->state == R2J_IN_STREAM_CG_CONSUMER_PEL) {
-        prefix = "]}],\n         \"nacked\": [\"";
-    } else if (ctx->state == R2J_IN_STREAM_CG_NACK) {
-        prefix = ", \"";
-    } else {
+    if (ctx->state != R2J_IN_STREAM || ctx->streamState != R2J_STREAM_SUBTREE) {
         RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
                         "toJsonStreamNackZoneEntry(): Invalid state value: %d", ctx->state);
         return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
     }
 
-    fprintf(ctx->outfile, "%s%" PRIu64 "-%" PRIu64 "\"", prefix, id->ms, id->seq);
-    ctx->state = R2J_IN_STREAM_CG_NACK;
+    if (jTop(ctx) == JLVL4_NACKED) {
+        fprintf(ctx->outfile, ", \"");                 /* another id in the open array */
+    } else {
+        /* close the global PEL / consumers subtree, keep the group, open "nacked" */
+        jUnwindTo(ctx, JLVL4_NACKED);
+        jOpen(ctx, JLVL4_NACKED, ",\n         \"nacked\": [\"", "]");
+    }
+    fprintf(ctx->outfile, "%" PRIu64 "-%" PRIu64 "\"", id->ms, id->seq);
     return RDB_OK;
 }
 
 static RdbRes toJsonStreamIdmpMeta(RdbParser *p, void *userData, RdbStreamIdmpMeta *meta) {
     RdbxToJson *ctx = userData;
-    char *prefix;
 
     /* Skip outputting IDMP section if there are no producers - it's effectively empty/default config */
     if (meta->numProducers == 0)
         return RDB_OK;
 
-    if (ctx->state == R2J_IN_STREAM) {
-        prefix = ",\n      \"idmp\": {";
-    } else if (ctx->state == R2J_IN_STREAM_CG) {
-        prefix = "}],\n      \"idmp\": {";
-    } else if (ctx->state == R2J_IN_STREAM_CG_PEL) {
-        prefix = "]}],\n      \"idmp\": {";
-    } else if (ctx->state == R2J_IN_STREAM_CG_CONSUMER) {
-        prefix = "}]}],\n      \"idmp\": {";
-    } else if (ctx->state == R2J_IN_STREAM_CG_CONSUMER_PEL) {
-        prefix = "]}]}],\n      \"idmp\": {";
-    } else if (ctx->state == R2J_IN_STREAM_CG_NACK) {
-        prefix = "]}],\n      \"idmp\": {";
-    } else if (ctx->state == R2J_IN_KEY) {
-        /* No stream entries were recorded - handleStreamMetadata not registered */
-        prefix = "{\n      \"idmp\": {";
-    } else if (ctx->state == R2J_IN_STREAM_ENTRIES) {
-        /* Stream entries exist but handleStreamMetadata not registered */
-        prefix = "],\n      \"idmp\": {";
+    /* "idmp" is a sibling of "entries"/"groups" under the stream object. */
+    if (ctx->state == R2J_IN_KEY) {
+        /* No entries and handleStreamMetadata not registered: open stream object */
+        jOpen(ctx, JLVL1_VALUE, "{", "}");
+        jOpen(ctx, JLVL2_IDMP, "\n      \"idmp\": {", /*close:*/"}");
+        ctx->state = R2J_IN_STREAM;
+    } else if (ctx->state == R2J_IN_STREAM) {
+        jUnwindTo(ctx, JLVL2_IDMP);  /* close whatever child is open (entries array / groups subtree) */
+        jOpen(ctx, JLVL2_IDMP, ",\n      \"idmp\": {", /*close:*/"}");
     } else {
         RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
                         "toJsonStreamIdmpMeta(): Invalid state value: %d", ctx->state);
         return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
     }
 
-    fprintf(ctx->outfile, "%s\n        \"duration\": %" PRIu64 ", \"maxEntries\": %" PRIu64 ", \"numProducers\": %" PRIu64,
-            prefix, meta->duration, meta->maxEntries, meta->numProducers);
+    fprintf(ctx->outfile, "\n        \"duration\": %" PRIu64 ", \"maxEntries\": %" PRIu64 ", \"numProducers\": %" PRIu64,
+            meta->duration, meta->maxEntries, meta->numProducers);
 
-    ctx->state = R2J_IN_STREAM_IDMP;
+    ctx->streamState = R2J_STREAM_SUBTREE;
     return RDB_OK;
 }
 
 static RdbRes toJsonStreamIdmpProducer(RdbParser *p, void *userData, RdbStreamIdmpProducer *producer) {
     RdbxToJson *ctx = userData;
-    char *prefix;
 
-    if (ctx->state == R2J_IN_STREAM_IDMP) {
-        prefix = ",\n        \"producers\": [\n          {\"pid\": ";
-    } else if (ctx->state == R2J_IN_STREAM_IDMP_ENTRY) {
-        prefix = "]},\n          {\"pid\": ";
-    } else if (ctx->state == R2J_IN_STREAM_IDMP_PRODUCER) {
-        /* Previous producer had zero entries - close it without entries array */
-        prefix = "},\n          {\"pid\": ";
+    if (jTop(ctx) == JLVL2_IDMP) {
+        /* first producer: open the "producers" array + producer object */
+        jOpen(ctx, JLVL3_PRODUCERS, ",\n        \"producers\": [", /*close:*/"]");
+        jOpen(ctx, JLVL4_PRODUCER, "\n          {\"pid\": ", /*close:*/"}");
+    } else if (jTop(ctx) == JLVL4_PRODUCER || jTop(ctx) == JLVL5_PENTRIES) {
+        /* sibling producer: close the previous producer (and its entries) */
+        jUnwindTo(ctx, JLVL4_PRODUCER);
+        jOpen(ctx, JLVL4_PRODUCER, ",\n          {\"pid\": ", /*close:*/"}");
     } else {
         RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
                         "toJsonStreamIdmpProducer(): Invalid state value: %d", ctx->state);
         return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
     }
 
-    fprintf(ctx->outfile, "%s", prefix);
     outputQuotedEscaping(ctx, producer->pid, RDB_bulkLen(p, producer->pid));
     fprintf(ctx->outfile, ", \"numEntries\": %" PRIu64, producer->numEntries);
 
-    ctx->state = R2J_IN_STREAM_IDMP_PRODUCER;
     return RDB_OK;
 }
 
 static RdbRes toJsonStreamIdmpEntry(RdbParser *p, void *userData, RdbStreamIdmpEntry *entry) {
     RdbxToJson *ctx = userData;
-    char *prefix;
 
-    if (ctx->state == R2J_IN_STREAM_IDMP_PRODUCER) {
-        prefix = ",\n           \"entries\": [{\"iid\": ";
-    } else if (ctx->state == R2J_IN_STREAM_IDMP_ENTRY) {
-        prefix = ", {\"iid\": ";
-    } else {
+    if (jTop(ctx) == JLVL4_PRODUCER)
+        jOpen(ctx, JLVL5_PENTRIES, ",\n           \"entries\": [", "]"); /* open the producer's "entries" array */
+    else if (jTop(ctx) == JLVL5_PENTRIES)
+        fprintf(ctx->outfile, ", ");
+    else {
         RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
                         "toJsonStreamIdmpEntry(): Invalid state value: %d", ctx->state);
         return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
     }
 
-    fprintf(ctx->outfile, "%s", prefix);
+    fprintf(ctx->outfile, "{\"iid\": ");
     outputQuotedEscaping(ctx, entry->iid, RDB_bulkLen(p, entry->iid));
     fprintf(ctx->outfile, ", \"streamId\": \"%" PRIu64 "-%" PRIu64 "\"}", entry->streamId.ms, entry->streamId.seq);
 
-    ctx->state = R2J_IN_STREAM_IDMP_ENTRY;
     return RDB_OK;
 }
 
@@ -878,7 +876,7 @@ static RdbRes toJsonArrayMetadata(RdbParser *p, void *userData, uint64_t count, 
         return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
     }
 
-    fprintf(ctx->outfile, "{");
+    jOpen(ctx, JLVL1_VALUE, "{", /*close:*/"]}");      /* elements array + wrapper object */
     if (insertIdx != RDB_ARRAY_INSERT_IDX_NONE)
         fprintf(ctx->outfile, "\"insert_idx\":\"%" PRIu64 "\",", insertIdx);
     fprintf(ctx->outfile, "\"elements\":[");

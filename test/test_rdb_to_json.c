@@ -542,6 +542,18 @@ static void test_r2j_stream_v14_xnack(void **state) {
     testRdbToJsonCommon(DUMP_FOLDER("stream_v14_xnack.rdb"), DUMP_FOLDER("stream_v14_xnack.json"), &r2jConf);
 }
 
+/* Consumer group with a consumer but an empty global PEL (all entries ACKed).
+ * The "consumers" array must open directly after the group header, with no
+ * preceding "pending" array. */
+static void test_r2j_stream_empty_pel(void **state) {
+    UNUSED(state);
+    RdbxToJsonConf r2jConf = DEF_CONF(RDB_LEVEL_DATA);
+    r2jConf.includeAuxField = 0;
+    r2jConf.includeStreamMeta = 1;
+    r2jConf.flatten = 1;
+    testRdbToJsonCommon(DUMP_FOLDER("stream_v12_empty_pel.rdb"), DUMP_FOLDER("stream_v12_empty_pel.json"), &r2jConf);
+}
+
 /* RDB v14 array (RDB_TYPE_ARRAY) JSON emission. Each fixture exercises
  * a different code path of the schema in docs/rdb-v14-support-plan.md §6 T-4:
  *   - basic           : single-type elements, no insert_idx
@@ -675,6 +687,7 @@ int group_rdb_to_json(void) {
         cmocka_unit_test(test_r2j_stream_data),
         cmocka_unit_test(test_r2j_stream_v13_idmp),
         cmocka_unit_test(test_r2j_stream_v14_xnack),
+        cmocka_unit_test(test_r2j_stream_empty_pel),
 
         /* array (RDB_TYPE_ARRAY, v14+) */
         cmocka_unit_test(test_r2j_array_v14_basic),
