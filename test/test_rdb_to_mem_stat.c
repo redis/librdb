@@ -166,6 +166,12 @@ static long long memUsage(const char *key) {
 static void test_memStat_live_drift(void **state) {
     UNUSED(state);
     if (!isSetRedisServer()) { printf("    (skipped: no live Redis server)\n"); return; }
+#ifdef __APPLE__
+    /* The estimate models jemalloc size classes; live MEMORY USAGE only tracks
+     * it on a jemalloc build. macOS Redis is built on libc malloc, where the
+     * footprint (and thus drift) is unrelated to the estimate. */
+    skip();
+#endif
 
     static const char *keys[16];
     long long expected[16];
