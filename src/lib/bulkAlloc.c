@@ -159,8 +159,10 @@ static void bulkPoolAllocNew(RdbParser *p, size_t len, BulkType type, char *refB
                             "bulkPoolAllocNew() received invalid allocation type request: %d", type);
             assert(0);
     }
-    /* add string termination */
-    ((unsigned char *) binfo->ref)[len] = '\0';
+    /* add string termination (skip on allocation failure; callers detect
+     * the failure via a NULL binfo->ref and report RDB_ERR_FAIL_ALLOC) */
+    if (binfo->ref != NULL)
+        ((unsigned char *) binfo->ref)[len] = '\0';
 }
 
 /* Allocate memory, either new buffer or retrieve from queue. If requested to allocate
@@ -405,6 +407,8 @@ static inline void bulkStackFlush(BulkStack *stack) {
 static inline RdbBulk bulkHeapAlloc(RdbParser *p, size_t size) {
 
     BulkHeapHdr *header = (BulkHeapHdr *)RDB_alloc(p, sizeof(BulkHeapHdr) + size);
+    if (header == NULL)
+        return NULL;
     header->magic = BULK_MAGIC;
     header->refcount = 1;
     return (RdbBulk) (header + 1);
