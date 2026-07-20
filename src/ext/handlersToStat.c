@@ -190,8 +190,15 @@ static void aggregateKey(RdbxToStat *ctx) {
 
 /* qsort comparator for the final output pass (over min-heap) */
 static int topCmpDesc(const void *a, const void *b) {
-    uint64_t x = ((const TopEntry*)a)->memBytes, y = ((const TopEntry*)b)->memBytes;
-    return (x < y) - (x > y);
+    const TopEntry *ea = a, *eb = b;
+    if (ea->memBytes != eb->memBytes)
+        return (ea->memBytes < eb->memBytes) - (ea->memBytes > eb->memBytes);
+    /* Deterministic tie-break (qsort is not stable): equal-memory keys must
+     * order the same on every platform, else the golden report diff spuriously
+     * fails. Order by db, then key name. */
+    if (ea->dbnum != eb->dbnum)
+        return (ea->dbnum > eb->dbnum) - (ea->dbnum < eb->dbnum);
+    return strcmp(ea->key, eb->key);
 }
 
 /* Human-readable byte size. Rotating buffers so several calls in one fprintf

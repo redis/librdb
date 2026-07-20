@@ -22,9 +22,9 @@ Top 10 keys by memory:
            97B set          0            1        97B     none  set
            94B string       0            -          -     none  hll
            84B list         0            1        84B     none  list
-           66B stream       0            -          -     none  stream6
            66B stream       0            -          -     none  stream3
            66B stream       0            -          -     none  stream5
+           66B stream       0            -          -     none  stream6
 
 Histograms (non-empty buckets; min = bucket lower bound, keys = key count, share = % of type, cum% = cumulative share):
 
