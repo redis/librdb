@@ -321,29 +321,29 @@ static void renderPretty(RdbxToStat *ctx) {
     /* Two-line header: each bracketed group label spans its columns exactly. The
      * 38-space pad, the single spaces between brackets, and the bracket widths all
      * track the row format below -- keep them in sync if column widths change. */
-    fprintf(o, "%38s[     Expiry     ] [     Memory    ] [      items per key       ] [          memory per key         ]\n", "");
-    fprintf(o, "  %-8s %12s %13s %9s %8s %10s %6s %6s %6s %6s %7s %8s %8s %8s %8s\n",
+    fprintf(o, "%38s[     Expiry     ] [     Memory    ] [          Memory per key         ] [      Items per key       ]\n", "");
+    fprintf(o, "  %-8s %12s %13s %9s %8s %10s %6s %8s %8s %8s %8s %6s %6s %6s %7s\n",
             "type", "keys", "items", "volatile", "expired", "mem", "mem%",
             "avg", "p90", "p99", "max", "avg", "p90", "p99", "max");
     for (int i = 0; i < nTypes; i++) {
         int t = order[i];
         uint64_t c = ctx->typeAgg[t].count, b = ctx->typeAgg[t].bytes, it = ctx->typeAgg[t].items;
         double pct = totalBytes ? (b * 100.0 / totalBytes) : 0;
-        fprintf(o, "  %-8s %12llu %13s %9llu %8llu %10s %5.1f%% %6s %6s %6s %7s %8s %8s %8s %8s\n",
+        fprintf(o, "  %-8s %12llu %13s %9llu %8llu %10s %5.1f%% %8s %8s %8s %8s %6s %6s %6s %7s\n",
                 rdbxTypeName(t), (unsigned long long) c, countOrDash(it),
                 (unsigned long long) ctx->typeAgg[t].nVolatile,
                 (unsigned long long) ctx->typeAgg[t].nExpired,
                 human(b), pct,
-                humanCount(c ? it / c : 0),
-                humanCount(histPct(&ctx->typeAgg[t].itemsHist, c, 90)),
-                humanCount(histPct(&ctx->typeAgg[t].itemsHist, c, 99)),
-                humanCount(ctx->typeAgg[t].maxItems),
                 human(c ? b / c : 0),
                 human(histPct(&ctx->typeAgg[t].memHist, c, 90)),
                 human(histPct(&ctx->typeAgg[t].memHist, c, 99)),
-                human(ctx->typeAgg[t].maxMem));
+                human(ctx->typeAgg[t].maxMem),
+                humanCount(c ? it / c : 0),
+                humanCount(histPct(&ctx->typeAgg[t].itemsHist, c, 90)),
+                humanCount(histPct(&ctx->typeAgg[t].itemsHist, c, 99)),
+                humanCount(ctx->typeAgg[t].maxItems));
     }
-    fprintf(o, "  %-8s %12llu %13llu %9llu %8llu %10s %6s %6s %6s %6s %7s %8s %8s %8s %8s\n\n", "TOTAL",
+    fprintf(o, "  %-8s %12llu %13llu %9llu %8llu %10s %6s %8s %8s %8s %8s %6s %6s %6s %7s\n\n", "TOTAL",
             (unsigned long long) totalKeys, (unsigned long long) totalItems,
             (unsigned long long) totalVol, (unsigned long long) totalExp,
             human(totalBytes), "", "", "", "", "", "", "", "", "");

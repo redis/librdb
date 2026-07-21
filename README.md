@@ -62,13 +62,13 @@ To print a formatted memory statistics report (add --histogram for a more detail
 
     rdb-cli dump.rdb stat
     Statistics (Memory is estimated):
-                                        [     Expiry     ] [     Memory    ] [      items per key       ] [          memory per key         ]
-    type             keys         items  volatile  expired        mem   mem%    avg    p90    p99     max      avg      p90      p99      max
-    hash          1560278      81456780         0        0       6.9G  73.2%     52     88    352    1.2K     4.6K    15.0K    36.0K    98.0K
-    set           7651482      27952535         3        3       1.7G  17.7%      3      1      4    1.4M     232B     144B     144B    61.2M
-    list          6017862       7906342         0        0     811.7M   8.5%      1      1      5    4.2K     141B     144B     176B     2.1M
-    string         106018             -         2        2      65.1M   0.7%      -      -      -       -     644B     704B     704B     1.0M
-    stream              1           948         0        0      22.3K   0.0%    948    960    960     960    22.3K    22.0K    22.0K    22.0K
+                                        [     Expiry     ] [     Memory    ] [          Memory per key         ] [      Items per key       ]
+    type             keys         items  volatile  expired        mem   mem%      avg      p90      p99      max    avg    p90    p99     max
+    hash          1560278      81456780         0        0       6.9G  73.2%     4.6K    15.0K    36.0K    98.0K     52     88    352    1.2K
+    set           7651482      27952535         3        3       1.7G  17.7%     232B     144B     144B    61.2M      3      1      4    1.4M
+    list          6017862       7906342         0        0     811.7M   8.5%     141B     144B     176B     2.1M      1      1      5    4.2K
+    string         106018             -         2        2      65.1M   0.7%     644B     704B     704B     1.0M      -      -      -       -
+    stream              1           948         0        0      22.3K   0.0%    22.3K    22.0K    22.0K    22.0K    948    960    960     960
     TOTAL        15335641     117316605         5        5       9.4G
     Volatile keys hold 2.0K (0.0% of memory)
     Estimated keyspace tables (dict overhead): 192.0M

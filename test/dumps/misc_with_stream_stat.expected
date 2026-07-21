@@ -1,12 +1,12 @@
 Statistics (Memory is estimated):
-                                      [     Expiry     ] [     Memory    ] [      items per key       ] [          memory per key         ]
-  type             keys         items  volatile  expired        mem   mem%    avg    p90    p99     max      avg      p90      p99      max
-  stream              5           200         0        0       2.5K  76.9%     40    208    208     200     513B     2.2K     2.2K     2.2K
-  string              3             -         1        0       248B   7.4%      -      -      -       -      82B     104B     104B     103B
-  hash                1             2         0        0       182B   5.5%      2      2      2       2     182B     176B     176B     182B
-  zset                1             1         0        0       158B   4.7%      1      1      1       1     158B     144B     144B     158B
-  set                 1             1         0        0        97B   2.9%      1      1      1       1      97B     104B     104B      97B
-  list                1             1         0        0        84B   2.5%      1      1      1       1      84B      88B      88B      84B
+                                      [     Expiry     ] [     Memory    ] [          Memory per key         ] [      Items per key       ]
+  type             keys         items  volatile  expired        mem   mem%      avg      p90      p99      max    avg    p90    p99     max
+  stream              5           200         0        0       2.5K  76.9%     513B     2.2K     2.2K     2.2K     40    208    208     200
+  string              3             -         1        0       248B   7.4%      82B     104B     104B     103B      -      -      -       -
+  hash                1             2         0        0       182B   5.5%     182B     176B     176B     182B      2      2      2       2
+  zset                1             1         0        0       158B   4.7%     158B     144B     144B     158B      1      1      1       1
+  set                 1             1         0        0        97B   2.9%      97B     104B     104B      97B      1      1      1       1
+  list                1             1         0        0        84B   2.5%      84B      88B      88B      84B      1      1      1       1
   TOTAL              12           205         1        0       3.3K                                                                        
 
   Volatile keys hold 103B (3.1% of memory)
