@@ -73,8 +73,9 @@ jobs:
 
       - name: Install prerequisites
         run: |
-          # Build and install cmocka 1.1 from source (common for all platforms)
-          git clone --depth=1 --branch=stable-1.1 https://git.cryptomilk.org/projects/cmocka.git
+          # Build and install cmocka 1.1 from source (common for all platforms).
+          # Cloned from gitlab, cmocka's home. git.cryptomilk.org stopped serving it.
+          git clone --depth=1 --branch=stable-1.1 https://gitlab.com/cmocka/cmocka.git
           cd cmocka
           mkdir build
           cd build
