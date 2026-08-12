@@ -407,6 +407,45 @@ static void test_r2r_array_v14_insert_idx_boundary(void **state) {
                         expSuffix, sizeof(expSuffix) - 1, M_SUFFIX, 1);
 }
 
+/* v15 hinted hash templates (REF forms). A REF payload references the
+ * out-of-band template section, so it can't be RESTORE'd as-is:
+ *   - v15+ target + --support-restore: emit a synthesized self-contained
+ *     RESTORE (preserves the template on the destination);
+ *   - older target: fall back to plain HSET (portable to any version). */
+static void checkTemplateResp(const char *fixture) {
+    /* v15 target -> RESTORE, no HSET */
+    RdbxToRespConf v15 = { .supportRestore = 1, .dstRedisVersion = "8.10" };
+    testRdbToRespCommon(fixture, &v15, "RESTORE", 7, M_SUBSTR, 1);
+    testRdbToRespCommon(fixture, &v15, "HSET", 4, M_SUBSTR, 0);
+    /* older target -> HSET, no RESTORE (support-restore auto-disabled) */
+    RdbxToRespConf old = { .supportRestore = 1, .dstRedisVersion = "8.0" };
+    testRdbToRespCommon(fixture, &old, "HSET", 4, M_SUBSTR, 1);
+    testRdbToRespCommon(fixture, &old, "RESTORE", 7, M_SUBSTR, 0);
+}
+
+static void test_r2r_hash_template_lp_ref_v15(void **state) {
+    UNUSED(state);
+    checkTemplateResp("hash_template_v15.rdb");
+}
+
+static void test_r2r_hash_template_array_ref_v15(void **state) {
+    UNUSED(state);
+    checkTemplateResp("hash_template_array_v15.rdb");
+}
+
+/* v15 self-contained forms (types 29/31). These are already self-contained, so
+ * a v15+ target RESTOREs them directly (re-emitted structurally); an older
+ * target falls back to HSET. Same target-driven behavior as the REF forms. */
+static void test_r2r_hash_template_self_array_v15(void **state) {
+    UNUSED(state);
+    checkTemplateResp("hash_template_self_array_v15.rdb");
+}
+
+static void test_r2r_hash_template_self_lp_v15(void **state) {
+    UNUSED(state);
+    checkTemplateResp("hash_template_self_lp_v15.rdb");
+}
+
 /*************************** group_rdb_to_resp *******************************/
 int group_rdb_to_resp(void) {
     const struct CMUnitTest tests[] = {
@@ -456,6 +495,10 @@ int group_rdb_to_resp(void) {
             cmocka_unit_test(test_r2r_array_v14_target_88_data_level),
             cmocka_unit_test(test_r2r_array_v14_target_88_restore),
             cmocka_unit_test(test_r2r_array_v14_insert_idx_boundary),
+            cmocka_unit_test(test_r2r_hash_template_lp_ref_v15),
+            cmocka_unit_test(test_r2r_hash_template_array_ref_v15),
+            cmocka_unit_test(test_r2r_hash_template_self_array_v15),
+            cmocka_unit_test(test_r2r_hash_template_self_lp_v15),
             /* misc */
             cmocka_unit_test(test_r2r_misc_with_stream),
             cmocka_unit_test(test_r2r_multiple_lists_and_strings),

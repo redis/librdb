@@ -159,6 +159,10 @@ typedef enum ParsingElementType {
     PE_MODULE_AUX,
     PE_STREAM_LP,
     PE_ARRAY,
+    PE_HASH_TEMPLATE,      /* top-level RDB_OPCODE_HASH_TEMPLATE record (v15) */
+    PE_HASH_TMPL_LP_REF,   /* RDB_TYPE_HASH_TMPL_LP_REF (v15) */
+    PE_HASH_TMPL_ARRAY_REF,/* RDB_TYPE_HASH_TMPL_ARRAY_REF (v15) */
+    PE_HASH_TMPL_SELF,     /* RDB_TYPE_HASH_TMPL_LP / _ARRAY, self-contained (v15) */
 
     /* parsing raw data types */
     PE_RAW_NEW_KEY,
@@ -185,6 +189,9 @@ typedef enum ParsingElementType {
     PE_RAW_STREAM_LP,
     PE_RAW_KEY_META,
     PE_RAW_ARRAY,
+    PE_RAW_HASH_TMPL_LP_REF,    /* RDB_TYPE_HASH_TMPL_LP_REF -> self-contained RESTORE (v15) */
+    PE_RAW_HASH_TMPL_ARRAY_REF, /* RDB_TYPE_HASH_TMPL_ARRAY_REF -> self-contained RESTORE (v15) */
+    PE_RAW_HASH_TMPL_SELF,      /* RDB_TYPE_HASH_TMPL_LP / _ARRAY, self-contained (v15) */
 
     PE_END_OF_FILE,
     PE_MAX
@@ -223,6 +230,25 @@ typedef struct {
     uint64_t visitingField;
     int64_t hexpireMinMsec;
 } ElementHashCtx;
+
+/* One hinted hash template (v15): saved-id -> ordered field names. Field-name
+ * buffers are owned by the registry and referenced by REF-encoded hashes. */
+typedef struct {
+    uint64_t fieldCount;     /* declared number of fields */
+    uint64_t fieldsCap;      /* allocated slots of 'fields'/'fieldLens'. Grows as
+                              * the fields are read, up to fieldCount */
+    unsigned char **fields;  /* fieldsCap field-name buffers (NUL-terminated) */
+    size_t *fieldLens;
+} HashTemplate;
+
+typedef struct {
+    uint64_t numFields;
+    uint64_t visitingField;
+    HashTemplate *tmpl;      /* resolved template: a registry entry (REF forms) or
+                              * &selfTmpl (self-contained forms) */
+    HashTemplate selfTmpl;   /* self-contained forms (v15): inline template, not in
+                              * the registry. Freed at end-of-key / parser delete. */
+} ElementHashTmplCtx;
 
 typedef struct {
     uint64_t moduleId;
@@ -313,6 +339,7 @@ typedef struct ElementCtx {
     ElementModuleCtx module;
     ElementStreamCtx stream;
     ElementArrayCtx array;
+    ElementHashTmplCtx hashTmpl;
 
     /* raw elements context */
     ElementRawStringCtx rawString;
@@ -408,6 +435,15 @@ struct RdbParser {
     AppCallbackCtx appCbCtx; /* Trace bulks that will be given to next app cb. Cleared after each cb */
     RawContext rawCtx;
     int selectedDb;
+
+    /* Hinted hash templates (v15): saved-id -> field names, populated from the
+     * RDB_OPCODE_HASH_TEMPLATE section and referenced by REF-encoded hashes.
+     * The saver assigns dense ids, so the id indexes the array directly (see
+     * RDB_HASH_TMPL_MAX_ID for the cap this imposes on a sparse id). */
+    struct {
+        HashTemplate *entries;  /* indexed by saved template id */
+        uint64_t cap;
+    } hashTmpls;
 
     /*** caching ***/
     BulkPool *cache;   /* Cleared after each parsing-element state change */
@@ -586,6 +622,10 @@ RdbStatus elementFunction(RdbParser *p);
 RdbStatus elementModule(RdbParser *p);
 RdbStatus elementStreamLP(RdbParser *p);
 RdbStatus elementArray(RdbParser *p);
+RdbStatus elementHashTemplate(RdbParser *p);
+RdbStatus elementHashTmplLpRef(RdbParser *p);
+RdbStatus elementHashTmplArrayRef(RdbParser *p);
+RdbStatus elementHashTmplSelfContained(RdbParser *p);
 
 /*** Raw Parsing Elements ***/
 RdbStatus elementRawEndKey(RdbParser *p);
@@ -608,6 +648,13 @@ RdbStatus elementRawModule(RdbParser *p);
 RdbStatus elementRawStreamLP(RdbParser *p);
 RdbStatus elementRawKeyMeta(RdbParser *p);
 RdbStatus elementRawArray(RdbParser *p);
+RdbStatus elementRawHashTmplLpRef(RdbParser *p);
+RdbStatus elementRawHashTmplArrayRef(RdbParser *p);
+RdbStatus elementRawHashTmplSelfContained(RdbParser *p);
+
+/* Resolve a saved hinted-hash-template id to its registry entry (v15). Reports
+ * RDB_ERR_HASH_TMPL_UNKNOWN_ID and returns NULL if unknown. */
+HashTemplate *hashTemplateGetById(RdbParser *p, uint64_t id);
 
 /*** inline functions ***/
 

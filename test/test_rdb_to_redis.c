@@ -115,41 +115,46 @@ static void rdb_save_librdb_reload_eq(int isRestore, char *serverRdbFile) {
  * the background. test_rdb_to_resp.c verifies that RESTORE command is used
  * only when it should.
  */
+static void test_rdb_to_redis_common_mode(const char *rdbfile, int ignoreListOrder,
+                                          char *expRespCmd, const char *expJsonFile,
+                                          int isRestore) {
+    sendRedisCmd("FLUSHALL", REDIS_REPLY_STATUS, NULL);
+
+    /* FUNCTION FLUSH */
+    if (serverMajorVer >= 7)
+        sendRedisCmd("FUNCTION FLUSH", REDIS_REPLY_STATUS, NULL);
+
+    /* 1. Convert RDB to Json (out1.json) */
+    rdb_to_json(rdbfile, TMP_FOLDER("out1.json"));
+
+    /* 2. Upload RDB against Redis and save DUMP-RDB */
+    rdb_to_tcp(rdbfile, 1, isRestore, TMP_FOLDER("cmd.resp"));
+    sendRedisCmd("SAVE", REDIS_REPLY_STATUS, NULL);
+
+    if (expRespCmd && !isRestore) {
+        /* Verify corresponding RESP commands includes `expRespCmd` */
+         assert_file_payload(TMP_FOLDER("cmd.resp"),
+                             expRespCmd,
+                             strlen(expRespCmd),
+                             M_SUBSTR, 1);
+    }
+
+    /* 3. From DUMP-RDB generate Json (out2.json) */
+    rdb_to_json(TMP_FOLDER("dump.rdb"), TMP_FOLDER("out2.json"));
+
+    /* 4. Verify that dumped RDB and converted to json is as expected  */
+    if (expJsonFile)
+        assert_json_equal(expJsonFile, TMP_FOLDER("out2.json"), 0);
+    else
+        assert_json_equal(TMP_FOLDER("out1.json"), TMP_FOLDER("out2.json"), ignoreListOrder);
+}
+
 static void test_rdb_to_redis_common(const char *rdbfile, int ignoreListOrder, char *expRespCmd, const char *expJsonFile) {
 
     /* test one time without RESTORE, Playing against old version.
      * and one time with RESTORE, Playing against new version. */
-    for (int isRestore = 0 ; isRestore <= 1 ; ++isRestore) {
-        sendRedisCmd("FLUSHALL", REDIS_REPLY_STATUS, NULL);
-
-        /* FUNCTION FLUSH */
-        if (serverMajorVer >= 7)
-            sendRedisCmd("FUNCTION FLUSH", REDIS_REPLY_STATUS, NULL);
-
-        /* 1. Convert RDB to Json (out1.json) */
-        rdb_to_json(rdbfile, TMP_FOLDER("out1.json"));
-
-        /* 2. Upload RDB against Redis and save DUMP-RDB */
-        rdb_to_tcp(rdbfile, 1, isRestore, TMP_FOLDER("cmd.resp"));
-        sendRedisCmd("SAVE", REDIS_REPLY_STATUS, NULL);
-
-        if (expRespCmd && !isRestore) {
-            /* Verify corresponding RESP commands includes `expRespCmd` */
-             assert_file_payload(TMP_FOLDER("cmd.resp"),
-                                 expRespCmd,
-                                 strlen(expRespCmd),
-                                 M_SUBSTR, 1);
-        }
-
-        /* 3. From DUMP-RDB generate Json (out2.json) */
-        rdb_to_json(TMP_FOLDER("dump.rdb"), TMP_FOLDER("out2.json"));
-
-        /* 4. Verify that dumped RDB and converted to json is as expected  */
-        if (expJsonFile)
-            assert_json_equal(expJsonFile, TMP_FOLDER("out2.json"), 0);
-        else
-            assert_json_equal(TMP_FOLDER("out1.json"), TMP_FOLDER("out2.json"), ignoreListOrder);
-    }
+    for (int isRestore = 0 ; isRestore <= 1 ; ++isRestore)
+        test_rdb_to_redis_common_mode(rdbfile, ignoreListOrder, expRespCmd, expJsonFile, isRestore);
 }
 
 static void test_rdb_to_redis_single_string(void **state) {
@@ -216,6 +221,110 @@ static void test_rdb_to_redis_hash_with_expire(void **state) {
                      "70368744177663 70368744177663 -1"); /* verify expected output */
     }
     teardownRedisServer();
+}
+
+/* Hinted hash templates (RDB v15) against a template-aware server: let the server
+ * build both template encodings, save an RDB, and replay it through the parser in
+ * RESTORE and non-RESTORE modes. Only a live v15 server can confirm that the RDB
+ * bytes we parse are the ones Redis really writes, that it accepts the payload we
+ * synthesize for RESTORE, and that the template survives on the destination.
+ * Fixture-driven coverage of the same forms, portable to any target version, is in
+ * test_rdb_to_redis_v15_hash_template below.
+ *
+ * Coverage:
+ * - REF forms as written by SAVE (_LP_REF via template-listpack, _ARRAY_REF via
+ *   template-array), both resolved against the RDB template section
+ * - RESTORE mode (L0): the synthesized self-contained payload must keep the
+ *   template encoding on the destination
+ * - non-RESTORE mode (L1/L2): field/value pairs replayed as HSET
+ * - keys of both forms sharing one template, plus a plain hash in the same RDB */
+static void test_rdb_to_redis_hash_template(void **state) {
+    UNUSED(state);
+
+    /* Hinted hash templates are supported since Redis 8.10 */
+    if ((serverMajorVer<8) || ((serverMajorVer==8) && (serverMinorVer<10)))
+        skip();
+
+    setupRedisServer("--enable-debug-command yes", 0);
+
+    /* Template-encode any hash of >=2 fields; >3 fields won't fit a listpack, so
+     * it lands on template-array instead of template-listpack. */
+    sendRedisCmd("CONFIG SET hash-min-template-entries 2", REDIS_REPLY_STATUS, NULL);
+    sendRedisCmd("CONFIG SET hash-max-listpack-entries 3", REDIS_REPLY_STATUS, NULL);
+    sendRedisCmd("FLUSHALL", REDIS_REPLY_STATUS, NULL);
+
+    /* Two keys sharing one template -> template-listpack (_LP_REF on save) */
+    sendRedisCmd("HSET h_lp1 age 30 city nyc", REDIS_REPLY_INTEGER, "2");
+    sendRedisCmd("HSET h_lp2 age 41 city sfo", REDIS_REPLY_INTEGER, "2");
+    sendRedisCmd("OBJECT ENCODING h_lp1", REDIS_REPLY_STRING, "template-listpack");
+
+    /* More fields than fit a listpack -> template-array (_ARRAY_REF on save) */
+    sendRedisCmd("HSET h_arr f1 v1 f2 v2 f3 v3 f4 v4", REDIS_REPLY_INTEGER, "4");
+    sendRedisCmd("OBJECT ENCODING h_arr", REDIS_REPLY_STRING, "template-array");
+
+    /* A single-field hash stays a plain listpack (below the template threshold) */
+    sendRedisCmd("HSET h_plain only 1", REDIS_REPLY_INTEGER, "1");
+    sendRedisCmd("OBJECT ENCODING h_plain", REDIS_REPLY_STRING, "listpack");
+
+    for (int isRestore = 0; isRestore <= 1; ++isRestore) {
+        rdb_save_librdb_reload_eq(isRestore, TMP_FOLDER("dump.rdb"));
+
+        /* Values are back either way. Only RESTORE carries the encoding over;
+         * without it the replayed HSETs are re-templated by this server, so the
+         * encoding is asserted for RESTORE mode alone. */
+        sendRedisCmd("HGET h_lp2 city", REDIS_REPLY_STRING, "sfo");
+        sendRedisCmd("HGET h_arr f4", REDIS_REPLY_STRING, "v4");
+        if (isRestore) {
+            sendRedisCmd("OBJECT ENCODING h_lp1", REDIS_REPLY_STRING, "template-listpack");
+            sendRedisCmd("OBJECT ENCODING h_arr", REDIS_REPLY_STRING, "template-array");
+        }
+    }
+
+    /* Which command carried the data (RESTORE vs a fallback to HSET) is pinned by
+     * checkTemplateResp() in test_rdb_to_resp.c, per target version. */
+
+    teardownRedisServer();
+}
+
+/* Same v15 template forms from ready-made fixtures instead of a live SAVE, so this
+ * runs on any target. The fixture's data must come back unchanged: replay it, SAVE,
+ * and compare the JSON of the saved RDB against the fixture's expected JSON.
+ *
+ * Covers the two REF forms, integer/empty/LZF value edges, and all four
+ * self-contained combinations (FIELDS_LP / FIELDS_RAW x listpack / array values).
+ *
+ * The non-RESTORE pass (asserting HSET) runs everywhere. The RESTORE pass is added
+ * only for a target that knows templates, since an older one would reject a v15
+ * payload. */
+static void test_rdb_to_redis_v15_hash_template(void **state) {
+    UNUSED(state);
+
+    /* The RESTORE pass requires a target that supports templates (Redis 8.10) */
+    int maxMode = ((serverMajorVer>8) || ((serverMajorVer==8) && (serverMinorVer>=10))) ? 1 : 0;
+
+    struct { const char *rdb; const char *json; } fixtures[] = {
+        /* REF forms: field names come from the RDB template section */
+        { DUMP_FOLDER("hash_template_v15.rdb"),
+          DUMP_FOLDER("hash_template_v15.json") },
+        { DUMP_FOLDER("hash_template_array_v15.rdb"),
+          DUMP_FOLDER("hash_template_array_v15.json") },
+        { DUMP_FOLDER("hash_template_values_v15.rdb"),
+          DUMP_FOLDER("hash_template_values_v15.json") },
+        /* Self-contained forms (types 29/31): field names inlined in the payload */
+        { DUMP_FOLDER("hash_template_self_lp_v15.rdb"),
+          DUMP_FOLDER("hash_template_self_3keys_v15.json") },
+        { DUMP_FOLDER("hash_template_self_array_v15.rdb"),
+          DUMP_FOLDER("hash_template_self_3keys_v15.json") },
+        { DUMP_FOLDER("hash_template_self_lpraw_v15.rdb"),
+          DUMP_FOLDER("hash_template_self_2keys_v15.json") },
+        { DUMP_FOLDER("hash_template_self_arraylp_v15.rdb"),
+          DUMP_FOLDER("hash_template_self_2keys_v15.json") },
+    };
+
+    for (unsigned i = 0 ; i < sizeof(fixtures)/sizeof(fixtures[0]) ; ++i)
+        for (int isRestore = 0 ; isRestore <= maxMode ; ++isRestore)
+            test_rdb_to_redis_common_mode(fixtures[i].rdb, 0, "$4\r\nHSET",
+                                          fixtures[i].json, isRestore);
 }
 
 static void test_rdb_to_redis_hash_zl(void **state) {
@@ -864,6 +973,8 @@ int group_rdb_to_redis(void) {
             /* hash */
             cmocka_unit_test_setup(test_rdb_to_redis_hash, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_hash_with_expire, setupTest),
+            cmocka_unit_test_setup(test_rdb_to_redis_hash_template, setupTest),
+            cmocka_unit_test_setup(test_rdb_to_redis_v15_hash_template, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_hash_zl, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_hash_lp, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_hash_zm, setupTest),

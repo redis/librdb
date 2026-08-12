@@ -24,6 +24,8 @@ typedef struct {
 } RedisToRdbVersion;
 
 static const RedisToRdbVersion redisToRdbVersion[] = {
+        {"8.10", VER_VAL(8,10), 15},
+        {"8.9", VER_VAL(8,9), 15}, // 8.9.x = unstable/pre-release line of 8.10; already writes RDB v15
         {"8.8", VER_VAL(8,8), 14},
         {"8.6", VER_VAL(8,6), 13},
         {"7.4", VER_VAL(7,4), 12}, // + 8.0, 8.2, 8.4
