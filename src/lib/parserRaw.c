@@ -1469,7 +1469,7 @@ RdbStatus elementRawArray(RdbParser *p) {
     }
 }
 
-/*** hinted hash templates (v15): raw -> self-contained RESTORE ***/
+/*** hash templates (v15): raw -> self-contained RESTORE ***/
 
 /* RDB_TYPE_HASH_TMPL_ARRAY_REF at raw level: [id][value_1]...[value_N] ->
  * self-contained RDB_TYPE_HASH_TMPL_ARRAY payload for RESTORE. */
@@ -1576,8 +1576,8 @@ RdbStatus elementRawHashTmplSelfContained(RdbParser *p) {
             int hdrLen = 0, cntLen = 0;
 
             /* Reserve room for both length words up front so the two reads stay
-             * contiguous - a second aggMakeRoom() between them could move the
-             * buffer and orphan the first write. */
+             * contiguous. Status safely ignored: first bulk surely has room, and
+             * a maxRawSize failure is re-caught by the next checked call. */
             aggMakeRoom(p, 18); /* worst case 9 bytes each for fmt + count */
             IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &fmt, (unsigned char *) rawCtx->at, &hdrLen));
 
@@ -1588,6 +1588,7 @@ RdbStatus elementRawHashTmplSelfContained(RdbParser *p) {
 
                 /*** ENTER SAFE STATE ***/
 
+                IF_NOT_OK_RETURN(hashTmplValidateFieldCount(p, count, NULL));
                 IF_NOT_OK_RETURN(cbHandleBegin(p, DATA_SIZE_UNKNOWN_AHEAD));
                 IF_NOT_OK_RETURN(aggUpdateWritten(p, hdrLen + cntLen));
                 h->numFields = count;
@@ -1595,20 +1596,21 @@ RdbStatus elementRawHashTmplSelfContained(RdbParser *p) {
                 return updateElementState(p, ST_FIELDS_RAW_LOOP, 0);
             }
 
-            /* FIELDS_LP: one listpack blob of field names. Read it so we can
-             * validate it and count the fields (needed for the ARRAY value
-             * section). Unknown fmt values are rejected. */
-            BulkInfo *blobBulk;
-            IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC_APP_BULK, NULL, &blobBulk));
-
-            /*** ENTER SAFE STATE ***/
-
             if (fmt != 0) {
                 RDB_reportError(p, RDB_ERR_HASH_TMPL_INVLD,
                                 "Unknown hash-template fields format %llu",
                                 (unsigned long long) fmt);
                 return RDB_STATUS_ERROR;
             }
+
+            /* FIELDS_LP: one listpack blob of field names. Read it so we can
+             * validate it and count the fields (needed for the ARRAY value
+             * section). */
+            BulkInfo *blobBulk;
+            IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC_APP_BULK, NULL, &blobBulk));
+
+            /*** ENTER SAFE STATE ***/
+
             unsigned char *blob = (unsigned char *) blobBulk->ref;
             if (blobBulk->len == 0 ||
                 !lpValidateIntegrity(blob, blobBulk->len, p->deepIntegCheck, NULL, NULL)) {
@@ -1616,6 +1618,7 @@ RdbStatus elementRawHashTmplSelfContained(RdbParser *p) {
                                 "elementRawHashTmplSelfContained(): field blob integrity check failed");
                 return RDB_STATUS_ERROR;
             }
+            IF_NOT_OK_RETURN(hashTmplValidateFieldCount(p, lpLength(blob), NULL));
 
             IF_NOT_OK_RETURN(cbHandleBegin(p, DATA_SIZE_UNKNOWN_AHEAD));
             IF_NOT_OK_RETURN(aggUpdateWritten(p, hdrLen));  /* fields_fmt byte */

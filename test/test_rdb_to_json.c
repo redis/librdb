@@ -676,7 +676,7 @@ static void test_r2j_hash_template_self_corrupt_huge_field_count_v15(void **stat
                         RDB_ERR_FAILED_PARTIAL_READ_RDB_FILE);
 }
 
-/* v15 hinted hash templates: REF-encoded hashes resolve field names from the
+/* v15 hash templates: REF-encoded hashes resolve field names from the
  * top-level template section and must render as ordinary hashes. */
 static void test_r2j_hash_template_lp_ref_v15(void **state) {
     UNUSED(state);
@@ -710,7 +710,7 @@ static void test_r2j_hash_template_lp_ref_v15_struct(void **state) {
     testRdbToJsonCommon(DUMP_FOLDER("hash_template_v15.rdb"), DUMP_FOLDER("hash_template_v15.json"), &r2jConf);
 }
 
-/* v15 self-contained hinted hash templates (types 29/31): the field names are
+/* v15 self-contained hash templates (types 29/31): the field names are
  * inlined in the payload (no template section), covering both field formats
  * (FIELDS_LP / FIELDS_RAW) and both value encodings (listpack / array). Redis
  * writes these only via DUMP, but its loader - and librdb - accept them from an

@@ -112,7 +112,7 @@ RdbRes handle_hash_field(RdbParser *p, void *userData, RdbBulk field, RdbBulk va
     return RDB_OK;
 }
 
-/* Dumps to iterate. The hinted-hash-template dumps (v15) are included since they
+/* Dumps to iterate. The hash-template dumps (v15) are included since they
  * pass field names and values to the callbacks as referenced bulks. */
 static const char *bulkOpsDumps[] = {
         DUMP_FOLDER("multiple_lists_strings.rdb"),

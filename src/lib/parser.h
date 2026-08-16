@@ -231,7 +231,7 @@ typedef struct {
     int64_t hexpireMinMsec;
 } ElementHashCtx;
 
-/* One hinted hash template (v15): saved-id -> ordered field names. Field-name
+/* One hash template (v15): saved-id -> ordered field names. Field-name
  * buffers are owned by the registry and referenced by REF-encoded hashes. */
 typedef struct {
     uint64_t fieldCount;     /* declared number of fields */
@@ -436,7 +436,7 @@ struct RdbParser {
     RawContext rawCtx;
     int selectedDb;
 
-    /* Hinted hash templates (v15): saved-id -> field names, populated from the
+    /* Hash templates (v15): saved-id -> field names, populated from the
      * RDB_OPCODE_HASH_TEMPLATE section and referenced by REF-encoded hashes.
      * The saver assigns dense ids, so the id indexes the array directly (see
      * RDB_HASH_TMPL_MAX_ID for the cap this imposes on a sparse id). */
@@ -652,9 +652,13 @@ RdbStatus elementRawHashTmplLpRef(RdbParser *p);
 RdbStatus elementRawHashTmplArrayRef(RdbParser *p);
 RdbStatus elementRawHashTmplSelfContained(RdbParser *p);
 
-/* Resolve a saved hinted-hash-template id to its registry entry (v15). Reports
+/* Resolve a saved hash-template id to its registry entry (v15). Reports
  * RDB_ERR_HASH_TMPL_UNKNOWN_ID and returns NULL if unknown. */
 HashTemplate *hashTemplateGetById(RdbParser *p, uint64_t id);
+
+/* Reject a zero or over-large template field count (RDB_ERR_HASH_TMPL_INVLD).
+ * If 'fieldCount' is given, record the validated count into it. */
+RdbStatus hashTmplValidateFieldCount(RdbParser *p, uint64_t count, uint64_t *fieldCount);
 
 /*** inline functions ***/
 

@@ -223,7 +223,7 @@ static void test_rdb_to_redis_hash_with_expire(void **state) {
     teardownRedisServer();
 }
 
-/* Hinted hash templates (RDB v15) against a template-aware server: let the server
+/* Hash templates (RDB v15) against a template-aware server: let the server
  * build both template encodings, save an RDB, and replay it through the parser in
  * RESTORE and non-RESTORE modes. Only a live v15 server can confirm that the RDB
  * bytes we parse are the ones Redis really writes, that it accepts the payload we
@@ -241,7 +241,7 @@ static void test_rdb_to_redis_hash_with_expire(void **state) {
 static void test_rdb_to_redis_hash_template(void **state) {
     UNUSED(state);
 
-    /* Hinted hash templates are supported since Redis 8.10 */
+    /* Hash templates are supported since Redis 8.10 */
     if ((serverMajorVer<8) || ((serverMajorVer==8) && (serverMinorVer<10)))
         skip();
 

@@ -407,7 +407,7 @@ static void test_r2r_array_v14_insert_idx_boundary(void **state) {
                         expSuffix, sizeof(expSuffix) - 1, M_SUFFIX, 1);
 }
 
-/* v15 hinted hash templates (REF forms). A REF payload references the
+/* v15 hash templates (REF forms). A REF payload references the
  * out-of-band template section, so it can't be RESTORE'd as-is:
  *   - v15+ target + --support-restore: emit a synthesized self-contained
  *     RESTORE (preserves the template on the destination);
