@@ -1,3 +1,8 @@
+/* Tests the RdbBulk API (clone, free, len, isRef) rather than parsing results.
+ * Each bulk delivered to the callbacks is verified against the semantics of the
+ * configured bulkAllocType, iterating over all alloc types and all three
+ * handler levels (raw, struct, data). */
+
 #include <string.h>
 #include "test_common.h"
 
@@ -96,6 +101,27 @@ RdbRes handle_list_element(RdbParser *p, void *userData, RdbBulk b) {
     return RDB_OK;
 }
 
+static int numHashFieldsCb; /* verify the hash callbacks were really reached */
+
+RdbRes handle_hash_field(RdbParser *p, void *userData, RdbBulk field, RdbBulk value,
+                         int64_t expireAt) {
+    UNUSED(userData, expireAt);
+    ++numHashFieldsCb;
+    testBulkOps(p, field, 0);
+    testBulkOps(p, value, 0);
+    return RDB_OK;
+}
+
+/* Dumps to iterate. The hash-template dumps (v15) are included since they
+ * pass field names and values to the callbacks as referenced bulks. */
+static const char *bulkOpsDumps[] = {
+        DUMP_FOLDER("multiple_lists_strings.rdb"),
+        DUMP_FOLDER("hash_template_v15.rdb"),       /* template hash, values in a listpack */
+        DUMP_FOLDER("hash_template_array_v15.rdb"), /* template hash, values as raw strings */
+        DUMP_FOLDER("hash_template_self_lp_v15.rdb"), /* self-contained template hash */
+};
+#define NUM_BULK_OPS_DUMPS (sizeof(bulkOpsDumps) / sizeof(bulkOpsDumps[0]))
+
 static void test_raw_handlers_callbacks_bulk_ops (void **state) {
     UNUSED(state);
     RdbStatus  status;
@@ -103,6 +129,7 @@ static void test_raw_handlers_callbacks_bulk_ops (void **state) {
     void *user_data =&rawObjSizeLeft;
 
     for (mem.bulkAllocType = 0 ; mem.bulkAllocType < RDB_BULK_ALLOC_MAX ; ++mem.bulkAllocType) {
+      for (unsigned d = 0 ; d < NUM_BULK_OPS_DUMPS ; ++d) {
 
         RdbHandlersRawCallbacks callbacks = {
                 .handleAuxField = handle_aux_field,
@@ -114,11 +141,12 @@ static void test_raw_handlers_callbacks_bulk_ops (void **state) {
 
         RdbParser *parser = RDB_createParserRdb(&mem);
         RDB_setLogger(parser, loggerCb);
-        assert_non_null(RDBX_createReaderFile(parser, DUMP_FOLDER("multiple_lists_strings.rdb")));
+        assert_non_null(RDBX_createReaderFile(parser, bulkOpsDumps[d]));
         assert_non_null(RDB_createHandlersRaw(parser, &callbacks, user_data, NULL));
         while ((status = RDB_parse(parser)) == RDB_STATUS_WAIT_MORE_DATA);
         assert_int_equal( status, RDB_STATUS_OK);
         RDB_deleteParser(parser);
+      }
     }
 }
 
@@ -128,7 +156,10 @@ static void test_struct_handlers_callbacks_bulk_ops (void **state) {
     size_t rawObjSizeLeft;
     void *user_data =&rawObjSizeLeft;
 
+    numHashFieldsCb = 0;
+
     for (mem.bulkAllocType = 0 ; mem.bulkAllocType < RDB_BULK_ALLOC_MAX ; ++mem.bulkAllocType) {
+      for (unsigned d = 0 ; d < NUM_BULK_OPS_DUMPS ; ++d) {
 
         RdbHandlersStructCallbacks callbacks = {
                 .handleAuxField = handle_aux_field,
@@ -136,17 +167,19 @@ static void test_struct_handlers_callbacks_bulk_ops (void **state) {
                 .handleString = handle_string_value,
                 .handleListPlain = handle_list_element,
                 .handleListLP = handle_list_element,
-
+                .handleHashPlain = handle_hash_field,
         };
 
         RdbParser *parser = RDB_createParserRdb(&mem);
         RDB_setLogger(parser, loggerCb);
-        assert_non_null(RDBX_createReaderFile(parser, DUMP_FOLDER("multiple_lists_strings.rdb")));
+        assert_non_null(RDBX_createReaderFile(parser, bulkOpsDumps[d]));
         assert_non_null(RDB_createHandlersStruct(parser, &callbacks, user_data, NULL));
         while ((status = RDB_parse(parser)) == RDB_STATUS_WAIT_MORE_DATA);
         assert_int_equal( status, RDB_STATUS_OK);
         RDB_deleteParser(parser);
+      }
     }
+    assert_true(numHashFieldsCb > 0);
 }
 
 static void test_data_handlers_callbacks_bulk_ops (void **state) {
@@ -155,23 +188,29 @@ static void test_data_handlers_callbacks_bulk_ops (void **state) {
     size_t rawObjSizeLeft;
     void *user_data =&rawObjSizeLeft;
 
+    numHashFieldsCb = 0;
+
     for (mem.bulkAllocType = 0 ; mem.bulkAllocType < RDB_BULK_ALLOC_MAX ; ++mem.bulkAllocType) {
+      for (unsigned d = 0 ; d < NUM_BULK_OPS_DUMPS ; ++d) {
 
         RdbHandlersDataCallbacks callbacks = {
                 .handleAuxField = handle_aux_field,
                 .handleNewKey = handle_new_key,
                 .handleStringValue = handle_string_value,
                 .handleListItem = handle_list_element,
+                .handleHashField = handle_hash_field,
         };
 
         RdbParser *parser = RDB_createParserRdb(&mem);
         RDB_setLogger(parser, loggerCb);
-        assert_non_null(RDBX_createReaderFile(parser, DUMP_FOLDER("multiple_lists_strings.rdb")));
+        assert_non_null(RDBX_createReaderFile(parser, bulkOpsDumps[d]));
         assert_non_null(RDB_createHandlersData(parser, &callbacks, user_data, NULL));
         while ((status = RDB_parse(parser)) == RDB_STATUS_WAIT_MORE_DATA);
         assert_int_equal( status, RDB_STATUS_OK);
         RDB_deleteParser(parser);
+      }
     }
+    assert_true(numHashFieldsCb > 0);
 }
 
 /*************************** group_rdb_to_json *******************************/

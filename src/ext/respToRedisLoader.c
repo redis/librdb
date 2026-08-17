@@ -35,7 +35,10 @@
 #define REPLY_BUFF_SIZE             1024  /* reply buffer size */
 
 #define MAX_EINTR_RETRY             5
-#define RECV_CMD_TIMEOUT_SEC        10    /* recv() command timeout in seconds */
+#define RECV_CMD_TIMEOUT_SEC        10    /* recv()/send() command timeout in seconds */
+#define MAX_WRITE_STALL_RETRY       12    /* fail after this many consecutive send() timeouts
+                                             with zero progress (MAX_WRITE_STALL_RETRY *
+                                             RECV_CMD_TIMEOUT_SEC seconds of no drain) */
 
 struct RdbxRespToRedisLoader {
 
@@ -206,6 +209,11 @@ static ssize_t writevSSL(SSL *ssl, struct iovec *iov, int iovCnt) {
         if (sent <= 0) {
             int ssl_err = SSL_get_error(ssl, sent);
             if (ssl_err == SSL_ERROR_WANT_WRITE || ssl_err == SSL_ERROR_WANT_READ) {
+                /* Report bytes already sent so the caller advances past them and
+                 * the retry re-issues SSL_write() with the SAME buffer (OpenSSL
+                 * requires it). Only a block on the first entry returns EAGAIN. */
+                if (totalWritten > 0)
+                    return totalWritten;
                 errno = EAGAIN;
             } else {
                 errno = EIO;
@@ -226,6 +234,7 @@ static int redisLoaderWritev(void *context, struct iovec *iov, int iovCnt,
 {
     ssize_t writeResult;
     int retries = 0;
+    int stallRetries = 0;
 
     RdbxRespToRedisLoader *ctx = context;
 
@@ -257,12 +266,35 @@ static int redisLoaderWritev(void *context, struct iovec *iov, int iovCnt,
                     break;
                 }
                 continue;
+            } else if (errno == EAGAIN || errno == EWOULDBLOCK) {
+                /* send() hit SO_SNDTIMEO with no bytes drained. A live server
+                 * keeps draining while we stream a command, so a sustained
+                 * zero-progress stall means it is stuck: bound the number of
+                 * *consecutive* no-progress windows (reset on any progress). */
+                if ((++stallRetries) >= MAX_WRITE_STALL_RETRY) {
+                    RDB_reportError(ctx->p, (RdbRes) RDBX_ERR_RESP2REDIS_FAILED_WRITE,
+                                    "Failed to write socket. Server not draining for %d seconds",
+                                    MAX_WRITE_STALL_RETRY * RECV_CMD_TIMEOUT_SEC);
+                    break;
+                }
+                RDB_log(ctx->p, RDB_LOG_INF,
+                        "Redis server not accepting writes for %d seconds",
+                        stallRetries * RECV_CMD_TIMEOUT_SEC);
+
+                /* Parser got external error? Currently used only for testing */
+                if (RDB_getErrorCode(ctx->p) != RDB_OK)
+                    break;
+
+                continue;
             } else {
                 RDB_reportError(ctx->p, (RdbRes) RDBX_ERR_RESP2REDIS_FAILED_WRITE,
                                 "Failed to write socket (errno=%d)", errno);
                 break;
             }
         }
+
+        retries = stallRetries = 0; /* progress made: reset EINTR and stall counters
+                                       so only *consecutive* interruptions count */
 
         /* crunch iov entries that were transmitted entirely */
         while ((iovCnt) && (iov->iov_len <= (size_t) writeResult)) {
@@ -438,9 +470,12 @@ _LIBRDB_API RdbxRespToRedisLoader *RDBX_createRespToRedisFd(RdbParser *p,
         return NULL;
     }
 
-    /* Set receive timeout (blocking, but with a limit) */
+    /* Set send/receive timeouts (blocking, but with a limit) so that a busy
+     * server which stops draining or replying is retried rather than blocking
+     * forever. See redisLoaderWritev()/readReplies() for the retry loops. */
     struct timeval timeout = { .tv_sec = RECV_CMD_TIMEOUT_SEC, .tv_usec = 0 };
-    if (setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) < 0) {
+    if ((setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) < 0) ||
+        (setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout)) < 0)) {
         RDB_reportError(p, (RdbRes) RDBX_ERR_RESP2REDIS_SET_TIMEOUT,
                         "Failed to configure timeout for socket. errno=%d: %s",
                         errno, strerror(errno));
@@ -546,9 +581,10 @@ static int configureSocket(RdbParser *p, int sockfd, int *origSockFlags) {
         return -1;
     }
 
-    /* Set receive timeout */
+    /* Set send/receive timeouts (see RDBX_createRespToRedisFd) */
     struct timeval timeout = { .tv_sec = RECV_CMD_TIMEOUT_SEC, .tv_usec = 0 };
-    if (setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) < 0) {
+    if ((setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout)) < 0) ||
+        (setsockopt(sockfd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout)) < 0)) {
         RDB_reportError(p, (RdbRes) RDBX_ERR_RESP2REDIS_SET_TIMEOUT,
                         "Failed to set socket timeout. errno=%d: %s", errno, strerror(errno));
         return -1;

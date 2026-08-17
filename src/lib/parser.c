@@ -92,6 +92,11 @@ struct ParsingElementInfo peInfo[PE_MAX] = {
         [PE_STREAM_LP]        = {elementStreamLP, "elementStreamLP", "Parsing stream Listpack"},
         /* array (sparse-array, v14+) */
         [PE_ARRAY]            = {elementArray, "elementArray", "Parsing sparse array"},
+        /* hash templates (v15+) */
+        [PE_HASH_TEMPLATE]      = {elementHashTemplate, "elementHashTemplate", "Parsing hash template record"},
+        [PE_HASH_TMPL_LP_REF]   = {elementHashTmplLpRef, "elementHashTmplLpRef", "Parsing template hash (listpack ref)"},
+        [PE_HASH_TMPL_ARRAY_REF]= {elementHashTmplArrayRef, "elementHashTmplArrayRef", "Parsing template hash (array ref)"},
+        [PE_HASH_TMPL_SELF]     = {elementHashTmplSelfContained, "elementHashTmplSelfContained", "Parsing template hash (self-contained)"},
 
         /*** parsing raw data (RDB_LEVEL_RAW) ***/
 
@@ -129,6 +134,10 @@ struct ParsingElementInfo peInfo[PE_MAX] = {
         [PE_RAW_KEY_META]     = {elementRawKeyMeta, "elementRawKeyMeta", "Parsing raw key metadata"},
         /* sparse array (RDB v14) */
         [PE_RAW_ARRAY]        = {elementRawArray, "elementRawArray", "Parsing raw sparse array"},
+        /* hash templates (v15+) */
+        [PE_RAW_HASH_TMPL_LP_REF]   = {elementRawHashTmplLpRef, "elementRawHashTmplLpRef", "Raw template hash (listpack ref)"},
+        [PE_RAW_HASH_TMPL_ARRAY_REF]= {elementRawHashTmplArrayRef, "elementRawHashTmplArrayRef", "Raw template hash (array ref)"},
+        [PE_RAW_HASH_TMPL_SELF]     = {elementRawHashTmplSelfContained, "elementRawHashTmplSelfContained", "Raw template hash (self-contained)"},
 
         /* Redis Enterprise only */
         [__PE_SLOT_NUM]         = {__elementSlotNum, "elementSlotNum", "Parse cluster slot number (Redis Ent.)"},
@@ -295,15 +304,46 @@ _LIBRDB_API RdbParser *RDB_createParserRdb(RdbMemAlloc *memAlloc) {
     p->checksum = 0;
     p->rdbversion = 0;
 
+    p->hashTmpls.entries = NULL; /* grown on the first template record (v15) */
+    p->hashTmpls.cap = 0;
+
     parserRawInit(p);
 
     return p;
+}
+
+/* Free a hash-template's field buffers (v15) and zero it. Null-safe for
+ * partially-populated templates (an interrupted parse). */
+static void hashTemplateFreeFields(RdbParser *p, HashTemplate *t) {
+    if (t->fields) {
+        for (uint64_t f = 0; f < t->fieldsCap; ++f)
+            if (t->fields[f]) RDB_free(p, t->fields[f]);
+        RDB_free(p, t->fields);
+    }
+    if (t->fieldLens) RDB_free(p, t->fieldLens);
+    memset(t, 0, sizeof(*t));
+}
+
+/* Release the hash-template registry plus any in-flight self-contained
+ * template (v15). */
+static void hashTemplatesRelease(RdbParser *p) {
+    hashTemplateFreeFields(p, &p->elmCtx.hashTmpl.selfTmpl);
+
+    if (p->hashTmpls.entries == NULL) return;
+
+    for (uint64_t i = 0; i < p->hashTmpls.cap; ++i)
+        hashTemplateFreeFields(p, &p->hashTmpls.entries[i]);
+
+    RDB_free(p, p->hashTmpls.entries);
+    p->hashTmpls.entries = NULL;
+    p->hashTmpls.cap = 0;
 }
 
 _LIBRDB_API void RDB_deleteParser(RdbParser *p) {
     BulkPool *pool = p->cache;
 
     bulkUnmanagedFree(p, &p->callSubElm.bulkResult);
+    hashTemplatesRelease(p);
 
     parserRawRelease(p);
 
@@ -609,6 +649,10 @@ _LIBRDB_API int RDB_handleByLevel(RdbParser *p, RdbDataType type, RdbHandlersLev
             p->handleTypeObjByLevel[RDB_TYPE_HASH_LISTPACK] = lvl;
             p->handleTypeObjByLevel[RDB_TYPE_HASH_LISTPACK_EX_PRE_GA] = lvl;
             p->handleTypeObjByLevel[RDB_TYPE_HASH_LISTPACK_EX] = lvl;
+            p->handleTypeObjByLevel[RDB_TYPE_HASH_TMPL_LP_REF] = lvl;
+            p->handleTypeObjByLevel[RDB_TYPE_HASH_TMPL_ARRAY_REF] = lvl;
+            p->handleTypeObjByLevel[RDB_TYPE_HASH_TMPL_LP] = lvl;
+            p->handleTypeObjByLevel[RDB_TYPE_HASH_TMPL_ARRAY] = lvl;
             break;
         case RDB_DATA_TYPE_MODULE:
             p->handleTypeObjByLevel[RDB_TYPE_MODULE_2] = lvl;
@@ -675,6 +719,10 @@ static inline RdbDataType getDataType(int opcode) {
         case RDB_TYPE_HASH_LISTPACK:
         case RDB_TYPE_HASH_LISTPACK_EX_PRE_GA:
         case RDB_TYPE_HASH_LISTPACK_EX:
+        case RDB_TYPE_HASH_TMPL_LP_REF:
+        case RDB_TYPE_HASH_TMPL_ARRAY_REF:
+        case RDB_TYPE_HASH_TMPL_LP:
+        case RDB_TYPE_HASH_TMPL_ARRAY:
             return RDB_DATA_TYPE_HASH;
 
         case RDB_TYPE_MODULE_2:
@@ -1617,6 +1665,25 @@ RdbStatus elementNextRdbType(RdbParser *p) {
         case RDB_TYPE_STREAM_LISTPACKS_5:   return nextParsingElementKeyValue(p, PE_RAW_STREAM_LP, PE_STREAM_LP); /*(v14+)*/
         /* array */    
         case RDB_TYPE_ARRAY:                return nextParsingElementKeyValue(p, PE_RAW_ARRAY, PE_ARRAY); /*(v14+)*/
+
+        /* hash templates (v15+)- REF forms resolve their field names
+         * from the template registry populated by RDB_OPCODE_HASH_TEMPLATE. 
+         *   - L1/L2 (DATA/STRUCT): emit ordinary field/value pairs (-> HSET).
+         *   - L0 (support-restore): a REF payload references the out-of-band
+         *     template section and can't be RESTORE'd as-is, so the raw handler
+         *     synthesizes a self-contained payload of the matching form
+         *     (_LP_REF -> TMPL_LP, _ARRAY_REF -> TMPL_ARRAY). */
+        case RDB_TYPE_HASH_TMPL_LP_REF:     return nextParsingElementKeyValue(p, PE_RAW_HASH_TMPL_LP_REF, PE_HASH_TMPL_LP_REF);
+        case RDB_TYPE_HASH_TMPL_ARRAY_REF:  return nextParsingElementKeyValue(p, PE_RAW_HASH_TMPL_ARRAY_REF, PE_HASH_TMPL_ARRAY_REF);
+        /* Self-contained forms carry their field names inline (no template-section
+         * reference), so they need no registry. Redis's SAVE never emits them into
+         * a full RDB - only DUMP does - but its loader accepts them anywhere, so we
+         * do too. Both LP and ARRAY route to the same element, which branches on
+         * currOpcode for the value section. */
+        case RDB_TYPE_HASH_TMPL_LP:
+        case RDB_TYPE_HASH_TMPL_ARRAY:      return nextParsingElementKeyValue(p, PE_RAW_HASH_TMPL_SELF, PE_HASH_TMPL_SELF);
+
+        case RDB_OPCODE_HASH_TEMPLATE:      return nextParsingElement(p, PE_HASH_TEMPLATE);
 
         case RDB_OPCODE_MODULE_AUX:         if (p->handleTypeObjByLevel[RDB_OPCODE_MODULE_AUX] == RDB_LEVEL_RAW)
                                                 return nextParsingElement(p, PE_RAW_MODULE_AUX);
@@ -2854,6 +2921,556 @@ RdbStatus elementArray(RdbParser *p) {
         default:
             RDB_reportError(p, RDB_ERR_ARRAY_INVALID_STATE,
                             "elementArray(): invalid parsing element state: %d", ctx->state);
+            return RDB_STATUS_ERROR;
+    }
+}
+
+/*** hash templates (v15) ***/
+
+/* The registry maps a saved template id to its field names, indexed by the id
+ * (dense, as assigned by the saver). An id beyond RDB_HASH_TMPL_MAX_ID is
+ * rejected rather than allowed to size an allocation off untrusted input.
+ * Note growing the array invalidates entry pointers, so a resolved template
+ * must not be held across template records - only within one key/record, which
+ * is all any caller needs (and no realloc can happen mid-record). */
+static RdbStatus hashTemplatesEnsureCap(RdbParser *p, uint64_t id) {
+    if (id < p->hashTmpls.cap)
+        return RDB_STATUS_OK;
+
+    if (id >= RDB_HASH_TMPL_MAX_ID) {
+        RDB_reportError(p, RDB_ERR_HASH_TMPL_INVLD,
+                        "Hash template id %llu exceeds the supported maximum (%llu)",
+                        (unsigned long long) id, (unsigned long long) RDB_HASH_TMPL_MAX_ID);
+        return RDB_STATUS_ERROR;
+    }
+
+    uint64_t newCap = p->hashTmpls.cap ? p->hashTmpls.cap : 16;
+    while (newCap <= id) newCap *= 2;
+
+    HashTemplate *arr = (HashTemplate *) RDB_realloc(p, p->hashTmpls.entries,
+                                                     newCap * sizeof(HashTemplate));
+    if (arr == NULL) {
+        RDB_reportError(p, RDB_ERR_FAIL_ALLOC,
+                        "hashTemplatesEnsureCap(): failed allocating %llu template slots",
+                        (unsigned long long) newCap);
+        return RDB_STATUS_ERROR;
+    }
+    memset(arr + p->hashTmpls.cap, 0, (newCap - p->hashTmpls.cap) * sizeof(HashTemplate));
+    p->hashTmpls.entries = arr;
+    p->hashTmpls.cap = newCap;
+    return RDB_STATUS_OK;
+}
+
+/* Register a new template under the saved 'id' and hand back its zeroed slot.
+ * Rejects a duplicate id, as Redis's loader does. The caller marks the slot
+ * occupied by setting fieldCount (hashTmplValidateFieldCount), which it always does
+ * before any state that could bring us back here. */
+static RdbStatus hashTemplateRegister(RdbParser *p, uint64_t id, HashTemplate **tmpl) {
+    IF_NOT_OK_RETURN(hashTemplatesEnsureCap(p, id));
+
+    if (p->hashTmpls.entries[id].fieldCount != 0) {
+        RDB_reportError(p, RDB_ERR_HASH_TMPL_INVLD,
+                        "Duplicate hash template id %llu", (unsigned long long) id);
+        return RDB_STATUS_ERROR;
+    }
+
+    *tmpl = &p->hashTmpls.entries[id];
+    return RDB_STATUS_OK;
+}
+
+/* Get template by id, or report the error and return NULL. Rejects an id that
+ * was never registered, and one whose field names were not read in full. */
+HashTemplate *hashTemplateGetById(RdbParser *p, uint64_t id) {
+    HashTemplate *t = (id < p->hashTmpls.cap) ? &p->hashTmpls.entries[id] : NULL;
+    if (t == NULL || t->fields == NULL || t->fieldsCap < t->fieldCount) {
+        RDB_reportError(p, RDB_ERR_HASH_TMPL_UNKNOWN_ID,
+                        "Template-encoded hash references unknown template id %llu",
+                        (unsigned long long) id);
+        return NULL;
+    }
+    return t;
+}
+
+/* Emit one (field, value) pair of a template-encoded hash. 'field' comes from
+ * the resolved template. 'valueBulk' is the value to report, and 'valueEmb' is
+ * non-NULL only when that bulk is embedded in a listpack and therefore has to be
+ * restored right after the callback (see allocEmbeddedBulk()).*/
+static RdbStatus hashTemplateEmitPair(RdbParser *p, const unsigned char *field,
+                                      size_t fieldLen, BulkInfo *valueBulk,
+                                      EmbeddedBulk *valueEmb) {
+    /* The template owns the field name as a NUL-terminated buffer that outlives the
+     * momentary callback, so it is handed over as a referenced bulk instead of
+     * allocating and copying it for each pair (unlike the ZP/LP embedded strings, no
+     * terminator has to be faked here). Only if the app configured
+     * RDB_BULK_ALLOC_EXTERN a new buffer gets allocated and copied. */
+    BulkInfo fieldBulk;
+    bulkUnmanagedAlloc(p, fieldLen, UNMNG_RQ_ALLOC_APP_BULK_REF, (char *) field, &fieldBulk);
+    if (unlikely(fieldBulk.ref == NULL)) {
+        RDB_reportError(p, RDB_ERR_FAIL_ALLOC,
+                        "hashTemplateEmitPair(): failed allocating field of %zu bytes", fieldLen);
+        return RDB_STATUS_ERROR;
+    }
+
+    registerAppBulkForNextCb(p, &fieldBulk);
+    registerAppBulkForNextCb(p, valueBulk);
+
+    /* Finalization (on either success or failure) */
+    #define FINALIZE_PAIR { bulkUnmanagedFree(p, &fieldBulk);            \
+                            if (valueEmb) restoreEmbeddedBulk(p, valueEmb); }
+
+    if (p->elmCtx.key.handleByLevel == RDB_LEVEL_STRUCT)
+        CALL_HANDLERS_CB(p, FINALIZE_PAIR, RDB_LEVEL_STRUCT, rdbStruct.handleHashPlain,
+                         fieldBulk.ref, valueBulk->ref, (int64_t) -1);
+    else
+        CALL_HANDLERS_CB(p, FINALIZE_PAIR, RDB_LEVEL_DATA, rdbData.handleHashField,
+                         fieldBulk.ref, valueBulk->ref, (int64_t) -1);
+    #undef FINALIZE_PAIR
+
+    return RDB_STATUS_OK;
+}
+
+/* Compare two template field names by Redis's sdscmplen() ordering: length
+ * first, then bytes. Returns <0 / 0 / >0 like memcmp. The template field lookup
+ * relies on this ordering. */
+static int templateFieldCmp(const unsigned char *a, size_t alen,
+                            const unsigned char *b, size_t blen) {
+    if (alen != blen) return (alen < blen) ? -1 : 1;
+    return memcmp(a, b, alen);
+}
+
+/* Reject a zero or over-large template field count. If 'fieldCount' is given,
+ * record the validated count into it (raw-level callers validate only). The
+ * template field-name arrays are grown as the fields are read (see
+ * templateGrowFields) rather than pre-sized to this untrusted count. */
+RdbStatus hashTmplValidateFieldCount(RdbParser *p, uint64_t count, uint64_t *fieldCount) {
+    if (count == 0) {
+        RDB_reportError(p, RDB_ERR_HASH_TMPL_INVLD, "Hash template has zero fields");
+        return RDB_STATUS_ERROR;
+    }
+    if (count >= (SIZE_MAX / sizeof(unsigned char *))) {
+        RDB_reportError(p, RDB_ERR_HASH_TMPL_INVLD, "Hash template field count %llu too large",
+                        (unsigned long long) count);
+        return RDB_STATUS_ERROR;
+    }
+    if (fieldCount) *fieldCount = count;
+    return RDB_STATUS_OK;
+}
+
+/* Make slot 'i' of the template's field-name arrays available, growing them
+ * geometrically (never beyond the declared fieldCount). Only slots below
+ * fieldsCap are initialized, and only those are visited when freeing. */
+static RdbStatus templateGrowFields(RdbParser *p, HashTemplate *t, uint64_t i) {
+    if (i < t->fieldsCap)
+        return RDB_STATUS_OK;
+
+    uint64_t newCap = t->fieldsCap ? t->fieldsCap * 2 : 16;
+    if (newCap > t->fieldCount) newCap = t->fieldCount;
+
+    unsigned char **fields = (unsigned char **) RDB_realloc(p, t->fields,
+                                                newCap * sizeof(unsigned char *));
+    if (fields != NULL) t->fields = fields;
+    size_t *fieldLens = (fields == NULL) ? NULL :
+                        (size_t *) RDB_realloc(p, t->fieldLens, newCap * sizeof(size_t));
+    if (fieldLens == NULL) {
+        RDB_reportError(p, RDB_ERR_FAIL_ALLOC,
+                        "templateGrowFields(): failed allocating %llu template fields",
+                        (unsigned long long) newCap);
+        return RDB_STATUS_ERROR;
+    }
+    t->fieldLens = fieldLens;
+    memset(t->fields + t->fieldsCap, 0,
+           (newCap - t->fieldsCap) * sizeof(unsigned char *));
+    t->fieldsCap = newCap;
+    return RDB_STATUS_OK;
+}
+
+/* Store field 'i' into template 't' (owns a NUL-terminated copy) and verify the
+ * fields stay strictly ascending by templateFieldCmp() ordering. */
+static RdbStatus templateStoreField(RdbParser *p, HashTemplate *t, uint64_t i,
+                                    const unsigned char *field, size_t fieldLen) {
+    IF_NOT_OK_RETURN(templateGrowFields(p, t, i));
+
+    unsigned char *copy = (unsigned char *) RDB_alloc(p, fieldLen + 1);
+    if (copy == NULL) {
+        RDB_reportError(p, RDB_ERR_FAIL_ALLOC,
+                        "templateStoreField(): failed allocating field of %zu bytes", fieldLen);
+        return RDB_STATUS_ERROR;
+    }
+    memcpy(copy, field, fieldLen);
+    copy[fieldLen] = '\0';
+    t->fields[i] = copy;
+    t->fieldLens[i] = fieldLen;
+
+    if (i > 0 && templateFieldCmp(t->fields[i - 1], t->fieldLens[i - 1], copy, fieldLen) >= 0) {
+        RDB_reportError(p, RDB_ERR_HASH_TMPL_INVLD,
+                        "Hash template fields not strictly sorted");
+        return RDB_STATUS_ERROR;
+    }
+    return RDB_STATUS_OK;
+}
+
+/* Emit the (field,value) pairs of a values listpack whose first entry is the
+ * template id and remaining entries are the values in field order. Caller has
+ * already validated that 'lp' holds t->fieldCount+1 entries. The values are
+ * passed to the callbacks embedded (referenced) within the listpack. */
+static RdbStatus hashTemplateEmitLpValues(RdbParser *p, unsigned char *lp, HashTemplate *t) {
+    unsigned char *iter; /* skip the leading template-id entry */
+    unsigned int slen;
+    long long v;
+    /* NULL iters are unreachable under deep integrity check; guards a lying
+     * header count (lpLength) when the app opted for a shallow check. */
+    if ((iter = lpFirst(lp)) == NULL) goto err_lp_end; /* leading template-id entry */
+    for (uint64_t i = 0; i < t->fieldCount; ++i) {
+        if ((iter = lpNext(lp, iter)) == NULL) goto err_lp_end;
+        unsigned char *vstr = lpGetValue(iter, &slen, &v);
+
+        /* Pass the value as a bulk that references the listpack entry, with its
+         * trailing char temporarily overridden by '\0'. hashTemplateEmitPair()
+         * restores that char once the callback returns. */
+        EmbeddedBulk valueEmb;
+        if (!allocEmbeddedBulk(p, vstr, slen, v, &valueEmb))
+            return RDB_STATUS_ERROR;
+
+        IF_NOT_OK_RETURN(hashTemplateEmitPair(p, t->fields[i], t->fieldLens[i],
+                                              &valueEmb.binfo, &valueEmb));
+    }
+    return RDB_STATUS_OK;
+err_lp_end:
+    RDB_reportError(p, RDB_ERR_HASH_TMPL_INVLD,
+                    "Hash template values listpack ended prematurely");
+    return RDB_STATUS_ERROR;
+}
+
+/* Parse the FIELDS_LP field-name section (one listpack blob of field names) into
+ * template 't', validating integrity and ordering. Integer entries decode to
+ * their decimal string, matching Redis's loader. */
+static RdbStatus hashTemplateParseFieldsLp(RdbParser *p, unsigned char *lp,
+                                           size_t lpBytesLen, HashTemplate *t) {
+    if (lpBytesLen == 0 || !lpValidateIntegrity(lp, lpBytesLen, p->deepIntegCheck, NULL, NULL)) {
+        RDB_reportError(p, RDB_ERR_HASH_TMPL_INVLD,
+                        "Hash template field blob integrity check failed");
+        return RDB_STATUS_ERROR;
+    }
+
+    uint64_t count = lpLength(lp);
+    IF_NOT_OK_RETURN(hashTmplValidateFieldCount(p, count, &t->fieldCount));
+
+    unsigned char *iter = lpFirst(lp);
+    unsigned int slen;
+    long long v;
+    for (uint64_t i = 0; i < count; ++i) {
+        /* Unreachable under deep integrity check. Guards a lying header count
+         * (lpLength) when the app opted for a shallow check. */
+        if (iter == NULL) {
+            RDB_reportError(p, RDB_ERR_HASH_TMPL_INVLD,
+                            "Hash template fields listpack ended prematurely");
+            return RDB_STATUS_ERROR;
+        }
+        unsigned char *fstr = lpGetValue(iter, &slen, &v);
+        if (fstr != NULL) {
+            IF_NOT_OK_RETURN(templateStoreField(p, t, i, fstr, slen));
+        } else {
+            char buf[LONG_STR_SIZE];
+            int len = ll2string(buf, sizeof(buf), v);
+            IF_NOT_OK_RETURN(templateStoreField(p, t, i, (unsigned char *) buf, len));
+        }
+        iter = lpNext(lp, iter);
+    }
+    return RDB_STATUS_OK;
+}
+
+/* Parse one top-level RDB_OPCODE_HASH_TEMPLATE record into the registry.
+ * Record: [id][field_count][field_1]...[field_N]. Field names must be strictly
+ * ascending (the REF forms rely only on the id->fields mapping, but we mirror
+ * Redis's corruption checks). */
+RdbStatus elementHashTemplate(RdbParser *p) {
+    ElementCtx *ctx = &p->elmCtx;
+    enum { ST_TMPL_HDR = 0, ST_TMPL_FIELDS };
+
+    switch (ctx->state) {
+        case ST_TMPL_HDR: {
+            uint64_t id, fieldCount;
+            IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &id, NULL, NULL));
+            IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &fieldCount, NULL, NULL));
+
+            /*** ENTER SAFE STATE ***/
+
+            HashTemplate *t;
+            IF_NOT_OK_RETURN(hashTemplateRegister(p, id, &t));
+            IF_NOT_OK_RETURN(hashTmplValidateFieldCount(p, fieldCount, &t->fieldCount));
+
+            ctx->hashTmpl.tmpl = t;
+            ctx->hashTmpl.numFields = fieldCount;
+            ctx->hashTmpl.visitingField = 0;
+
+            updateElementState(p, ST_TMPL_FIELDS, 0);
+        }
+        /* fall-thru */
+        case ST_TMPL_FIELDS: {
+            HashTemplate *t = ctx->hashTmpl.tmpl;
+            while (ctx->hashTmpl.visitingField < ctx->hashTmpl.numFields) {
+                BulkInfo *fieldBulk;
+                IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC_APP_BULK, NULL, &fieldBulk));
+
+                /*** ENTER SAFE STATE ***/
+
+                uint64_t i = ctx->hashTmpl.visitingField;
+                IF_NOT_OK_RETURN(templateStoreField(p, t, i, fieldBulk->ref, fieldBulk->len));
+
+                ctx->hashTmpl.visitingField++;
+                updateElementState(p, ST_TMPL_FIELDS, 0);
+            }
+            return nextParsingElement(p, PE_NEXT_RDB_TYPE);
+        }
+
+        default:
+            RDB_reportError(p, RDB_ERR_HASH_TMPL_INVLD,
+                            "elementHashTemplate(): invalid state: %d", ctx->state);
+            return RDB_STATUS_ERROR;
+    }
+}
+
+/* RDB_TYPE_HASH_TMPL_ARRAY_REF: [template_id][value_1]...[value_N]. Field names
+ * come from the registry; values are raw strings in field order. */
+RdbStatus elementHashTmplArrayRef(RdbParser *p) {
+    ElementCtx *ctx = &p->elmCtx;
+    enum {
+        ST_HDR = 0, /* Read template id */ 
+        ST_NEXT     /* Read values and emit fields-values pairs */
+    };
+
+    switch (ctx->state) {
+        case ST_HDR: {
+            uint64_t id;
+            IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &id, NULL, NULL));
+
+            /*** ENTER SAFE STATE ***/
+
+            HashTemplate *t = hashTemplateGetById(p, id);
+            if (t == NULL) return RDB_STATUS_ERROR;
+
+            ctx->hashTmpl.tmpl = t;
+            ctx->hashTmpl.numFields = t->fieldCount;
+            ctx->hashTmpl.visitingField = 0;
+            ctx->key.numItemsHint = t->fieldCount;
+
+            updateElementState(p, ST_NEXT, 0);
+        }
+        /* fall-thru */
+        case ST_NEXT: {
+            HashTemplate *t = ctx->hashTmpl.tmpl;
+            while (ctx->hashTmpl.visitingField < ctx->hashTmpl.numFields) {
+                BulkInfo *valueBulk;
+                IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC_APP_BULK, NULL, &valueBulk));
+
+                /*** ENTER SAFE STATE ***/
+
+                uint64_t i = ctx->hashTmpl.visitingField;
+                IF_NOT_OK_RETURN(hashTemplateEmitPair(p, t->fields[i], t->fieldLens[i],
+                                                      valueBulk, NULL /*not embedded*/));
+
+                ctx->hashTmpl.visitingField++;
+                updateElementState(p, ST_NEXT, 0);
+            }
+            return nextParsingElement(p, PE_END_KEY);
+        }
+
+        default:
+            RDB_reportError(p, RDB_ERR_HASH_TMPL_INVLD,
+                            "elementHashTmplArrayRef(): invalid state: %d", ctx->state);
+            return RDB_STATUS_ERROR;
+    }
+}
+
+/* RDB_TYPE_HASH_TMPL_LP_REF: one listpack blob whose first entry is the saved
+ * template id and remaining entries are the values in field order. */
+RdbStatus elementHashTmplLpRef(RdbParser *p) {
+    BulkInfo *lpBulk;
+    IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC_APP_BULK, NULL, &lpBulk));
+
+    /*** ENTER SAFE STATE ***/
+
+    unsigned char *lp = (unsigned char *) lpBulk->ref;
+    if (!lpValidateIntegrity(lp, lpBulk->len, p->deepIntegCheck, NULL, NULL)) {
+        RDB_reportError(p, RDB_ERR_HASH_TMPL_INVLD,
+                        "elementHashTmplLpRef(): listpack integrity check failed");
+        return RDB_STATUS_ERROR;
+    }
+
+    unsigned char *iter = lpFirst(lp);
+    if (iter == NULL) {
+        RDB_reportError(p, RDB_ERR_HASH_TMPL_INVLD,
+                        "elementHashTmplLpRef(): empty template listpack");
+        return RDB_STATUS_ERROR;
+    }
+
+    /* First entry is the template id (must be an integer). */
+    unsigned int slen;
+    long long idVal;
+    if (lpGetValue(iter, &slen, &idVal) != NULL || idVal < 0) {
+        RDB_reportError(p, RDB_ERR_HASH_TMPL_INVLD,
+                        "elementHashTmplLpRef(): template id entry is not a non-negative integer");
+        return RDB_STATUS_ERROR;
+    }
+
+    HashTemplate *t = hashTemplateGetById(p, (uint64_t) idVal);
+    if (t == NULL) return RDB_STATUS_ERROR;
+    p->elmCtx.key.numItemsHint = (int64_t) t->fieldCount;
+
+    if (lpLength(lp) != t->fieldCount + 1) {
+        RDB_reportError(p, RDB_ERR_HASH_TMPL_INVLD,
+                        "elementHashTmplLpRef(): listpack has %lu entries, expected %llu",
+                        lpLength(lp), (unsigned long long) (t->fieldCount + 1));
+        return RDB_STATUS_ERROR;
+    }
+
+    IF_NOT_OK_RETURN(hashTemplateEmitLpValues(p, lp, t));
+    return nextParsingElement(p, PE_END_KEY);
+}
+
+/* RDB_TYPE_HASH_TMPL_LP / _ARRAY (self-contained, v15): the field names are
+ * carried inline, so no template-section reference is needed. Layout:
+ *   [fields_fmt][field names][values]
+ * fields_fmt: 0 = FIELDS_LP (names as one listpack blob), 1 = FIELDS_RAW (a
+ * count then that many strings). Values: TMPL_LP -> one values listpack blob
+ * (leading id entry + values); TMPL_ARRAY -> fieldCount value strings. Emits
+ * ordinary field/value pairs (-> HSET), like the REF forms. The inline template
+ * lives in ctx->hashTmpl.selfTmpl and is freed once the key completes. */
+RdbStatus elementHashTmplSelfContained(RdbParser *p) {
+    ElementCtx *ctx = &p->elmCtx;
+    ElementHashTmplCtx *h = &ctx->hashTmpl;
+    enum {
+        ST_FIELDS = 0,      /* Read fields_fmt; parse a FIELDS_LP blob in one shot,
+                             * or read the FIELDS_RAW count and go to the loop below */
+        ST_FIELDS_RAW_LOOP, /* FIELDS_RAW only: load field names one at a time */
+        ST_VALUES_ARRAY,    /* TMPL_ARRAY: load fieldCount value strings, emitting pairs */
+        ST_VALUES_LP,       /* TMPL_LP: load the single values listpack blob */
+    };
+
+    switch (ctx->state) {
+        case ST_FIELDS: {
+            uint64_t fmt;
+            IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &fmt, NULL, NULL));
+
+            if (fmt == 0) {
+                /* FIELDS_LP: field names as one listpack blob. */
+                BulkInfo *blobBulk;
+                IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC_APP_BULK, NULL, &blobBulk));
+
+                /*** ENTER SAFE STATE ***/
+
+                IF_NOT_OK_RETURN(hashTemplateParseFieldsLp(p, blobBulk->ref,
+                                                           blobBulk->len, &h->selfTmpl));
+            } else if (fmt == 1) {
+                /* FIELDS_RAW: a field count then that many field-name strings. */
+                uint64_t count;
+                IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &count, NULL, NULL));
+
+                /*** ENTER SAFE STATE ***/
+
+                IF_NOT_OK_RETURN(hashTmplValidateFieldCount(p, count, &h->selfTmpl.fieldCount));
+                h->numFields = count;
+                h->visitingField = 0;
+                return updateElementState(p, ST_FIELDS_RAW_LOOP, 0);
+            } else {
+                RDB_reportError(p, RDB_ERR_HASH_TMPL_INVLD,
+                                "Unknown hash-template fields format %llu",
+                                (unsigned long long) fmt);
+                return RDB_STATUS_ERROR;
+            }
+
+            /* FIELDS_LP parsed in one shot -> move to the value section. */
+            h->tmpl = &h->selfTmpl;
+            h->numFields = h->selfTmpl.fieldCount;
+            h->visitingField = 0;
+            ctx->key.numItemsHint = (int64_t) h->selfTmpl.fieldCount;
+            if (p->currOpcode == RDB_TYPE_HASH_TMPL_LP)
+                return updateElementState(p, ST_VALUES_LP, 0);
+            else
+                return updateElementState(p, ST_VALUES_ARRAY, 0);
+        }
+
+        case ST_FIELDS_RAW_LOOP: {
+            HashTemplate *t = &h->selfTmpl;
+            while (h->visitingField < h->numFields) {
+                BulkInfo *fieldBulk;
+                IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC_APP_BULK, NULL, &fieldBulk));
+
+                /*** ENTER SAFE STATE ***/
+
+                IF_NOT_OK_RETURN(templateStoreField(p, t, h->visitingField,
+                                                    fieldBulk->ref, fieldBulk->len));
+                h->visitingField++;
+                updateElementState(p, ST_FIELDS_RAW_LOOP, 0);
+            }
+            h->tmpl = t;
+            h->numFields = t->fieldCount;
+            h->visitingField = 0;
+            ctx->key.numItemsHint = (int64_t) t->fieldCount;
+            if (p->currOpcode == RDB_TYPE_HASH_TMPL_LP)
+                return updateElementState(p, ST_VALUES_LP, 0);
+            else
+                return updateElementState(p, ST_VALUES_ARRAY, 0);
+        }
+
+        case ST_VALUES_ARRAY: {
+            HashTemplate *t = h->tmpl;
+            while (h->visitingField < h->numFields) {
+                BulkInfo *valueBulk;
+                IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC_APP_BULK, NULL, &valueBulk));
+
+                /*** ENTER SAFE STATE ***/
+
+                uint64_t i = h->visitingField;
+                IF_NOT_OK_RETURN(hashTemplateEmitPair(p, t->fields[i], t->fieldLens[i],
+                                                      valueBulk, NULL /*not embedded*/));
+                h->visitingField++;
+                updateElementState(p, ST_VALUES_ARRAY, 0);
+            }
+            hashTemplateFreeFields(p, &h->selfTmpl);
+            return nextParsingElement(p, PE_END_KEY);
+        }
+
+        case ST_VALUES_LP: {
+            BulkInfo *lpBulk;
+            IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC_APP_BULK, NULL, &lpBulk));
+
+            /*** ENTER SAFE STATE ***/
+
+            unsigned char *lp = (unsigned char *) lpBulk->ref;
+            HashTemplate *t = h->tmpl;
+
+            if (!lpValidateIntegrity(lp, lpBulk->len, p->deepIntegCheck, NULL, NULL)) {
+                RDB_reportError(p, RDB_ERR_HASH_TMPL_INVLD,
+                                "elementHashTmplSelfContained(): values listpack integrity check failed");
+                return RDB_STATUS_ERROR;
+            }
+
+            unsigned char *iter = lpFirst(lp);
+            unsigned int slen;
+            long long idVal;
+            /* First entry is the (source) template id, ignored for self-contained
+             * payloads, but it must be present and integer-encoded. */
+            if (iter == NULL || lpGetValue(iter, &slen, &idVal) != NULL) {
+                RDB_reportError(p, RDB_ERR_HASH_TMPL_INVLD,
+                                "elementHashTmplSelfContained(): missing/invalid values listpack id entry");
+                return RDB_STATUS_ERROR;
+            }
+            if (lpLength(lp) != t->fieldCount + 1) {
+                RDB_reportError(p, RDB_ERR_HASH_TMPL_INVLD,
+                                "elementHashTmplSelfContained(): listpack has %lu entries, expected %llu",
+                                lpLength(lp), (unsigned long long) (t->fieldCount + 1));
+                return RDB_STATUS_ERROR;
+            }
+
+            IF_NOT_OK_RETURN(hashTemplateEmitLpValues(p, lp, t));
+            hashTemplateFreeFields(p, &h->selfTmpl);
+            return nextParsingElement(p, PE_END_KEY);
+        }
+
+        default:
+            RDB_reportError(p, RDB_ERR_HASH_TMPL_INVLD,
+                            "elementHashTmplSelfContained(): invalid state: %d", ctx->state);
             return RDB_STATUS_ERROR;
     }
 }

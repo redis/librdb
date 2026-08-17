@@ -115,41 +115,46 @@ static void rdb_save_librdb_reload_eq(int isRestore, char *serverRdbFile) {
  * the background. test_rdb_to_resp.c verifies that RESTORE command is used
  * only when it should.
  */
+static void test_rdb_to_redis_common_mode(const char *rdbfile, int ignoreListOrder,
+                                          char *expRespCmd, const char *expJsonFile,
+                                          int isRestore) {
+    sendRedisCmd("FLUSHALL", REDIS_REPLY_STATUS, NULL);
+
+    /* FUNCTION FLUSH */
+    if (serverMajorVer >= 7)
+        sendRedisCmd("FUNCTION FLUSH", REDIS_REPLY_STATUS, NULL);
+
+    /* 1. Convert RDB to Json (out1.json) */
+    rdb_to_json(rdbfile, TMP_FOLDER("out1.json"));
+
+    /* 2. Upload RDB against Redis and save DUMP-RDB */
+    rdb_to_tcp(rdbfile, 1, isRestore, TMP_FOLDER("cmd.resp"));
+    sendRedisCmd("SAVE", REDIS_REPLY_STATUS, NULL);
+
+    if (expRespCmd && !isRestore) {
+        /* Verify corresponding RESP commands includes `expRespCmd` */
+         assert_file_payload(TMP_FOLDER("cmd.resp"),
+                             expRespCmd,
+                             strlen(expRespCmd),
+                             M_SUBSTR, 1);
+    }
+
+    /* 3. From DUMP-RDB generate Json (out2.json) */
+    rdb_to_json(TMP_FOLDER("dump.rdb"), TMP_FOLDER("out2.json"));
+
+    /* 4. Verify that dumped RDB and converted to json is as expected  */
+    if (expJsonFile)
+        assert_json_equal(expJsonFile, TMP_FOLDER("out2.json"), 0);
+    else
+        assert_json_equal(TMP_FOLDER("out1.json"), TMP_FOLDER("out2.json"), ignoreListOrder);
+}
+
 static void test_rdb_to_redis_common(const char *rdbfile, int ignoreListOrder, char *expRespCmd, const char *expJsonFile) {
 
     /* test one time without RESTORE, Playing against old version.
      * and one time with RESTORE, Playing against new version. */
-    for (int isRestore = 0 ; isRestore <= 1 ; ++isRestore) {
-        sendRedisCmd("FLUSHALL", REDIS_REPLY_STATUS, NULL);
-
-        /* FUNCTION FLUSH */
-        if (serverMajorVer >= 7)
-            sendRedisCmd("FUNCTION FLUSH", REDIS_REPLY_STATUS, NULL);
-
-        /* 1. Convert RDB to Json (out1.json) */
-        rdb_to_json(rdbfile, TMP_FOLDER("out1.json"));
-
-        /* 2. Upload RDB against Redis and save DUMP-RDB */
-        rdb_to_tcp(rdbfile, 1, isRestore, TMP_FOLDER("cmd.resp"));
-        sendRedisCmd("SAVE", REDIS_REPLY_STATUS, NULL);
-
-        if (expRespCmd && !isRestore) {
-            /* Verify corresponding RESP commands includes `expRespCmd` */
-             assert_file_payload(TMP_FOLDER("cmd.resp"),
-                                 expRespCmd,
-                                 strlen(expRespCmd),
-                                 M_SUBSTR, 1);
-        }
-
-        /* 3. From DUMP-RDB generate Json (out2.json) */
-        rdb_to_json(TMP_FOLDER("dump.rdb"), TMP_FOLDER("out2.json"));
-
-        /* 4. Verify that dumped RDB and converted to json is as expected  */
-        if (expJsonFile)
-            assert_json_equal(expJsonFile, TMP_FOLDER("out2.json"), 0);
-        else
-            assert_json_equal(TMP_FOLDER("out1.json"), TMP_FOLDER("out2.json"), ignoreListOrder);
-    }
+    for (int isRestore = 0 ; isRestore <= 1 ; ++isRestore)
+        test_rdb_to_redis_common_mode(rdbfile, ignoreListOrder, expRespCmd, expJsonFile, isRestore);
 }
 
 static void test_rdb_to_redis_single_string(void **state) {
@@ -216,6 +221,110 @@ static void test_rdb_to_redis_hash_with_expire(void **state) {
                      "70368744177663 70368744177663 -1"); /* verify expected output */
     }
     teardownRedisServer();
+}
+
+/* Hash templates (RDB v15) against a template-aware server: let the server
+ * build both template encodings, save an RDB, and replay it through the parser in
+ * RESTORE and non-RESTORE modes. Only a live v15 server can confirm that the RDB
+ * bytes we parse are the ones Redis really writes, that it accepts the payload we
+ * synthesize for RESTORE, and that the template survives on the destination.
+ * Fixture-driven coverage of the same forms, portable to any target version, is in
+ * test_rdb_to_redis_v15_hash_template below.
+ *
+ * Coverage:
+ * - REF forms as written by SAVE (_LP_REF via template-listpack, _ARRAY_REF via
+ *   template-array), both resolved against the RDB template section
+ * - RESTORE mode (L0): the synthesized self-contained payload must keep the
+ *   template encoding on the destination
+ * - non-RESTORE mode (L1/L2): field/value pairs replayed as HSET
+ * - keys of both forms sharing one template, plus a plain hash in the same RDB */
+static void test_rdb_to_redis_hash_template(void **state) {
+    UNUSED(state);
+
+    /* Hash templates are supported since Redis 8.10 */
+    if ((serverMajorVer<8) || ((serverMajorVer==8) && (serverMinorVer<10)))
+        skip();
+
+    setupRedisServer("--enable-debug-command yes", 0);
+
+    /* Template-encode any hash of >=2 fields; >3 fields won't fit a listpack, so
+     * it lands on template-array instead of template-listpack. */
+    sendRedisCmd("CONFIG SET hash-min-template-entries 2", REDIS_REPLY_STATUS, NULL);
+    sendRedisCmd("CONFIG SET hash-max-listpack-entries 3", REDIS_REPLY_STATUS, NULL);
+    sendRedisCmd("FLUSHALL", REDIS_REPLY_STATUS, NULL);
+
+    /* Two keys sharing one template -> template-listpack (_LP_REF on save) */
+    sendRedisCmd("HSET h_lp1 age 30 city nyc", REDIS_REPLY_INTEGER, "2");
+    sendRedisCmd("HSET h_lp2 age 41 city sfo", REDIS_REPLY_INTEGER, "2");
+    sendRedisCmd("OBJECT ENCODING h_lp1", REDIS_REPLY_STRING, "template-listpack");
+
+    /* More fields than fit a listpack -> template-array (_ARRAY_REF on save) */
+    sendRedisCmd("HSET h_arr f1 v1 f2 v2 f3 v3 f4 v4", REDIS_REPLY_INTEGER, "4");
+    sendRedisCmd("OBJECT ENCODING h_arr", REDIS_REPLY_STRING, "template-array");
+
+    /* A single-field hash stays a plain listpack (below the template threshold) */
+    sendRedisCmd("HSET h_plain only 1", REDIS_REPLY_INTEGER, "1");
+    sendRedisCmd("OBJECT ENCODING h_plain", REDIS_REPLY_STRING, "listpack");
+
+    for (int isRestore = 0; isRestore <= 1; ++isRestore) {
+        rdb_save_librdb_reload_eq(isRestore, TMP_FOLDER("dump.rdb"));
+
+        /* Values are back either way. Only RESTORE carries the encoding over;
+         * without it the replayed HSETs are re-templated by this server, so the
+         * encoding is asserted for RESTORE mode alone. */
+        sendRedisCmd("HGET h_lp2 city", REDIS_REPLY_STRING, "sfo");
+        sendRedisCmd("HGET h_arr f4", REDIS_REPLY_STRING, "v4");
+        if (isRestore) {
+            sendRedisCmd("OBJECT ENCODING h_lp1", REDIS_REPLY_STRING, "template-listpack");
+            sendRedisCmd("OBJECT ENCODING h_arr", REDIS_REPLY_STRING, "template-array");
+        }
+    }
+
+    /* Which command carried the data (RESTORE vs a fallback to HSET) is pinned by
+     * checkTemplateResp() in test_rdb_to_resp.c, per target version. */
+
+    teardownRedisServer();
+}
+
+/* Same v15 template forms from ready-made fixtures instead of a live SAVE, so this
+ * runs on any target. The fixture's data must come back unchanged: replay it, SAVE,
+ * and compare the JSON of the saved RDB against the fixture's expected JSON.
+ *
+ * Covers the two REF forms, integer/empty/LZF value edges, and all four
+ * self-contained combinations (FIELDS_LP / FIELDS_RAW x listpack / array values).
+ *
+ * The non-RESTORE pass (asserting HSET) runs everywhere. The RESTORE pass is added
+ * only for a target that knows templates, since an older one would reject a v15
+ * payload. */
+static void test_rdb_to_redis_v15_hash_template(void **state) {
+    UNUSED(state);
+
+    /* The RESTORE pass requires a target that supports templates (Redis 8.10) */
+    int maxMode = ((serverMajorVer>8) || ((serverMajorVer==8) && (serverMinorVer>=10))) ? 1 : 0;
+
+    struct { const char *rdb; const char *json; } fixtures[] = {
+        /* REF forms: field names come from the RDB template section */
+        { DUMP_FOLDER("hash_template_v15.rdb"),
+          DUMP_FOLDER("hash_template_v15.json") },
+        { DUMP_FOLDER("hash_template_array_v15.rdb"),
+          DUMP_FOLDER("hash_template_array_v15.json") },
+        { DUMP_FOLDER("hash_template_values_v15.rdb"),
+          DUMP_FOLDER("hash_template_values_v15.json") },
+        /* Self-contained forms (types 29/31): field names inlined in the payload */
+        { DUMP_FOLDER("hash_template_self_lp_v15.rdb"),
+          DUMP_FOLDER("hash_template_self_3keys_v15.json") },
+        { DUMP_FOLDER("hash_template_self_array_v15.rdb"),
+          DUMP_FOLDER("hash_template_self_3keys_v15.json") },
+        { DUMP_FOLDER("hash_template_self_lpraw_v15.rdb"),
+          DUMP_FOLDER("hash_template_self_2keys_v15.json") },
+        { DUMP_FOLDER("hash_template_self_arraylp_v15.rdb"),
+          DUMP_FOLDER("hash_template_self_2keys_v15.json") },
+    };
+
+    for (unsigned i = 0 ; i < sizeof(fixtures)/sizeof(fixtures[0]) ; ++i)
+        for (int isRestore = 0 ; isRestore <= maxMode ; ++isRestore)
+            test_rdb_to_redis_common_mode(fixtures[i].rdb, 0, "$4\r\nHSET",
+                                          fixtures[i].json, isRestore);
 }
 
 static void test_rdb_to_redis_hash_zl(void **state) {
@@ -743,38 +852,52 @@ static void test_rdb_to_redis_func_lib_replace_if_exist(void **state) {
  * the parser retries after TIMEOUT_SECONDS. Not part of CI since it takes to long */
 int countdownRetries;
 RdbParser *parser;
+
+/* Start a dummy TCP server on 127.0.0.1; returns the listening fd and fills
+ * *port. rcvbuf>0 shrinks SO_RCVBUF (so a writer blocks quickly). */
+static int startDummyServer(int *port, int rcvbuf) {
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    assert_true(fd >= 0);
+    int opt = 1;
+    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+    if (rcvbuf > 0)
+        setsockopt(fd, SOL_SOCKET, SO_RCVBUF, &rcvbuf, sizeof(rcvbuf));
+    struct sockaddr_in a = { .sin_family = AF_INET,
+                             .sin_addr.s_addr = inet_addr("127.0.0.1"),
+                             .sin_port = htons(0) };
+    assert_int_equal(bind(fd, (struct sockaddr *)&a, sizeof(a)), 0);
+    socklen_t len = sizeof(a);
+    assert_int_equal(getsockname(fd, (struct sockaddr *)&a, &len), 0);
+    *port = ntohs(a.sin_port);
+    assert_int_equal(listen(fd, 1), 0);
+    printf("Dummy TCP server started on port %d\n", *port);
+    return fd;
+}
+
+/* Shared by the recv-side (test_rdb_tcp_timeout) and send-side
+ * (test_rdb_tcp_write_timeout) tests; each emits only its own retry message. */
 void dummyTcpTimeoutLogger(RdbLogLevel l, const char *msg) {
     UNUSED(l);
-    if (strstr(msg, "No reply from redis-server for") != NULL)
+    if (strstr(msg, "No reply from redis-server for") != NULL ||
+        strstr(msg, "Redis server not accepting writes for") != NULL)
         if (--countdownRetries == 0)
             RDB_reportError(parser, (RdbRes)12345678, "Inject error to end the test");
 }
 void test_rdb_tcp_timeout(void **state) {
     UNUSED(state);
+    if (!isRunSlowTests()) skip(); /* long-running; enable with --slow-tests */
     const int RECV_TIMEOUT_SECONDS = 10; /* socket retry timeout */
     int test_retries = 3; /* limit test to finite number of retries */
-    int server_fd, client_fd;
-    struct sockaddr_in server_addr, client_addr;
+    int client_fd;
+    struct sockaddr_in client_addr;
     socklen_t client_len = sizeof(client_addr);
 
     /* expected to retry 3 times before ending the test */
     countdownRetries = test_retries;
 
     /* Dummy TCP server that only receives messages but does not respond */
-    server_fd = socket(AF_INET, SOCK_STREAM, 0);
-    assert_true(server_fd >= 0);
-
-    int opt = 1;
-    setsockopt(server_fd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
-    server_addr.sin_family = AF_INET;
-    server_addr.sin_addr.s_addr = INADDR_ANY;
-    server_addr.sin_port = htons(0);
-    assert_int_equal(bind(server_fd, (struct sockaddr *)&server_addr, sizeof(server_addr)), 0);
-    socklen_t addr_len = sizeof(server_addr);
-    assert_int_equal(getsockname(server_fd, (struct sockaddr *)&server_addr, &addr_len), 0);
-    int assigned_port = ntohs(server_addr.sin_port);
-    assert_int_equal(listen(server_fd, 1), 0);
-    printf("Dummy TCP server started, waiting for client to connect...\n");
+    int assigned_port;
+    int server_fd = startDummyServer(&assigned_port, 0);
 
     parser = RDB_createParserRdb(NULL);
     RDB_setLogLevel(parser, RDB_LOG_INF);
@@ -807,6 +930,77 @@ void test_rdb_tcp_timeout(void **state) {
     int expectedTime = RECV_TIMEOUT_SECONDS * test_retries;
     printf("Elapsed time: %ld, expected time: %d\n", elapsedTime, expectedTime);
     assert_in_range(elapsedTime, expectedTime - 2, expectedTime + 2);
+
+    RDB_deleteParser(parser);
+    close(client_fd);
+    close(server_fd);
+}
+
+/* Create dummy TCP server that accepts a connection but never reads from it, so
+ * the client's send buffer fills and send() keeps timing out on SO_SNDTIMEO.
+ * Verify that redisLoaderWritev() retries on the stall (mirror of the recv side
+ * tested by test_rdb_tcp_timeout). Both the client send buffer and the server
+ * receive buffer are shrunk so a moderate key is enough to block the writer.
+ * Not part of CI since it takes too long. */
+void test_rdb_tcp_write_timeout(void **state) {
+    UNUSED(state);
+    if (!isRunSlowTests()) skip(); /* long-running; enable with --slow-tests */
+    int test_retries = 3; /* end via injected error before MAX_WRITE_STALL_RETRY (12) */
+    int client_fd, conn_fd;
+    struct sockaddr_in server_addr, client_addr;
+    socklen_t client_len = sizeof(client_addr);
+
+    /* expected to retry 3 times before ending the test */
+    countdownRetries = test_retries;
+
+    /* Dummy TCP server that accepts the connection but never reads from it.
+     * Shrink its receive buffer so the writer blocks quickly. */
+    int assigned_port;
+    int server_fd = startDummyServer(&assigned_port, 1024);
+
+    /* Client socket with a tiny send buffer, connected ourselves so we control
+     * the buffer size, then handed to librdb via RDBX_createRespToRedisFd(). */
+    conn_fd = socket(AF_INET, SOCK_STREAM, 0);
+    assert_true(conn_fd >= 0);
+    int sndbuf = 1024;
+    setsockopt(conn_fd, SOL_SOCKET, SO_SNDBUF, &sndbuf, sizeof(sndbuf));
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+    server_addr.sin_port = htons(assigned_port);
+    assert_int_equal(connect(conn_fd, (struct sockaddr *)&server_addr, sizeof(server_addr)), 0);
+
+    client_fd = accept(server_fd, (struct sockaddr *)&client_addr, &client_len);
+    assert_true(client_fd >= 0);
+    /* Intentionally never recv() from client_fd */
+
+    parser = RDB_createParserRdb(NULL);
+    RDB_setLogLevel(parser, RDB_LOG_INF);
+    RDB_setLogger(parser, dummyTcpTimeoutLogger);
+    /* A key big enough to overflow the socket buffers and block the writer */
+    assert_non_null(RDBX_createReaderFile(parser, DUMP_FOLDER("100_lists.rdb")));
+
+    RdbxToRespConf rdb2respConf = {
+            .supportRestore = 1,
+            .dstRedisVersion = getTargetRedisVersion(NULL, NULL),
+            .supportRestoreModuleAux = isSupportRestoreModuleAux()
+    };
+
+    RdbxToResp *rdbToResp;
+    RdbxRespToRedisLoader *r2r;
+    assert_non_null(rdbToResp = RDBX_createHandlersToResp(parser, &rdb2respConf));
+    assert_non_null(r2r = RDBX_createRespToRedisFd(parser, rdbToResp, NULL, conn_fd));
+
+    /* Avoid reading replies mid-stream so the writer is the one that stalls */
+    RDBX_setPipelineDepth(r2r, 1000);
+
+    /* Run parser. Expected to hit SO_SNDTIMEO and retry the write test_retries
+     * times, logging each time, before the logger injects an error to stop it. */
+    RdbStatus status;
+    while ((status = RDB_parse(parser)) == RDB_STATUS_WAIT_MORE_DATA);
+
+    /* Error code is only set after test_retries write-timeout retries, so this
+     * proves the writer retried instead of aborting on the first EAGAIN. */
+    assert_int_equal(RDB_getErrorCode(parser), 12345678);
 
     RDB_deleteParser(parser);
     close(client_fd);
@@ -864,6 +1058,8 @@ int group_rdb_to_redis(void) {
             /* hash */
             cmocka_unit_test_setup(test_rdb_to_redis_hash, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_hash_with_expire, setupTest),
+            cmocka_unit_test_setup(test_rdb_to_redis_hash_template, setupTest),
+            cmocka_unit_test_setup(test_rdb_to_redis_v15_hash_template, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_hash_zl, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_hash_lp, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_hash_zm, setupTest),
@@ -910,7 +1106,8 @@ int group_rdb_to_redis(void) {
             cmocka_unit_test_setup(test_rdb_to_redis_script, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_script_legacy, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_ipv6_localhost, setupTest),
-            //cmocka_unit_test_setup(test_rdb_tcp_timeout, setupTest), /* too long to run */
+            cmocka_unit_test_setup(test_rdb_tcp_timeout, setupTest),      /* slow; --slow-tests */
+            cmocka_unit_test_setup(test_rdb_tcp_write_timeout, setupTest),/* slow; --slow-tests */
     };
 
     int res = cmocka_run_group_tests(tests, NULL, NULL);

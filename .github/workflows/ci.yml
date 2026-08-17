@@ -9,6 +9,7 @@ on:
 jobs:
   build:
     strategy:
+      fail-fast: false
       matrix:
         include:
           - os: ubuntu-latest
@@ -29,22 +30,26 @@ jobs:
             version: "7.4"
           - os: ubuntu-latest
             compiler: gcc
-            version: "7.4"
+            version: "8.2"
           - os: ubuntu-latest
             compiler: clang
-            version: "unstable"
+            version: "8.6"
+            tls: true
+          - os: ubuntu-latest
+            compiler: clang
+            version: "8.8"
+          - os: ubuntu-latest
+            compiler: gcc
+            version: "8.10"
           - os: macos-latest
             compiler: gcc
             version: "8.0"
             tls: true
-          - os: ubuntu-latest
-            compiler: gcc
-            version: "8.2"
           - os: macos-latest
             compiler: clang
-            version: "unstable"
+            version: "8.10"
           - os: ubuntu-latest
-            compiler: gcc
+            compiler: clang
             version: "unstable"
 
     runs-on: ${{ matrix.os }}
@@ -68,7 +73,6 @@ jobs:
 
       - name: Install prerequisites
         run: |
-          # Build and install cmocka 1.1 from source (common for all platforms)
           git clone --depth=1 --branch=stable-1.1 https://gitlab.com/cmocka/cmocka.git
           cd cmocka
           mkdir build
@@ -80,9 +84,9 @@ jobs:
 
           if [ "${RUNNER_OS}" = "Linux" ]; then
             sudo apt-get update
-            sudo apt-get install -y cmake clang libssl-dev valgrind git bc
+            sudo apt-get install -y cmake clang libssl-dev valgrind git
           elif [ "${RUNNER_OS}" = "macOS" ]; then
-            brew install bc llvm grep
+            brew install llvm grep
             echo "PATH=$(brew --prefix)/opt/grep/libexec/gnubin:${PATH}" >> "${GITHUB_ENV}"
             # Ensure cmocka's shared library is found at runtime on macOS
             echo "DYLD_LIBRARY_PATH=/usr/local/lib:${DYLD_LIBRARY_PATH}" >> "${GITHUB_ENV}"
@@ -104,7 +108,10 @@ jobs:
             make OPTIMIZATION=-O2 -j -C redis
           fi
 
-          if [ $(bc -l <<< "${{ matrix.version }} >= 6.2") -eq 1 ] || [ "${{ matrix.version }}" = "unstable" ]; then
+          # Test modules are available since Redis 6.2. Compare major/minor as
+          # integers - a numeric compare of the whole string reads "8.10" as 8.1.
+          if [ "${{ matrix.version }}" = "unstable" ] || \
+             awk -F. '{ exit !($1 > 6 || ($1 == 6 && $2 >= 2)) }' <<< "${{ matrix.version }}"; then
             make -j -C redis/tests/modules
           fi
 

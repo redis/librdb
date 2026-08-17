@@ -4,6 +4,7 @@ VALGRIND=0
 REDIS_FOLDER=""
 SPECIFIC_TEST=""
 SPECIFIC_TEST_GROUP=""
+SLOW_TESTS=""
 
 # Function to colorize test output
 colorize_output() {
@@ -30,8 +31,11 @@ while [[ $# -gt 0 ]]; do
     -g|--test-group)
       SPECIFIC_TEST_GROUP=" --test-group $2 "
       shift 2 ;;
+    -s|--slow-tests)
+      SLOW_TESTS=" --slow-tests "
+      shift ;;
     *|-h)
-      echo "Usage: $(basename $0) [-v|--valgrind] [-f|--folder REDIS_FOLDER] [-t|--test TEST] [-g|--test-group GROUP]"
+      echo "Usage: $(basename $0) [-v|--valgrind] [-f|--folder REDIS_FOLDER] [-t|--test TEST] [-g|--test-group GROUP] [-s|--slow-tests]"
       exit 1 ;;
   esac
 done
@@ -45,7 +49,7 @@ if [[ ${VALGRIND} -ne 0 ]]; then
   		--leak-resolution=high \
   		--error-exitcode=1 \
   		--log-file=test/log/valgrind.log \
-  		./test/test_static_lib -v $REDIS_FOLDER $SPECIFIC_TEST $SPECIFIC_TEST_GROUP 2>&1 | colorize_output
+  		./test/test_static_lib -v $REDIS_FOLDER $SPECIFIC_TEST $SPECIFIC_TEST_GROUP $SLOW_TESTS 2>&1 | colorize_output
 
   if [ ${PIPESTATUS[0]} -ne 0 ]; then
     sed -n -e '/SUMMARY:/,$p' ./test/log/valgrind.log | tail -n 20
@@ -54,6 +58,6 @@ if [[ ${VALGRIND} -ne 0 ]]; then
   fi
 
 else
-  ./test/test_lib $REDIS_FOLDER $SPECIFIC_TEST $SPECIFIC_TEST_GROUP 2>&1 | colorize_output
+  ./test/test_lib $REDIS_FOLDER $SPECIFIC_TEST $SPECIFIC_TEST_GROUP $SLOW_TESTS 2>&1 | colorize_output
   exit ${PIPESTATUS[0]}
 fi

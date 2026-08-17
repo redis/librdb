@@ -1,0 +1,5 @@
+"str":"hello world",
+"myzset":{"one":"1","two":"2","three":"3"},
+"myhash":{"f1":"v1","f2":"v2","f3":"v3"},
+"mylist":["a","b","c","1","2","3"],
+"myset":["x","y","z"]
