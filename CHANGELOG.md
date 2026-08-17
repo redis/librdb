@@ -18,8 +18,6 @@
   - New error codes `RDB_ERR_HASH_TMPL_INVLD`, `RDB_ERR_HASH_TMPL_UNKNOWN_ID`.
     Template ids and declared field counts read off the wire no longer size
     allocations, so a hand-crafted RDB can't crash the parser.
-  - `RDB_TYPE_GCRA` (33) is reserved only (Redis Enterprise `ENABLE_GCRA`
-    builds) and is not parsed.
 
 ## [2.3.0] - 2026-06-03
 

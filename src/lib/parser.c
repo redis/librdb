@@ -2937,7 +2937,7 @@ static RdbStatus hashTemplatesEnsureCap(RdbParser *p, uint64_t id) {
     if (id < p->hashTmpls.cap)
         return RDB_STATUS_OK;
 
-    if (id > RDB_HASH_TMPL_MAX_ID) {
+    if (id >= RDB_HASH_TMPL_MAX_ID) {
         RDB_reportError(p, RDB_ERR_HASH_TMPL_INVLD,
                         "Hash template id %llu exceeds the supported maximum (%llu)",
                         (unsigned long long) id, (unsigned long long) RDB_HASH_TMPL_MAX_ID);
@@ -3315,6 +3315,7 @@ RdbStatus elementHashTmplLpRef(RdbParser *p) {
 
     HashTemplate *t = hashTemplateGetById(p, (uint64_t) idVal);
     if (t == NULL) return RDB_STATUS_ERROR;
+    p->elmCtx.key.numItemsHint = (int64_t) t->fieldCount;
 
     if (lpLength(lp) != t->fieldCount + 1) {
         RDB_reportError(p, RDB_ERR_HASH_TMPL_INVLD,
