@@ -38,10 +38,21 @@
 #define RDB_TYPE_STREAM_LISTPACKS_4 26        /* Stream with IDMP support */
 #define RDB_TYPE_STREAM_LISTPACKS_5 27        /* Stream with XNACK / NACK zone (v14) */
 #define RDB_TYPE_ARRAY              28        /* Sparse array (v14) */
-#define RDB_TYPE_MAX                29
+#define RDB_TYPE_HASH_TMPL_LP       29        /* Hash template (v15): self-contained (DUMP): [fields_fmt][fields][lp_blob] */
+#define RDB_TYPE_HASH_TMPL_LP_REF   30        /* Hash template (v15): with template ref (RDB save): [tid][lp_blob] */
+#define RDB_TYPE_HASH_TMPL_ARRAY    31        /* Hash template (v15): self-contained (DUMP): [fields_fmt][fields][v0]...[vN-1] */
+#define RDB_TYPE_HASH_TMPL_ARRAY_REF 32       /* Hash template (v15): with template ref (RDB save): [tid][v0]...[vN-1] */
+#define RDB_TYPE_MAX                33
 
+
+/* Highest hash-template id the registry accepts (v15). The saver assigns
+ * dense ids from 0, one per distinct field-set, so this is far above any real
+ * save. It bounds the id-indexed registry against a crafted sparse id. Note
+ * Redis's loader keys templates by id in a dict and so accepts any id. */
+#define RDB_HASH_TMPL_MAX_ID  (1<<23) /* 8M entries */
 
 /* Special RDB opcodes (saved/loaded with rdbSaveType/rdbLoadType). */
+#define RDB_OPCODE_HASH_TEMPLATE 242 /* One hash template record (v15). */
 #define RDB_OPCODE_KEY_META   243   /* Key metadata (module metadata classes). */
 #define RDB_OPCODE_SLOT_INFO  244   /* Individual slot info, such as slot id and size (cluster mode only). */
 #define RDB_OPCODE_FUNCTION2  245   /* function library data */

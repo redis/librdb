@@ -584,6 +584,174 @@ static void test_r2j_array_v14_insert_idx_none(void **state) {
     testRdbToJsonCommon(DUMP_FOLDER("array_v14_insert_idx_none.rdb"), DUMP_FOLDER("array_v14_insert_idx_none.json"), &r2jConf);
 }
 
+/* v15 RDB with only plain-typed keys (no hash templates): must parse clean
+ * once the version gate accepts v15 (RDB v15 support, part 1). */
+static void test_r2j_multiple_types_v15(void **state) {
+    UNUSED(state);
+    RdbxToJsonConf r2jConf = DEF_CONF(RDB_LEVEL_DATA);
+    r2jConf.includeAuxField = 0;
+    testRdbToJsonCommon(DUMP_FOLDER("multiple_types_v15.rdb"), DUMP_FOLDER("multiple_types_v15.json"), &r2jConf);
+}
+
+/* Parse a (hand-crafted, checksum-disabled) v15 template fixture and assert the
+ * resulting status/error code. expErr == RDB_OK means the parse must succeed. */
+static void testTemplateCorrupt(const char *rdbfilename, RdbRes expErr) {
+    char rdbfile[1024];
+    snprintf(rdbfile, sizeof(rdbfile), "./test/dumps/%s", rdbfilename);
+    RdbParser *p = RDB_createParserRdb(NULL);
+    RDB_setLogLevel(p, RDB_LOG_ERR);
+    RDB_IgnoreChecksum(p);
+    assert_non_null(RDBX_createReaderFile(p, rdbfile));
+    RdbxToJsonConf conf = DEF_CONF(RDB_LEVEL_DATA);
+    conf.includeAuxField = 0;
+    assert_non_null(RDBX_createHandlersToJson(p, TMP_FOLDER("tmpl_corrupt.json"), &conf));
+
+    RdbStatus status;
+    while ((status = RDB_parse(p)) == RDB_STATUS_WAIT_MORE_DATA);
+
+    if (expErr == RDB_OK) {
+        assert_int_equal(status, RDB_STATUS_OK);
+    } else {
+        assert_int_equal(status, RDB_STATUS_ERROR);
+        assert_int_equal(RDB_getErrorCode(p), expErr);
+    }
+    RDB_deleteParser(p);
+}
+
+static void test_r2j_hash_template_arrayref_min_v15(void **state) {
+    UNUSED(state);
+    testTemplateCorrupt("hash_template_arrayref_min_v15.rdb", RDB_OK);
+}
+static void test_r2j_hash_template_corrupt_zero_fields_v15(void **state) {
+    UNUSED(state);
+    testTemplateCorrupt("hash_template_corrupt_zero_fields_v15.rdb", RDB_ERR_HASH_TMPL_INVLD);
+}
+static void test_r2j_hash_template_corrupt_unsorted_v15(void **state) {
+    UNUSED(state);
+    testTemplateCorrupt("hash_template_corrupt_unsorted_v15.rdb", RDB_ERR_HASH_TMPL_INVLD);
+}
+static void test_r2j_hash_template_corrupt_unknown_id_v15(void **state) {
+    UNUSED(state);
+    testTemplateCorrupt("hash_template_corrupt_unknown_id_v15.rdb", RDB_ERR_HASH_TMPL_UNKNOWN_ID);
+}
+static void test_r2j_hash_template_corrupt_dup_id_v15(void **state) {
+    UNUSED(state);
+    testTemplateCorrupt("hash_template_corrupt_dup_id_v15.rdb", RDB_ERR_HASH_TMPL_INVLD);
+}
+/* self-contained (types 29/31) corruption: unknown fields_fmt, unsorted inline
+ * fields (partial template freed on error), and a values listpack whose entry
+ * count doesn't match the field count. */
+static void test_r2j_hash_template_self_corrupt_badfmt_v15(void **state) {
+    UNUSED(state);
+    testTemplateCorrupt("hash_template_self_corrupt_badfmt_v15.rdb", RDB_ERR_HASH_TMPL_INVLD);
+}
+static void test_r2j_hash_template_self_corrupt_unsorted_v15(void **state) {
+    UNUSED(state);
+    testTemplateCorrupt("hash_template_self_corrupt_unsorted_v15.rdb", RDB_ERR_HASH_TMPL_INVLD);
+}
+static void test_r2j_hash_template_self_corrupt_lpcount_v15(void **state) {
+    UNUSED(state);
+    testTemplateCorrupt("hash_template_self_corrupt_lpcount_v15.rdb", RDB_ERR_HASH_TMPL_INVLD);
+}
+
+/* A sparse (2^62) template id is rejected: the registry is indexed by the id, so
+ * an id past RDB_HASH_TMPL_MAX_ID is refused rather than allowed to size an
+ * allocation. Redis, which keys templates by id in a dict, does load this
+ * fixture (checked with redis-check-rdb) - a deliberate divergence. */
+static void test_r2j_hash_template_corrupt_huge_id_v15(void **state) {
+    UNUSED(state);
+    testTemplateCorrupt("hash_template_corrupt_huge_id_v15.rdb", RDB_ERR_HASH_TMPL_INVLD);
+}
+
+/* An oversized field count is untrusted: stream the fields (and hit EOF here)
+ * instead of sizing an allocation from the declared count. */
+static void test_r2j_hash_template_corrupt_huge_field_count_v15(void **state) {
+    UNUSED(state);
+    testTemplateCorrupt("hash_template_corrupt_huge_field_count_v15.rdb",
+                        RDB_ERR_FAILED_PARTIAL_READ_RDB_FILE);
+}
+static void test_r2j_hash_template_self_corrupt_huge_field_count_v15(void **state) {
+    UNUSED(state);
+    testTemplateCorrupt("hash_template_self_corrupt_huge_field_count_v15.rdb",
+                        RDB_ERR_FAILED_PARTIAL_READ_RDB_FILE);
+}
+
+/* v15 hash templates: REF-encoded hashes resolve field names from the
+ * top-level template section and must render as ordinary hashes. */
+static void test_r2j_hash_template_lp_ref_v15(void **state) {
+    UNUSED(state);
+    RdbxToJsonConf r2jConf = DEF_CONF(RDB_LEVEL_DATA);
+    r2jConf.includeAuxField = 0;
+    testRdbToJsonCommon(DUMP_FOLDER("hash_template_v15.rdb"), DUMP_FOLDER("hash_template_v15.json"), &r2jConf);
+}
+
+static void test_r2j_hash_template_array_ref_v15(void **state) {
+    UNUSED(state);
+    RdbxToJsonConf r2jConf = DEF_CONF(RDB_LEVEL_DATA);
+    r2jConf.includeAuxField = 0;
+    testRdbToJsonCommon(DUMP_FOLDER("hash_template_array_v15.rdb"), DUMP_FOLDER("hash_template_array_v15.json"), &r2jConf);
+}
+
+/* Template hash value edge cases: integer-encoded, empty-string, and
+ * LZF-compressed values all decode correctly through the template path. */
+static void test_r2j_hash_template_values_v15(void **state) {
+    UNUSED(state);
+    RdbxToJsonConf r2jConf = DEF_CONF(RDB_LEVEL_DATA);
+    r2jConf.includeAuxField = 0;
+    testRdbToJsonCommon(DUMP_FOLDER("hash_template_values_v15.rdb"), DUMP_FOLDER("hash_template_values_v15.json"), &r2jConf);
+}
+
+/* Same payload at STRUCT level resolves through handleHashPlain to the same
+ * field/value pairs. */
+static void test_r2j_hash_template_lp_ref_v15_struct(void **state) {
+    UNUSED(state);
+    RdbxToJsonConf r2jConf = DEF_CONF(RDB_LEVEL_STRUCT);
+    r2jConf.includeAuxField = 0;
+    testRdbToJsonCommon(DUMP_FOLDER("hash_template_v15.rdb"), DUMP_FOLDER("hash_template_v15.json"), &r2jConf);
+}
+
+/* v15 self-contained hash templates (types 29/31): the field names are
+ * inlined in the payload (no template section), covering both field formats
+ * (FIELDS_LP / FIELDS_RAW) and both value encodings (listpack / array). Redis
+ * writes these only via DUMP, but its loader - and librdb - accept them from an
+ * RDB file too. All render as ordinary hashes. */
+static void test_r2j_hash_template_self_array_v15(void **state) {
+    UNUSED(state);
+    RdbxToJsonConf r2jConf = DEF_CONF(RDB_LEVEL_DATA);
+    r2jConf.includeAuxField = 0;
+    testRdbToJsonCommon(DUMP_FOLDER("hash_template_self_array_v15.rdb"),
+                        DUMP_FOLDER("hash_template_self_3keys_v15.json"), &r2jConf);
+}
+static void test_r2j_hash_template_self_arraylp_v15(void **state) {
+    UNUSED(state);
+    RdbxToJsonConf r2jConf = DEF_CONF(RDB_LEVEL_DATA);
+    r2jConf.includeAuxField = 0;
+    testRdbToJsonCommon(DUMP_FOLDER("hash_template_self_arraylp_v15.rdb"),
+                        DUMP_FOLDER("hash_template_self_2keys_v15.json"), &r2jConf);
+}
+static void test_r2j_hash_template_self_lp_v15(void **state) {
+    UNUSED(state);
+    RdbxToJsonConf r2jConf = DEF_CONF(RDB_LEVEL_DATA);
+    r2jConf.includeAuxField = 0;
+    testRdbToJsonCommon(DUMP_FOLDER("hash_template_self_lp_v15.rdb"),
+                        DUMP_FOLDER("hash_template_self_3keys_v15.json"), &r2jConf);
+}
+static void test_r2j_hash_template_self_lpraw_v15(void **state) {
+    UNUSED(state);
+    RdbxToJsonConf r2jConf = DEF_CONF(RDB_LEVEL_DATA);
+    r2jConf.includeAuxField = 0;
+    testRdbToJsonCommon(DUMP_FOLDER("hash_template_self_lpraw_v15.rdb"),
+                        DUMP_FOLDER("hash_template_self_2keys_v15.json"), &r2jConf);
+}
+/* Same self-contained payload at STRUCT level resolves via handleHashPlain. */
+static void test_r2j_hash_template_self_lp_v15_struct(void **state) {
+    UNUSED(state);
+    RdbxToJsonConf r2jConf = DEF_CONF(RDB_LEVEL_STRUCT);
+    r2jConf.includeAuxField = 0;
+    testRdbToJsonCommon(DUMP_FOLDER("hash_template_self_lp_v15.rdb"),
+                        DUMP_FOLDER("hash_template_self_3keys_v15.json"), &r2jConf);
+}
+
 static void test_r2j_cluster_slot_info(void **state) {
     UNUSED(state);
     RdbxToJsonConf r2jConf = DEF_CONF(RDB_LEVEL_DATA);
@@ -682,6 +850,29 @@ int group_rdb_to_json(void) {
         cmocka_unit_test(test_r2j_array_v14_with_insert_idx),
         cmocka_unit_test(test_r2j_array_v14_insert_idx_boundary),
         cmocka_unit_test(test_r2j_array_v14_insert_idx_none),
+
+        /* v15 */
+        cmocka_unit_test(test_r2j_multiple_types_v15),
+        cmocka_unit_test(test_r2j_hash_template_lp_ref_v15),
+        cmocka_unit_test(test_r2j_hash_template_array_ref_v15),
+        cmocka_unit_test(test_r2j_hash_template_values_v15),
+        cmocka_unit_test(test_r2j_hash_template_lp_ref_v15_struct),
+        cmocka_unit_test(test_r2j_hash_template_self_array_v15),
+        cmocka_unit_test(test_r2j_hash_template_self_arraylp_v15),
+        cmocka_unit_test(test_r2j_hash_template_self_lp_v15),
+        cmocka_unit_test(test_r2j_hash_template_self_lpraw_v15),
+        cmocka_unit_test(test_r2j_hash_template_self_lp_v15_struct),
+        cmocka_unit_test(test_r2j_hash_template_arrayref_min_v15),
+        cmocka_unit_test(test_r2j_hash_template_corrupt_zero_fields_v15),
+        cmocka_unit_test(test_r2j_hash_template_corrupt_unsorted_v15),
+        cmocka_unit_test(test_r2j_hash_template_corrupt_unknown_id_v15),
+        cmocka_unit_test(test_r2j_hash_template_corrupt_dup_id_v15),
+        cmocka_unit_test(test_r2j_hash_template_self_corrupt_badfmt_v15),
+        cmocka_unit_test(test_r2j_hash_template_self_corrupt_unsorted_v15),
+        cmocka_unit_test(test_r2j_hash_template_self_corrupt_lpcount_v15),
+        cmocka_unit_test(test_r2j_hash_template_corrupt_huge_id_v15),
+        cmocka_unit_test(test_r2j_hash_template_corrupt_huge_field_count_v15),
+        cmocka_unit_test(test_r2j_hash_template_self_corrupt_huge_field_count_v15),
 
         /* misc */
         cmocka_unit_test(test_r2j_multiple_lists_and_strings_data),
