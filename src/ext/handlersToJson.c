@@ -1,3 +1,20 @@
+/* RDB -> JSON conversion handlers, registered as libRDB parser callbacks (see
+ * RDBX_createHandlersToJson()). The parser drives everything: as it walks the
+ * RDB file it fires one handler per element (a DB, a key, a list item, a
+ * stream entry, ...), and each handler streams straight to ctx->outfile -
+ * there is no in-memory JSON tree.
+ *
+ * Because a JSON container (array/object) opens, receives children across
+ * multiple handler calls, and closes incrementally as parsing progresses, the
+ * currently-open containers are tracked on an explicit stack (RdbxToJson.stack)
+ * rather than via recursion. Each container kind is identified by a JContId
+ * (JC_DOC, JC_KEY, JC_LIST, ...), and its printed shape - nesting level,
+ * exclusive parent, opening/closing text and the delimiter between children -
+ * is declared once in jSpecs[]/ctx->specs[], indexed by id (see jSpec()).
+ * Handlers open/close containers by id (jOpen/jOpenUnder/jOpenNext/jUnwindTo)
+ * and validate the parser's calling sequence by checking which container is
+ * currently innermost (jTop()), instead of running a separate state machine. */
+
 #include <assert.h>
 #include <inttypes.h>
 #include <errno.h>
@@ -125,16 +142,14 @@ struct RdbxToJson {
     unsigned int count_db;
 
     /* Stack of open JSON containers, document root to innermost. Each frame
-     * records the container's closer, the delimiter between its children and
-     * how many children were appended so far: jNewItem()/jOpen() print the
-     * delimiter before every child but the first. jUnwindTo() pops and prints
-     * closers on demand, so toJsonEndRdb just unwinds to 0. Depth is bounded
-     * by the deepest nesting (doc > db > key > stream > groups > group >
-     * consumers > consumer > pel). */
+     * records the container's id and how many children were appended so far:
+     * jNewItem()/jOpen() print the delimiter (from ctx->specs[id]) before every
+     * child but the first. jUnwindTo() pops and prints closers (also from
+     * ctx->specs[id]) on demand, so toJsonEndRdb just unwinds to 0. Depth is
+     * bounded by the deepest nesting (doc > db > key > stream > groups > group
+     * > consumers > consumer > pel). */
     struct {
-        int id; 
-        const char *close; 
-        const char *delim; 
+        int id;
         int nItems;
     } stack[12];
     int stackTop;
@@ -161,13 +176,11 @@ static int jLevel(RdbxToJson *ctx, int id) {
 }
 
 /* Record an open container without printing anything. */
-static void jPush(RdbxToJson *ctx, int id, const char *delim, const char *close) {
+static void jPush(RdbxToJson *ctx, int id) {
     /* Every container opens directly under its declared parent - true even for
-     * jOpenT's "trusted" pushes, which skip jOpenUnder's own parent check. */
+     * jOpen's "trusted" pushes, which skip jOpenUnder's own parent check. */
     assert(jTop(ctx) == jSpec(ctx, id)->parent);
     ctx->stack[ctx->stackTop].id = id;
-    ctx->stack[ctx->stackTop].delim = delim;
-    ctx->stack[ctx->stackTop].close = close;
     ctx->stack[ctx->stackTop].nItems = 0;
     ctx->stackTop++;
 }
@@ -175,7 +188,7 @@ static void jPush(RdbxToJson *ctx, int id, const char *delim, const char *close)
 /* Print the innermost container's delimiter before every child but the first. */
 static void jDelim(RdbxToJson *ctx) {
     if (ctx->stackTop && ctx->stack[ctx->stackTop - 1].nItems++)
-        fputs(ctx->stack[ctx->stackTop - 1].delim, ctx->outfile);
+        fputs(jSpec(ctx, ctx->stack[ctx->stackTop - 1].id)->delim, ctx->outfile);
 }
 
 /* Start a child in container `id`, which must be the innermost open one. The
@@ -187,19 +200,19 @@ static void jNewItem(RdbxToJson *ctx, int id) {
     jDelim(ctx);
 }
 
-/* Open a container as a child of the current one: apply the parent's
- * delimiter by need, print the opening text (bracket and any label that
- * precedes it) and record delimiter and closer for jNewItem()/jUnwindTo(). */
-static void jOpen(RdbxToJson *ctx, int id, const char *open, const char *delim, const char *close) {
+/* Open `id` as a child of the current one: apply the parent's delimiter by
+ * need, print id's opening text (bracket and any label that precedes it,
+ * from ctx->specs[]) and record the frame for jNewItem()/jUnwindTo(). */
+static void jOpen(RdbxToJson *ctx, int id) {
     jDelim(ctx);
-    fputs(open, ctx->outfile);
-    jPush(ctx, id, delim, close);
+    fputs(jSpec(ctx, id)->open, ctx->outfile);
+    jPush(ctx, id);
 }
 
 /* Close (pop + print) every open container at the level of `id` or deeper. */
 static void jUnwindTo(RdbxToJson *ctx, int id) {
     while (ctx->stackTop && jLevel(ctx, ctx->stack[ctx->stackTop - 1].id) >= jLevel(ctx, id))
-        fputs(ctx->stack[--ctx->stackTop].close, ctx->outfile);
+        fputs(jSpec(ctx, ctx->stack[--ctx->stackTop].id)->close, ctx->outfile);
 }
 
 /* True if container `id` is currently open (depth is tiny, so a scan stays cheap). */
@@ -209,41 +222,22 @@ static int jIsOpen(RdbxToJson *ctx, int id) {
     return 0;
 }
 
-/* Open `id` as a child of `parent`, or fail (return 0) if `parent` is not the
- * innermost open container - the callback fired in a state it can't accept. */
-static int jOpenUnder(RdbxToJson *ctx, int parent, int id,
-                      const char *open, const char *delim, const char *close) {
-    if (jTop(ctx) != parent) return 0;
-    jOpen(ctx, id, open, delim, close);
+/* Open `id` as a child of its declared (ctx->specs[]) parent, or fail (return
+ * 0) if that parent is not the innermost open container - the callback fired
+ * in a state it can't accept. */
+static int jOpenUnder(RdbxToJson *ctx, int id) {
+    if (jTop(ctx) != jSpec(ctx, id)->parent) return 0;
+    jOpen(ctx, id);
     return 1;
 }
 
 /* Like jOpenUnder(), but first close the previous sibling's subtree
  * (everything at `id`'s level or deeper). For advancing to the next section
- * or element within `parent`; a failed parent check may thus follow emitted
+ * or element within its parent; a failed parent check may thus follow emitted
  * closers, but the conversion is aborted then anyway. */
-static int jOpenNext(RdbxToJson *ctx, int parent, int id,
-                     const char *open, const char *delim, const char *close) {
+static int jOpenNext(RdbxToJson *ctx, int id) {
     jUnwindTo(ctx, id);
-    return jOpenUnder(ctx, parent, id, open, delim, close);
-}
-
-/* jOpen() with id's spec looked up from ctx->specs[]. */
-static void jOpenT(RdbxToJson *ctx, int id) {
-    const JContSpec *s = jSpec(ctx, id);
-    jOpen(ctx, id, s->open, s->delim, s->close);
-}
-
-/* jOpenUnder() under id's exclusive parent, both looked up from ctx->specs[]. */
-static int jOpenUnderT(RdbxToJson *ctx, int id) {
-    const JContSpec *s = jSpec(ctx, id);
-    return jOpenUnder(ctx, s->parent, id, s->open, s->delim, s->close);
-}
-
-/* jOpenNext() under id's exclusive parent, both looked up from ctx->specs[]. */
-static int jOpenNextT(RdbxToJson *ctx, int id) {
-    const JContSpec *s = jSpec(ctx, id);
-    return jOpenNext(ctx, s->parent, id, s->open, s->delim, s->close);
+    return jOpenUnder(ctx, id);
 }
 
 /* Report that a callback fired while an unexpected container is innermost. */
@@ -442,7 +436,7 @@ static RdbRes toJsonAuxField(RdbParser *p, void *userData, RdbBulk auxkey, RdbBu
     RdbxToJson *ctx = userData;
 
     if (jTop(ctx) != JC_AUX && /* first aux-field: group them with {..} */
-        !jOpenUnderT(ctx, JC_AUX))
+        !jOpenUnder(ctx, JC_AUX))
         return invalidState(p, ctx, __func__);
 
     jNewItem(ctx, JC_AUX);
@@ -474,7 +468,7 @@ static RdbRes toJsonNewKey(RdbParser *p, void *userData, RdbBulk key, RdbKeyInfo
 
     /* The key itself needs no closer - its single child (the value) closes
      * itself - so the frame is just a position marker. */
-    if (unlikely(!jOpenUnderT(ctx, JC_KEY)))
+    if (unlikely(!jOpenUnder(ctx, JC_KEY)))
         return invalidState(p, ctx, __func__);
 
     ctx->keyCtx.key = RDB_bulkClone(p, key);
@@ -493,7 +487,7 @@ static RdbRes toJsonNewDb(RdbParser *p, void *userData, int db) {
     /* Close the previous DB (or the aux/func object) if open. In flatten mode
      * the DB frame prints nothing - it only scopes the keys, which then read
      * as direct children of the document. */
-    if (!jOpenNextT(ctx, JC_DB))
+    if (!jOpenNext(ctx, JC_DB))
         return invalidState(p, ctx, __func__);
 
     ++ctx->count_db;
@@ -505,7 +499,7 @@ static RdbRes toJsonNewRdb(RdbParser *p, void *userData, int rdbVersion) {
     RdbxToJson *ctx = userData;
 
     /* parent 0 = the empty stack: nothing may be open yet */
-    if (!jOpenUnderT(ctx, JC_DOC))
+    if (!jOpenUnder(ctx, JC_DOC))
         return invalidState(p, ctx, __func__);
 
     return RDB_OK;
@@ -553,7 +547,7 @@ static RdbRes toJsonList(RdbParser *p, void *userData, RdbBulk item) {
     RdbxToJson *ctx = userData;
 
     if (jTop(ctx) != JC_LIST && /* first item: open the list's array */
-        !jOpenUnderT(ctx, JC_LIST))
+        !jOpenUnder(ctx, JC_LIST))
         return invalidState(p, ctx, __func__);
 
     jNewItem(ctx, JC_LIST);
@@ -566,7 +560,7 @@ static RdbRes toJsonSet(RdbParser *p, void *userData, RdbBulk member) {
     RdbxToJson *ctx = userData;
 
     if (jTop(ctx) != JC_SET && /* first member: open the set's array */
-        !jOpenUnderT(ctx, JC_SET))
+        !jOpenUnder(ctx, JC_SET))
         return invalidState(p, ctx, __func__);
 
     jNewItem(ctx, JC_SET);
@@ -588,7 +582,7 @@ static RdbRes toJsonZset(RdbParser *p, void *userData, RdbBulk member, double sc
     }
 
     if (jTop(ctx) != JC_ZSET && /* first member: open the zset's object */
-        !jOpenUnderT(ctx, JC_ZSET))
+        !jOpenUnder(ctx, JC_ZSET))
         return invalidState(p, ctx, __func__);
 
     jNewItem(ctx, JC_ZSET);
@@ -605,7 +599,7 @@ static RdbRes toJsonHash(RdbParser *p, void *userData, RdbBulk field,
     RdbxToJson *ctx = userData;
 
     if (jTop(ctx) != JC_HASH && /* first field: open the hash's object */
-        !jOpenUnderT(ctx, JC_HASH))
+        !jOpenUnder(ctx, JC_HASH))
         return invalidState(p, ctx, __func__);
 
     jNewItem(ctx, JC_HASH);
@@ -620,7 +614,7 @@ static RdbRes toJsonFunction(RdbParser *p, void *userData, RdbBulk func) {
     RdbxToJson *ctx = userData;
 
     if (jTop(ctx) != JC_FUNC && /* first function: close aux if open, open "func" */
-        !jOpenNextT(ctx, JC_FUNC))
+        !jOpenNext(ctx, JC_FUNC))
         return invalidState(p, ctx, __func__);
 
     jNewItem(ctx, JC_FUNC);
@@ -634,15 +628,15 @@ static RdbRes toJsonStreamItem(RdbParser *p, void *userData, RdbStreamID *id, Rd
     RdbxToJson *ctx = userData;
 
     if (jTop(ctx) == JC_KEY) {
-        jOpenT(ctx, JC_STREAM);
-        jOpenT(ctx, JC_ENTRIES);
+        jOpen(ctx, JC_STREAM);
+        jOpen(ctx, JC_ENTRIES);
     }
 
     if (jTop(ctx) == JC_ENTRIES) {
         /* new entry: open its object and "items", then append the first field */
-        jOpenT(ctx, JC_ENTRY);
+        jOpen(ctx, JC_ENTRY);
         fprintf(ctx->outfile, "\"id\":\"%" PRIu64 "-%" PRIu64 "\", ", id->ms, id->seq);
-        jOpenT(ctx, JC_ITEMS);
+        jOpen(ctx, JC_ITEMS);
     } else if (jTop(ctx) != JC_ITEMS) {
         return invalidState(p, ctx, __func__);
     }
@@ -661,7 +655,7 @@ static RdbRes toJsonStreamMetadata(RdbParser *p, void *userData, RdbStreamMeta *
     RdbxToJson *ctx = userData;
 
     if (jTop(ctx) == JC_KEY) {  /* no entries recorded - emit empty array */
-        jOpenT(ctx, JC_STREAM);
+        jOpen(ctx, JC_STREAM);
         jNewItem(ctx, JC_STREAM);
         fprintf(ctx->outfile, "\n      \"entries\":[]");
     } else if (jTop(ctx) == JC_ENTRIES) {
@@ -683,11 +677,11 @@ static RdbRes toJsonStreamNewCGroup(RdbParser *p, void *userData, RdbBulk grpNam
 
     if (jTop(ctx) == JC_STREAM) {
         /* first group (metadata emitted): open the "groups" array */
-        jOpenT(ctx, JC_GROUPS);
+        jOpen(ctx, JC_GROUPS);
     }
 
     /* close the previous group (and whatever it left open), open the next */
-    if (!jOpenNextT(ctx, JC_GROUP))
+    if (!jOpenNext(ctx, JC_GROUP))
         return invalidState(p, ctx, __func__);
     jNewItem(ctx, JC_GROUP);
     fprintf(ctx->outfile, "\"name\": \"%s\", \"lastid\": \"%" PRIu64 "-%" PRIu64 "\", \"entriesRead\": %" PRIu64,
@@ -700,7 +694,7 @@ static RdbRes toJsonStreamCGroupPendingEntry(RdbParser *p, void *userData, RdbSt
     RdbxToJson *ctx = userData;
 
     if (jTop(ctx) != JC_GPEL && /* first entry: open the group's "pending" array */
-        !jOpenUnderT(ctx, JC_GPEL))
+        !jOpenUnder(ctx, JC_GPEL))
         return invalidState(p, ctx, __func__);
 
     jNewItem(ctx, JC_GPEL);
@@ -713,11 +707,11 @@ static RdbRes toJsonStreamNewConsumer(RdbParser *p, void *userData, RdbBulk cons
     RdbxToJson *ctx = userData;
 
     /* first consumer: close the global PEL if open, then open "consumers" */
-    if (!jIsOpen(ctx, JC_CONSUMERS) && !jOpenNextT(ctx, JC_CONSUMERS))
+    if (!jIsOpen(ctx, JC_CONSUMERS) && !jOpenNext(ctx, JC_CONSUMERS))
         return invalidState(p, ctx, __func__);
 
     /* close the previous consumer (and its PEL), open the next */
-    if (!jOpenNextT(ctx, JC_CONSUMER))
+    if (!jOpenNext(ctx, JC_CONSUMER))
         return invalidState(p, ctx, __func__);
 
     jNewItem(ctx, JC_CONSUMER);
@@ -731,7 +725,7 @@ static RdbRes toJsonStreamConsumerPendingEntry(RdbParser *p, void *userData, Rdb
     RdbxToJson *ctx = userData;
 
     if (jTop(ctx) != JC_CPEL && /* first entry: open the consumer's "pending" array */
-        !jOpenUnderT(ctx, JC_CPEL))
+        !jOpenUnder(ctx, JC_CPEL))
         return invalidState(p, ctx, __func__);
 
     jNewItem(ctx, JC_CPEL);
@@ -750,7 +744,7 @@ static RdbRes toJsonStreamNackZoneEntry(RdbParser *p, void *userData, RdbStreamI
     /* first entry: close the global PEL / consumers subtree, keep the group,
      * open "nacked" */
     if (jTop(ctx) != JC_NACKED &&
-        !jOpenNextT(ctx, JC_NACKED))
+        !jOpenNext(ctx, JC_NACKED))
         return invalidState(p, ctx, __func__);
     jNewItem(ctx, JC_NACKED);
     fprintf(ctx->outfile, "\"%" PRIu64 "-%" PRIu64 "\"", id->ms, id->seq);
@@ -767,11 +761,11 @@ static RdbRes toJsonStreamIdmpMeta(RdbParser *p, void *userData, RdbStreamIdmpMe
     /* "idmp" is a sibling of "entries"/"groups" under the stream object. */
     if (jTop(ctx) == JC_KEY) {
         /* No entries and handleStreamMetadata not registered: open stream object */
-        jOpenT(ctx, JC_STREAM);
+        jOpen(ctx, JC_STREAM);
     }
 
     /* close whatever child is open (entries array / groups subtree) */
-    if (!jOpenNextT(ctx, JC_IDMP))
+    if (!jOpenNext(ctx, JC_IDMP))
         return invalidState(p, ctx, __func__);
     jNewItem(ctx, JC_IDMP);
     fprintf(ctx->outfile, "\n        \"duration\": %" PRIu64 ", \"maxEntries\": %" PRIu64 ", \"numProducers\": %" PRIu64,
@@ -785,11 +779,11 @@ static RdbRes toJsonStreamIdmpProducer(RdbParser *p, void *userData, RdbStreamId
 
     if (jTop(ctx) == JC_IDMP) {
         /* first producer: open the "producers" array */
-        jOpenT(ctx, JC_PRODUCERS);
+        jOpen(ctx, JC_PRODUCERS);
     }
 
     /* close the previous producer (and its entries), open the next */
-    if (!jOpenNextT(ctx, JC_PRODUCER))
+    if (!jOpenNext(ctx, JC_PRODUCER))
         return invalidState(p, ctx, __func__);
     jNewItem(ctx, JC_PRODUCER);
     outputQuotedEscaping(ctx, producer->pid, RDB_bulkLen(p, producer->pid));
@@ -802,7 +796,7 @@ static RdbRes toJsonStreamIdmpEntry(RdbParser *p, void *userData, RdbStreamIdmpE
     RdbxToJson *ctx = userData;
 
     if (jTop(ctx) != JC_PENTRIES && /* first entry: open the producer's "entries" array */
-        !jOpenUnderT(ctx, JC_PENTRIES))
+        !jOpenUnder(ctx, JC_PENTRIES))
         return invalidState(p, ctx, __func__);
 
     jNewItem(ctx, JC_PENTRIES);
@@ -819,7 +813,7 @@ static RdbRes toJsonArrayMetadata(RdbParser *p, void *userData, uint64_t count, 
 
     /* One combined frame for elements array + wrapper object; the delimiter
      * separates elements (nothing is ever appended at the wrapper level). */
-    if (unlikely(!jOpenUnderT(ctx, JC_ARRAY)))
+    if (unlikely(!jOpenUnder(ctx, JC_ARRAY)))
         return invalidState(p, ctx, __func__);
     if (insertIdx != RDB_ARRAY_INSERT_IDX_NONE)
         fprintf(ctx->outfile, "\"insert_idx\":\"%" PRIu64 "\",", insertIdx);
