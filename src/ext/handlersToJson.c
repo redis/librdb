@@ -11,60 +11,108 @@ struct RdbxToJson;
 
 #define _STDOUT_STR "<stdout>"
 
-typedef enum
-{
-    R2J_IDLE = 0,
-    R2J_AUX_FIELDS,
-    R2J_FUNCTIONS,
+/* Ids of the emitted JSON containers, document root to innermost. 0 is reserved
+ * as the "nothing open" sentinel (see jTop()) and is never a real id - hence
+ * JC_DOC starts at 1. Each id's nesting level and printed shape are looked up
+ * from jSpecs[] below: jUnwindTo(id) closes every open container whose level is
+ * >= that of the given id, while jTop() comparisons match one exact container.
+ * Level is purely an ordering value (child.level > parent.level) - it is not
+ * required to equal the container's literal stack depth; jPush validates
+ * structure via jSpec(ctx, id)->parent instead. The stack fully captures the
+ * emission state - handlers validate against jTop() rather than a separate
+ * state machine. */
+enum JContId {
+    /* --- LEVEL 1 --- */
+    JC_DOC = 1,   /* the RDB document: array of DBs, or bare keys if flatten */
+    /* --- LEVEL 2 --- */
+    JC_AUX,       /* "aux" object; sibling of the DBs */
+    JC_FUNC,      /* "func" object; sibling of the DBs */
+    JC_DB,        /* one DB object (a no-op frame if flatten) */
+    /* --- LEVEL 3 --- */
+    JC_KEY,       /* marker for a key awaiting/holding its value */
+    /* --- LEVEL 4 : a key's value: */
+    JC_LIST,      /* list value: array of elements */
+    JC_SET,       /* set value: array of members */
+    JC_HASH,      /* hash value: object of field:value */
+    JC_ZSET,      /* zset value: object of member:score */
+    JC_ARRAY,     /* (v14+) elements array + wrapper object */
+    JC_STREAM,    /* stream object */
+    /* direct children of the stream object: */
+    JC_ENTRIES,   /* "entries" array of the stream */
+    JC_GROUPS,    /* "groups" array of consumer groups */
+    JC_IDMP,      /* "idmp" object: idempotent-producers state */
+    JC_ENTRY,     /* one stream entry */
+    JC_GROUP,     /* one consumer group object */
+    JC_PRODUCERS, /* "producers" array of the idmp object */
+    JC_ITEMS,     /* "items" object of one stream entry */
+    JC_GPEL,      /* group's "pending" array (global PEL) */
+    JC_NACKED,    /* group's "nacked" array of entry IDs */
+    JC_CONSUMERS, /* group's "consumers" array */
+    JC_PRODUCER,  /* one producer object */
+    JC_CONSUMER,  /* one consumer object */
+    JC_PENTRIES,  /* producer's "entries" array */
+    JC_CPEL,      /* consumer's "pending" array */
+};
 
-    R2J_IN_DB,
-    R2J_IN_KEY,
-
-    /* Possible states in R2J_IN_KEY */
-    R2J_IN_LIST,
-    R2J_IN_SET,
-    R2J_IN_STRING,
-    R2J_IN_HASH,
-    R2J_IN_ZSET,
-
-    R2J_IN_STREAM,  /* value is a stream; ctx->streamState tracks the phase within it */
-
-    R2J_IN_ARRAY, /*(v14+)*/
-
-} RdbxToJsonState;
-
-/* Sub-state while state == R2J_IN_STREAM. The stream is emitted in phases:
- * its entries, then metadata scalars, then the groups/idmp subtree (whose
- * nesting is tracked by the container stack, not by these values). */
-typedef enum
-{
-    R2J_STREAM_ENTRIES,       /* between entries (entries array open)          */
-    R2J_STREAM_ENTRY_FIELDS,  /* mid-entry, appending field:value to "items"   */
-    R2J_STREAM_META,          /* entries closed, awaiting groups/idmp          */
-    R2J_STREAM_SUBTREE,       /* inside the groups/idmp subtree (stack-tracked)*/
-} RdbxStreamState;
-
-/* Nesting levels of a key's value containers, outer (small) to inner (large).
- * Only the ordinal matters: jUnwindTo(level) closes every open container whose
- * level is >= the requested one, so toJsonEndKey just unwinds to 0. Siblings
- * that never coexist on the stack (e.g. "entries"/"groups"/"idmp", or a group's
- * "pending"/"consumers"/"nacked") share a level. */
-enum {
-    JLVL1_VALUE = 1,                       /* the key's top-level container: list/set/hash/zset/array/stream object */
-    JLVL2_ENTRIES = 2, JLVL2_GROUPS = 2, JLVL2_IDMP = 2, /* direct children of the value */
-    JLVL3_GROUP = 3,  JLVL3_PRODUCERS = 3,
-    JLVL4_GPEL = 4,   JLVL4_NACKED = 4, JLVL4_CONSUMERS = 4, JLVL4_PRODUCER = 4,
-    JLVL5_CONSUMER = 5, JLVL5_PENTRIES = 5,
-    JLVL6_CPEL = 6,
+/* Per-container nesting level, exclusive parent, and printed shape, indexed
+ * directly by JContId. Every id opens under exactly one fixed parent (JC_DOC's
+ * is 0, the same "nothing open" sentinel jTop() uses for an empty stack). This
+ * is the default/template table: JC_DOC/JC_DB's open/close actually depend on
+ * ctx->conf.flatten, and JC_AUX/JC_FUNC's open on the (CLI-settable)
+ * jsonMetaPrefix, so RdbxToJson keeps its own per-conversion copy (ctx->specs)
+ * patched for those ids at init - see initRdbToJsonCtx(). The "" here is
+ * JC_DOC/JC_DB's flatten=true value, kept only so every id has a full row
+ * (their delim is NOT flatten-dependent, so it's the real, always-used
+ * value). */
+typedef struct { int level, parent; const char *open, *delim, *close; } JContSpec;
+static const JContSpec jSpecs[] = {
+    /*               level parent       open                             delim      close */
+    [JC_DOC]       = { 1, 0,            "",                              ",\n",     ""       },
+    [JC_AUX]       = { 2, JC_DOC,       "",                              ",\n       ", "\n}" },
+    [JC_FUNC]      = { 2, JC_DOC,       "",                              ",\n",     "\n}"    },
+    [JC_DB]        = { 2, JC_DOC,       "",                              ",\n",     ""       },
+    [JC_KEY]       = { 3, JC_DB,        "    ",                          "",        ""       },
+    [JC_LIST]      = { 4, JC_KEY,       "[",                             ",",       "]"      },
+    [JC_SET]       = { 4, JC_KEY,       "[",                             ",",       "]"      },
+    [JC_HASH]      = { 4, JC_KEY,       "{",                             ",",       "}"      },
+    [JC_ZSET]      = { 4, JC_KEY,       "{",                             ",",       "}"      },
+    [JC_ARRAY]     = { 4, JC_KEY,       "{",                             ",",       "]}"     },
+    [JC_STREAM]    = { 4, JC_KEY,       "{",                             ",",       "}"      },
+    [JC_ENTRIES]   = { 5, JC_STREAM,    "\n      \"entries\":[",         ",",       "]"      },
+    [JC_GROUPS]    = { 5, JC_STREAM,    "\n      \"groups\": [\n",       ",\n",     "]"      },
+    [JC_IDMP]      = { 5, JC_STREAM,    "\n      \"idmp\": {",           ",",       "}"      },
+    [JC_ENTRY]     = { 6, JC_ENTRIES,   "\n        { ",                  "",        " }"     },
+    [JC_GROUP]     = { 6, JC_GROUPS,    "        {",                     ",",       "}"      },
+    [JC_PRODUCERS] = { 6, JC_IDMP,      "\n        \"producers\": [",    ",",       "]"      },
+    [JC_ITEMS]     = { 7, JC_ENTRY,     "\"items\":{",                   ", ",      "}"      },
+    [JC_GPEL]      = { 7, JC_GROUP,     "\n         \"pending\": [ ",    ",",       "]"      },
+    [JC_NACKED]    = { 7, JC_GROUP,     "\n         \"nacked\": [",      ",",       "]"      },
+    [JC_CONSUMERS] = { 7, JC_GROUP,     "\n         \"consumers\": [",   ",",       "]"      },
+    [JC_PRODUCER]  = { 7, JC_PRODUCERS, "\n          {\"pid\": ",        ",",       "}"      },
+    [JC_CONSUMER]  = { 8, JC_CONSUMERS, "\n           { ",               ",",       "}"      },
+    [JC_PENTRIES]  = { 8, JC_PRODUCER,  "\n           \"entries\": [",   ",",       "]"      },
+    [JC_CPEL]      = { 9, JC_CONSUMER,  "\n             \"pending\": [", ",",       "]"      },
 };
 
 struct RdbxToJson {
     RdbxToJsonConf conf;
-    RdbxToJsonState state;
-    RdbxStreamState streamState;  /* phase within a stream; valid while state == R2J_IN_STREAM */
 
     char *outfileName;  /* Holds output filename or equals _STDOUT_STR */
     FILE *outfile;
+
+    /* Per-conversion copy of jSpecs[], patched once at init for the ids whose
+     * printed shape depends on runtime config rather than being a fixed
+     * literal: JC_DOC/JC_DB on conf.flatten, JC_AUX/JC_FUNC's meta-section
+     * label on the (CLI-settable) jsonMetaPrefix. Everything else is an exact
+     * copy, so jSpec() can serve every id the same way. */
+    JContSpec specs[sizeof(jSpecs) / sizeof(jSpecs[0])];
+
+    /* Backing buffers for specs[JC_AUX]/specs[JC_FUNC].open - fixed-size so
+     * there's nothing to free; 200 bytes comfortably fits any realistic
+     * jsonMetaPrefix plus the fixed "aux__"/"func__" suffix (any excess is
+     * safely truncated by snprintf, never overflowed). */
+    char auxOpenText[200];
+    char funcOpenText[200];
 
     void (*encfunc)(struct RdbxToJson *ctx, char *p, size_t len);
 
@@ -73,44 +121,136 @@ struct RdbxToJson {
         RdbKeyInfo info;
     } keyCtx;
 
-    unsigned int count_keys;
     unsigned int count_functions;
     unsigned int count_db;
 
-    /* Stack of open JSON containers for the current key's value. Each opener
-     * records the string that closes it (a literal, e.g. "]" or "]}"); the
-     * opening bracket itself is part of the caller's own output. jUnwindTo()
-     * pops and prints closers on demand, so toJsonEndKey just unwinds to 0.
-     * Depth is bounded by the deepest nesting (stream: object > groups > group >
+    /* Stack of open JSON containers, document root to innermost. Each frame
+     * records the container's closer, the delimiter between its children and
+     * how many children were appended so far: jNewItem()/jOpen() print the
+     * delimiter before every child but the first. jUnwindTo() pops and prints
+     * closers on demand, so toJsonEndRdb just unwinds to 0. Depth is bounded
+     * by the deepest nesting (doc > db > key > stream > groups > group >
      * consumers > consumer > pel). */
-    struct { int level; const char *close; } stack[8];
+    struct {
+        int id; 
+        const char *close; 
+        const char *delim; 
+        int nItems;
+    } stack[12];
     int stackTop;
 };
 
-/* Record an open container without printing anything - only its closer string. */
-static void jPush(RdbxToJson *ctx, int level, const char *close) {
-    ctx->stack[ctx->stackTop].level = level;
+/* Id of the innermost open container, or 0 if the stack is empty. */
+static int jTop(RdbxToJson *ctx) {
+    return ctx->stackTop ? ctx->stack[ctx->stackTop - 1].id : 0;
+}
+
+/* Look up id's spec in ctx's own copy of jSpecs[] (see RdbxToJson.specs);
+ * asserts open != NULL so a distinct id missing from the table (e.g. a future
+ * enum addition) fails loudly instead of a NULL fputs. */
+static const JContSpec *jSpec(RdbxToJson *ctx, int id) {
+    const JContSpec *s = &ctx->specs[id];
+    assert(s->open);
+    return s;
+}
+
+/* Nesting level of `id`, or 0 for the "nothing open" sentinel (see jTop()) -
+ * always below every real level, so jUnwindTo(ctx, 0) still closes everything. */
+static int jLevel(RdbxToJson *ctx, int id) {
+    return id ? jSpec(ctx, id)->level : 0;
+}
+
+/* Record an open container without printing anything. */
+static void jPush(RdbxToJson *ctx, int id, const char *delim, const char *close) {
+    /* Every container opens directly under its declared parent - true even for
+     * jOpenT's "trusted" pushes, which skip jOpenUnder's own parent check. */
+    assert(jTop(ctx) == jSpec(ctx, id)->parent);
+    ctx->stack[ctx->stackTop].id = id;
+    ctx->stack[ctx->stackTop].delim = delim;
     ctx->stack[ctx->stackTop].close = close;
+    ctx->stack[ctx->stackTop].nItems = 0;
     ctx->stackTop++;
 }
 
-/* Open a container: print its opening text (bracket, and any separator/label
- * that precedes it) and record the matching closer for later jUnwindTo(). Any
- * formatted body is printed by the caller afterwards. */
-static void jOpen(RdbxToJson *ctx, int level, const char *open, const char *close) {
+/* Print the innermost container's delimiter before every child but the first. */
+static void jDelim(RdbxToJson *ctx) {
+    if (ctx->stackTop && ctx->stack[ctx->stackTop - 1].nItems++)
+        fputs(ctx->stack[ctx->stackTop - 1].delim, ctx->outfile);
+}
+
+/* Start a child in container `id`, which must be the innermost open one. The
+ * child itself is printed by the caller afterwards (an inline batch of
+ * scalars counts as one child). */
+static void jNewItem(RdbxToJson *ctx, int id) {
+    assert(jTop(ctx) == id);
+    (void) id;
+    jDelim(ctx);
+}
+
+/* Open a container as a child of the current one: apply the parent's
+ * delimiter by need, print the opening text (bracket and any label that
+ * precedes it) and record delimiter and closer for jNewItem()/jUnwindTo(). */
+static void jOpen(RdbxToJson *ctx, int id, const char *open, const char *delim, const char *close) {
+    jDelim(ctx);
     fputs(open, ctx->outfile);
-    jPush(ctx, level, close);
+    jPush(ctx, id, delim, close);
 }
 
-/* Level of the innermost open container, or 0 if the stack is empty. */
-static int jTop(RdbxToJson *ctx) {
-    return ctx->stackTop ? ctx->stack[ctx->stackTop - 1].level : 0;
-}
-
-/* Close (pop + print) every open container whose level is >= `level`. */
-static void jUnwindTo(RdbxToJson *ctx, int level) {
-    while (ctx->stackTop && ctx->stack[ctx->stackTop - 1].level >= level)
+/* Close (pop + print) every open container at the level of `id` or deeper. */
+static void jUnwindTo(RdbxToJson *ctx, int id) {
+    while (ctx->stackTop && jLevel(ctx, ctx->stack[ctx->stackTop - 1].id) >= jLevel(ctx, id))
         fputs(ctx->stack[--ctx->stackTop].close, ctx->outfile);
+}
+
+/* True if container `id` is currently open (depth is tiny, so a scan stays cheap). */
+static int jIsOpen(RdbxToJson *ctx, int id) {
+    for (int i = 0; i < ctx->stackTop; i++)
+        if (ctx->stack[i].id == id) return 1;
+    return 0;
+}
+
+/* Open `id` as a child of `parent`, or fail (return 0) if `parent` is not the
+ * innermost open container - the callback fired in a state it can't accept. */
+static int jOpenUnder(RdbxToJson *ctx, int parent, int id,
+                      const char *open, const char *delim, const char *close) {
+    if (jTop(ctx) != parent) return 0;
+    jOpen(ctx, id, open, delim, close);
+    return 1;
+}
+
+/* Like jOpenUnder(), but first close the previous sibling's subtree
+ * (everything at `id`'s level or deeper). For advancing to the next section
+ * or element within `parent`; a failed parent check may thus follow emitted
+ * closers, but the conversion is aborted then anyway. */
+static int jOpenNext(RdbxToJson *ctx, int parent, int id,
+                     const char *open, const char *delim, const char *close) {
+    jUnwindTo(ctx, id);
+    return jOpenUnder(ctx, parent, id, open, delim, close);
+}
+
+/* jOpen() with id's spec looked up from ctx->specs[]. */
+static void jOpenT(RdbxToJson *ctx, int id) {
+    const JContSpec *s = jSpec(ctx, id);
+    jOpen(ctx, id, s->open, s->delim, s->close);
+}
+
+/* jOpenUnder() under id's exclusive parent, both looked up from ctx->specs[]. */
+static int jOpenUnderT(RdbxToJson *ctx, int id) {
+    const JContSpec *s = jSpec(ctx, id);
+    return jOpenUnder(ctx, s->parent, id, s->open, s->delim, s->close);
+}
+
+/* jOpenNext() under id's exclusive parent, both looked up from ctx->specs[]. */
+static int jOpenNextT(RdbxToJson *ctx, int id) {
+    const JContSpec *s = jSpec(ctx, id);
+    return jOpenNext(ctx, s->parent, id, s->open, s->delim, s->close);
+}
+
+/* Report that a callback fired while an unexpected container is innermost. */
+static RdbRes invalidState(RdbParser *p, RdbxToJson *ctx, const char *caller) {
+    RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
+                    "%s(): Invalid container: %d", caller, jTop(ctx));
+    return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
 }
 
 const char *jsonMetaPrefix = "__";  /* Distinct meta from data with prefix string. */
@@ -230,8 +370,6 @@ static RdbxToJson *initRdbToJsonCtx(RdbParser *p, const char *outfilename, RdbxT
     ctx->outfileName = RDB_alloc(p, strlen(outfilename) + 1);
     strcpy(ctx->outfileName, outfilename);
     ctx->outfile = f;
-    ctx->state = R2J_IDLE;
-    ctx->count_keys = 0;
     ctx->count_functions = 0;
 
     /* default configuration */
@@ -253,6 +391,18 @@ static RdbxToJson *initRdbToJsonCtx(RdbParser *p, const char *outfilename, RdbxT
         default: assert(0); break;
     }
 
+    /* this conversion's own copy of jSpecs[], patched for conf.flatten and
+     * jsonMetaPrefix - see the comment on jSpecs[] and on ctx->specs. */
+    memcpy(ctx->specs, jSpecs, sizeof(jSpecs));
+    ctx->specs[JC_DOC].open  = ctx->conf.flatten ? "" : "[";
+    ctx->specs[JC_DOC].close = ctx->conf.flatten ? "" : "]\n";
+    ctx->specs[JC_DB].open   = ctx->conf.flatten ? "" : "{\n";
+    ctx->specs[JC_DB].close  = ctx->conf.flatten ? "" : "\n}";
+    snprintf(ctx->auxOpenText, sizeof(ctx->auxOpenText), " \"%saux__\": {\n", jsonMetaPrefix);
+    snprintf(ctx->funcOpenText, sizeof(ctx->funcOpenText), " \"%sfunc__\": {\n", jsonMetaPrefix);
+    ctx->specs[JC_AUX].open  = ctx->auxOpenText;
+    ctx->specs[JC_FUNC].open = ctx->funcOpenText;
+
     return ctx;
 }
 
@@ -261,17 +411,14 @@ static RdbxToJson *initRdbToJsonCtx(RdbParser *p, const char *outfilename, RdbxT
 static RdbRes toJsonDbSize(RdbParser *p, void *userData, uint64_t db_size, uint64_t exp_size) {
     RdbxToJson *ctx = userData;
 
-    if (ctx->state != R2J_IN_DB) {
-        RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
-                        "toJsonDbSize(): Invalid state value: %d", ctx->state);
-        return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
-    }
+    if (jTop(ctx) != JC_DB)
+        return invalidState(p, ctx, __func__);
 
-    /* output json part */
+    jNewItem(ctx, JC_DB);
     fprintf(ctx->outfile, "    \"%sdbsize__\": {\n", jsonMetaPrefix); /* group dbsize with {..} */
     fprintf(ctx->outfile, "      \"size\": %" PRIu64 ",\n", db_size);
     fprintf(ctx->outfile, "      \"expires\": %" PRIu64 "\n", exp_size);
-    fprintf(ctx->outfile, "    }%s\n", (db_size) ? "," : "");
+    fprintf(ctx->outfile, "    }");
 
     return RDB_OK;
 }
@@ -279,36 +426,26 @@ static RdbRes toJsonDbSize(RdbParser *p, void *userData, uint64_t db_size, uint6
 static RdbRes toJsonSlotInfo(RdbParser *p, void *userData, RdbSlotInfo *info) {
     RdbxToJson *ctx = userData;
 
-    if (ctx->state != R2J_IN_DB) {
-        RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
-                        "toJsonSlotInfo(): Invalid state value: %d", ctx->state);
-        return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
-    }
+    if (jTop(ctx) != JC_DB)
+        return invalidState(p, ctx, __func__);
 
-    /* output json part */
+    jNewItem(ctx, JC_DB);
     fprintf(ctx->outfile, "    \"%sslotinfo__\": {\n", jsonMetaPrefix);
     fprintf(ctx->outfile, "      \"slotId\": %" PRIu64 ",\n", info->slot_id);
     fprintf(ctx->outfile, "      \"slotSize\": %" PRIu64 ",\n", info->slot_size);
     fprintf(ctx->outfile, "      \"slotSExpiresSize\": %" PRIu64 "\n", info->expires_slot_size);
-    fprintf(ctx->outfile, "    },\n");
+    fprintf(ctx->outfile, "    }");
     return RDB_OK;
 }
 
 static RdbRes toJsonAuxField(RdbParser *p, void *userData, RdbBulk auxkey, RdbBulk auxval) {
     RdbxToJson *ctx = userData;
 
-    if (ctx->state == R2J_IDLE) {
-        ctx->state = R2J_AUX_FIELDS;
-        fprintf(ctx->outfile, " \"%saux__\": {\n", jsonMetaPrefix); /* group aux-fields with {..} */
-    } else if (ctx->state == R2J_AUX_FIELDS) {
-        fprintf(ctx->outfile, ",\n    ");
-    } else {
-        RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
-                        "toJsonAuxField(): Invalid state value: %d", ctx->state);
-        return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
-    }
+    if (jTop(ctx) != JC_AUX && /* first aux-field: group them with {..} */
+        !jOpenUnderT(ctx, JC_AUX))
+        return invalidState(p, ctx, __func__);
 
-    /* output json part */
+    jNewItem(ctx, JC_AUX);
     outputQuotedEscaping(ctx, auxkey, RDB_bulkLen(p, auxkey));
     fprintf(ctx->outfile, ":");
     outputQuotedEscaping(ctx, auxval, RDB_bulkLen(p, auxval));
@@ -319,30 +456,15 @@ static RdbRes toJsonAuxField(RdbParser *p, void *userData, RdbBulk auxkey, RdbBu
 static RdbRes toJsonEndKey(RdbParser *p, void *userData) {
     RdbxToJson *ctx = userData;
 
-    /* Close whatever containers this key's value left open. For scalars and
-     * empty values (KEY/STRING) the stack is empty and this is a no-op. */
-    switch(ctx->state) {
-        case R2J_IN_KEY:
-        case R2J_IN_STRING:
-        case R2J_IN_LIST:
-        case R2J_IN_SET:
-        case R2J_IN_HASH:
-        case R2J_IN_ZSET:
-        case R2J_IN_ARRAY:
-        case R2J_IN_STREAM:
-            jUnwindTo(ctx, 0);
-            break;
-        default:
-            RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
-                            "toJsonEndKey(): Invalid state value: %d", ctx->state);
-            return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
-    }
+    if (jLevel(ctx, jTop(ctx)) < jLevel(ctx, JC_KEY))
+        return invalidState(p, ctx, __func__);
+
+    /* Close whatever containers this key's value left open, along with the
+     * key marker itself. For scalar values only the marker is popped. */
+    jUnwindTo(ctx, JC_KEY);
 
     RDB_bulkCopyFree(p, ctx->keyCtx.key);
     ctx->keyCtx.key = NULL;
-
-    /* update new state */
-    ctx->state = R2J_IN_DB;
 
     return RDB_OK;
 }
@@ -350,21 +472,14 @@ static RdbRes toJsonEndKey(RdbParser *p, void *userData) {
 static RdbRes toJsonNewKey(RdbParser *p, void *userData, RdbBulk key, RdbKeyInfo *info) {
     RdbxToJson *ctx = userData;
 
-    if (unlikely(ctx->state != R2J_IN_DB)) {
-        RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
-                        "toJsonNewKey(): Invalid state value: %d", ctx->state);
-        return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
-    }
+    /* The key itself needs no closer - its single child (the value) closes
+     * itself - so the frame is just a position marker. */
+    if (unlikely(!jOpenUnderT(ctx, JC_KEY)))
+        return invalidState(p, ctx, __func__);
 
     ctx->keyCtx.key = RDB_bulkClone(p, key);
     ctx->keyCtx.info = *info;
 
-    /* update new state */
-    ctx->state = R2J_IN_KEY;
-    ctx->stackTop = 0; /* fresh container stack per key */
-
-    /* output json part */
-    fprintf(ctx->outfile, "%s    ", (++ctx->count_keys == 1) ? "" : ",\n");
     outputQuotedEscaping(ctx, key, RDB_bulkLen(p, key));
     fprintf(ctx->outfile, ":");
 
@@ -375,29 +490,13 @@ static RdbRes toJsonNewDb(RdbParser *p, void *userData, int db) {
     UNUSED(db);
     RdbxToJson *ctx = userData;
 
-    if (ctx->state == R2J_IDLE) {
-        /* old RDBs might not have aux-fields */
-        if (!ctx->conf.flatten) fprintf(ctx->outfile, "{\n");
-    } else if (ctx->state == R2J_AUX_FIELDS || ctx->state == R2J_FUNCTIONS) {
-        fprintf(ctx->outfile, "\n},\n");
-        if (!ctx->conf.flatten) fprintf(ctx->outfile, "{\n");
-    } else if (ctx->state == R2J_IN_DB) {
-        /* output json part */
-        if (ctx->conf.flatten) {
-            fprintf(ctx->outfile, ",\n");
-        } else {
-            fprintf(ctx->outfile, "\n},{\n");
-        }
-    } else {
-        RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
-                        "toJsonNewDb(): Invalid state value: %d", ctx->state);
-        return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
-    }
+    /* Close the previous DB (or the aux/func object) if open. In flatten mode
+     * the DB frame prints nothing - it only scopes the keys, which then read
+     * as direct children of the document. */
+    if (!jOpenNextT(ctx, JC_DB))
+        return invalidState(p, ctx, __func__);
 
-    /* update new state */
-    ctx->state = R2J_IN_DB;
     ++ctx->count_db;
-    ctx->count_keys = 0;
     return RDB_OK;
 }
 
@@ -405,13 +504,9 @@ static RdbRes toJsonNewRdb(RdbParser *p, void *userData, int rdbVersion) {
     UNUSED(rdbVersion);
     RdbxToJson *ctx = userData;
 
-    if (ctx->state != R2J_IDLE) {
-        RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
-                        "toJsonNewRdb(): Invalid state value: %d", ctx->state);
-        return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
-    }
-
-    if (!ctx->conf.flatten) fprintf(ctx->outfile, "[");
+    /* parent 0 = the empty stack: nothing may be open yet */
+    if (!jOpenUnderT(ctx, JC_DOC))
+        return invalidState(p, ctx, __func__);
 
     return RDB_OK;
 }
@@ -419,22 +514,13 @@ static RdbRes toJsonNewRdb(RdbParser *p, void *userData, int rdbVersion) {
 static RdbRes toJsonEndRdb(RdbParser *p, void *userData) {
     RdbxToJson *ctx = userData;
 
-    if (ctx->state == R2J_IDLE) {
+    if (ctx->stackTop == 0 || jLevel(ctx, jTop(ctx)) > jLevel(ctx, JC_DB))
+        return invalidState(p, ctx, __func__);
+
+    if (ctx->stack[0].nItems == 0)
         RDB_log(p, RDB_LOG_WRN, "RDB is empty.");
-    } else if (ctx->state == R2J_AUX_FIELDS || ctx->state == R2J_FUNCTIONS) {
-        fprintf(ctx->outfile, "\n},\n");
-    } else if (ctx->state == R2J_IN_DB) {
-        if (!ctx->conf.flatten) fprintf(ctx->outfile, "\n}");
-    } else {
-        RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
-                        "toJsonEndRdb(): Invalid state value: %d", ctx->state);
-        return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
-    }
 
-    if (!ctx->conf.flatten) fprintf(ctx->outfile, "]\n");
-
-    /* update new state */
-    ctx->state = R2J_IDLE;
+    jUnwindTo(ctx, 0); /* close everything, document included */
 
     return RDB_OK;
 }
@@ -442,13 +528,9 @@ static RdbRes toJsonEndRdb(RdbParser *p, void *userData) {
 static RdbRes toJsonModule(RdbParser *p, void *userData, RdbBulk moduleName, size_t serializedSize) {
     RdbxToJson *ctx = userData;
 
-    if (ctx->state != R2J_IN_KEY) {
-        RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
-                        "toJsonNewRdb(): Invalid state value: %d", ctx->state);
-        return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
-    }
+    if (jTop(ctx) != JC_KEY)
+        return invalidState(p, ctx, __func__);
 
-    /* output json part */
     fprintf(ctx->outfile, "\"<Content of Module '%s'. Occupies a serialized size of %zu bytes>\"",
             moduleName,
             serializedSize);
@@ -462,7 +544,6 @@ static RdbRes toJsonString(RdbParser *p, void *userData, RdbBulk string) {
     UNUSED(p);
     RdbxToJson *ctx = userData;
 
-    /* output json part */
     outputQuotedEscaping(ctx, string, RDB_bulkLen(p, string));
 
     return RDB_OK;
@@ -471,28 +552,12 @@ static RdbRes toJsonString(RdbParser *p, void *userData, RdbBulk string) {
 static RdbRes toJsonList(RdbParser *p, void *userData, RdbBulk item) {
     RdbxToJson *ctx = userData;
 
-    if (ctx->state == R2J_IN_KEY) {
+    if (jTop(ctx) != JC_LIST && /* first item: open the list's array */
+        !jOpenUnderT(ctx, JC_LIST))
+        return invalidState(p, ctx, __func__);
 
-        /* output json part */
-        jOpen(ctx, JLVL1_VALUE, "[", /*close:*/"]");
-        outputQuotedEscaping(ctx, item, RDB_bulkLen(p, item));
-
-        /* update new state */
-        ctx->state = R2J_IN_LIST;
-
-    } else if (ctx->state == R2J_IN_LIST) {
-
-        /* output json part */
-        fprintf(ctx->outfile, ",");
-        outputQuotedEscaping(ctx, item, RDB_bulkLen(p, item));
-
-        /* state unchanged */
-
-    } else {
-        RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
-                        "toJsonList(): Invalid state value: %d", ctx->state);
-        return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
-    }
+    jNewItem(ctx, JC_LIST);
+    outputQuotedEscaping(ctx, item, RDB_bulkLen(p, item));
 
     return RDB_OK;
 }
@@ -500,28 +565,12 @@ static RdbRes toJsonList(RdbParser *p, void *userData, RdbBulk item) {
 static RdbRes toJsonSet(RdbParser *p, void *userData, RdbBulk member) {
     RdbxToJson *ctx = userData;
 
-    if (ctx->state == R2J_IN_KEY) {
+    if (jTop(ctx) != JC_SET && /* first member: open the set's array */
+        !jOpenUnderT(ctx, JC_SET))
+        return invalidState(p, ctx, __func__);
 
-        /* output json part */
-        jOpen(ctx, JLVL1_VALUE, "[", /*close:*/"]");
-        outputQuotedEscaping(ctx, member, RDB_bulkLen(p, member));
-
-        /* update new state */
-        ctx->state = R2J_IN_SET;
-
-    } else if (ctx->state == R2J_IN_SET) {
-
-        /* output json part */
-        fprintf(ctx->outfile, ",");
-        outputQuotedEscaping(ctx, member, RDB_bulkLen(p, member));
-
-        /* state unchanged */
-
-    } else {
-        RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
-                        "toJsonSet(): Invalid state value: %d", ctx->state);
-        return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
-    }
+    jNewItem(ctx, JC_SET);
+    outputQuotedEscaping(ctx, member, RDB_bulkLen(p, member));
 
     return RDB_OK;
 }
@@ -538,28 +587,13 @@ static RdbRes toJsonZset(RdbParser *p, void *userData, RdbBulk member, double sc
         scoreStr[1] = '\0';
     }
 
-    if (ctx->state == R2J_IN_KEY) {
-        /* output json part */
-        jOpen(ctx, JLVL1_VALUE, "{", /*close:*/"}");
-        outputQuotedEscaping(ctx, member, RDB_bulkLen(p, member));
-        fprintf(ctx->outfile, ":\"%.*s\"", len, scoreStr);
+    if (jTop(ctx) != JC_ZSET && /* first member: open the zset's object */
+        !jOpenUnderT(ctx, JC_ZSET))
+        return invalidState(p, ctx, __func__);
 
-        /* update new state */
-        ctx->state = R2J_IN_ZSET;
-
-    } else if (ctx->state == R2J_IN_ZSET) {
-        /* output json part */
-        fprintf(ctx->outfile, ",");
-        outputQuotedEscaping(ctx, member, RDB_bulkLen(p, member));
-        fprintf(ctx->outfile, ":\"%.*s\"", len, scoreStr);
-
-        /* state unchanged */
-
-    } else {
-        RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
-                        "toJsonZset(): Invalid state value: %d", ctx->state);
-        return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
-    }
+    jNewItem(ctx, JC_ZSET);
+    outputQuotedEscaping(ctx, member, RDB_bulkLen(p, member));
+    fprintf(ctx->outfile, ":\"%.*s\"", len, scoreStr);
 
     return RDB_OK;
 }
@@ -570,27 +604,14 @@ static RdbRes toJsonHash(RdbParser *p, void *userData, RdbBulk field,
     UNUSED(expireAt);
     RdbxToJson *ctx = userData;
 
-    if (ctx->state == R2J_IN_KEY) {
+    if (jTop(ctx) != JC_HASH && /* first field: open the hash's object */
+        !jOpenUnderT(ctx, JC_HASH))
+        return invalidState(p, ctx, __func__);
 
-        /* output json part */
-        jOpen(ctx, JLVL1_VALUE, "{", /*close:*/"}");
-        outputQuotedEscaping(ctx, field, RDB_bulkLen(p, field));
-        fprintf(ctx->outfile, ":");
-        outputQuotedEscaping(ctx, value, RDB_bulkLen(p, value));
-        /* update new state */
-        ctx->state = R2J_IN_HASH;
-    } else if (ctx->state == R2J_IN_HASH) {
-        /* output json part */
-        fprintf(ctx->outfile, ",");
-        outputQuotedEscaping(ctx, field, RDB_bulkLen(p, field));
-        fprintf(ctx->outfile, ":");
-        outputQuotedEscaping(ctx, value, RDB_bulkLen(p, value));
-
-    } else {
-        RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
-                        "toJsonList(): Invalid state value: %d", ctx->state);
-        return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
-    }
+    jNewItem(ctx, JC_HASH);
+    outputQuotedEscaping(ctx, field, RDB_bulkLen(p, field));
+    fprintf(ctx->outfile, ":");
+    outputQuotedEscaping(ctx, value, RDB_bulkLen(p, value));
 
     return RDB_OK;
 }
@@ -598,21 +619,11 @@ static RdbRes toJsonHash(RdbParser *p, void *userData, RdbBulk field,
 static RdbRes toJsonFunction(RdbParser *p, void *userData, RdbBulk func) {
     RdbxToJson *ctx = userData;
 
-    if (ctx->state == R2J_IDLE) {
-        ctx->state = R2J_FUNCTIONS;
-        fprintf(ctx->outfile, "\"%sfunc__\": {\n", jsonMetaPrefix);
-    } else if (ctx->state == R2J_AUX_FIELDS) {
-        fprintf(ctx->outfile, "\n},\n \"%sfunc__\": {\n", jsonMetaPrefix);
-        ctx->state = R2J_FUNCTIONS;
-    } else if (ctx->state == R2J_FUNCTIONS) {
-        fprintf(ctx->outfile, ",\n");
-    } else {
-        RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
-                        "toJsonFunction(): Invalid state value: %d", ctx->state);
-        return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
-    }
+    if (jTop(ctx) != JC_FUNC && /* first function: close aux if open, open "func" */
+        !jOpenNextT(ctx, JC_FUNC))
+        return invalidState(p, ctx, __func__);
 
-    /* output json part */
+    jNewItem(ctx, JC_FUNC);
     fprintf(ctx->outfile, "    \"%sFunction_%d\":", jsonMetaPrefix, ++ctx->count_functions);
     outputQuotedEscaping( (RdbxToJson *) userData, func, RDB_bulkLen(p, func));
     ctx->count_functions++;
@@ -622,59 +633,44 @@ static RdbRes toJsonFunction(RdbParser *p, void *userData, RdbBulk func) {
 static RdbRes toJsonStreamItem(RdbParser *p, void *userData, RdbStreamID *id, RdbBulk field, RdbBulk value, int64_t itemsLeft) {
     RdbxToJson *ctx = userData;
 
-    if ( (ctx->state == R2J_IN_KEY) ||
-         (ctx->state == R2J_IN_STREAM && ctx->streamState == R2J_STREAM_ENTRIES) ) {
-        /* first field of a new entry */
-        int firstEntry = (ctx->state == R2J_IN_KEY);
-        if (firstEntry) {
-            jOpen(ctx, JLVL1_VALUE, "{", /*close:*/"}");  /* stream object */
-            jOpen(ctx, JLVL2_ENTRIES, "\n      \"entries\":[", "]"); /* entries array */
-            ctx->state = R2J_IN_STREAM;
-        }
-
-        /* output another stream entry */
-        fprintf(ctx->outfile, "%c\n        { \"id\":\"%" PRIu64 "-%" PRIu64 "\", ",
-                firstEntry ? ' ' : ',', id->ms, id->seq );
-        fprintf(ctx->outfile, "\"items\":{");
-        outputQuotedEscaping(ctx, field, RDB_bulkLen(p, field));
-        fprintf(ctx->outfile, ":");
-        outputQuotedEscaping(ctx, value, RDB_bulkLen(p, value));
-    } else if (ctx->state == R2J_IN_STREAM && ctx->streamState == R2J_STREAM_ENTRY_FIELDS) {
-        outputQuotedEscaping(ctx, field, RDB_bulkLen(p, field));
-        fprintf(ctx->outfile, ":");
-        outputQuotedEscaping(ctx, value, RDB_bulkLen(p, value));
-    } else {
-        RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
-                        "toJsonStreamItem(): Invalid state value: %d", ctx->state);
-        return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
+    if (jTop(ctx) == JC_KEY) {
+        jOpenT(ctx, JC_STREAM);
+        jOpenT(ctx, JC_ENTRIES);
     }
 
-    if (itemsLeft) {
-        fprintf(ctx->outfile, ", ");
-        ctx->streamState = R2J_STREAM_ENTRY_FIELDS;
-    } else {
-        fprintf(ctx->outfile, "} }");
-        ctx->streamState = R2J_STREAM_ENTRIES;
+    if (jTop(ctx) == JC_ENTRIES) {
+        /* new entry: open its object and "items", then append the first field */
+        jOpenT(ctx, JC_ENTRY);
+        fprintf(ctx->outfile, "\"id\":\"%" PRIu64 "-%" PRIu64 "\", ", id->ms, id->seq);
+        jOpenT(ctx, JC_ITEMS);
+    } else if (jTop(ctx) != JC_ITEMS) {
+        return invalidState(p, ctx, __func__);
     }
+
+    jNewItem(ctx, JC_ITEMS);
+    outputQuotedEscaping(ctx, field, RDB_bulkLen(p, field));
+    fprintf(ctx->outfile, ":");
+    outputQuotedEscaping(ctx, value, RDB_bulkLen(p, value));
+
+    if (!itemsLeft)
+        jUnwindTo(ctx, JC_ENTRY);  /* close "items" and the entry object */
     return RDB_OK;
 }
 
 static RdbRes toJsonStreamMetadata(RdbParser *p, void *userData, RdbStreamMeta *meta) {
     RdbxToJson *ctx = userData;
 
-    if (ctx->state == R2J_IN_KEY) {  /* no entries recorded - emit empty array */
-        jOpen(ctx, JLVL1_VALUE, "{", "}");      /* stream object */
+    if (jTop(ctx) == JC_KEY) {  /* no entries recorded - emit empty array */
+        jOpenT(ctx, JC_STREAM);
+        jNewItem(ctx, JC_STREAM);
         fprintf(ctx->outfile, "\n      \"entries\":[]");
-        ctx->state = R2J_IN_STREAM;
-    } else if (ctx->state == R2J_IN_STREAM && ctx->streamState == R2J_STREAM_ENTRIES) {
-        jUnwindTo(ctx, JLVL2_ENTRIES);          /* close the entries array */
+    } else if (jTop(ctx) == JC_ENTRIES) {
+        jUnwindTo(ctx, JC_ENTRIES);          /* close the entries array */
     } else {
-        RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
-                        "toJsonStreamMetadata(): Invalid state value: %d", ctx->state);
-        return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
+        return invalidState(p, ctx, __func__);
     }
-    ctx->streamState = R2J_STREAM_META;
-    fprintf(ctx->outfile, ",\n      \"length\": %" PRIu64 ", ", meta->length);
+    jNewItem(ctx, JC_STREAM);
+    fprintf(ctx->outfile, "\n      \"length\": %" PRIu64 ", ", meta->length);
     fprintf(ctx->outfile, "\n      \"entriesAdded\": %" PRIu64 ", ", meta->entriesAdded);
     fprintf(ctx->outfile, "\n      \"firstID\": \"%" PRIu64 "-%" PRIu64 "\", ", meta->firstID.ms, meta->firstID.seq);
     fprintf(ctx->outfile, "\n      \"lastID\": \"%" PRIu64 "-%" PRIu64 "\", ", meta->lastID.ms, meta->lastID.seq);
@@ -685,41 +681,29 @@ static RdbRes toJsonStreamMetadata(RdbParser *p, void *userData, RdbStreamMeta *
 static RdbRes toJsonStreamNewCGroup(RdbParser *p, void *userData, RdbBulk grpName, RdbStreamGroupMeta *meta) {
     RdbxToJson *ctx = userData;
 
-    if (ctx->state == R2J_IN_STREAM && ctx->streamState == R2J_STREAM_META) {
-        /* first group: open the "groups" array */
-        jOpen(ctx, JLVL2_GROUPS, ",\n      \"groups\": [\n", "]");
-    } else if (ctx->state == R2J_IN_STREAM && ctx->streamState == R2J_STREAM_SUBTREE) {
-        /* sibling group: close the previous group and whatever it left open */
-        jUnwindTo(ctx, JLVL3_GROUP);
-        fprintf(ctx->outfile, ",\n");
-    } else {
-        RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
-                        "toJsonStreamNewCGroup(): Invalid state value: %d", ctx->state);
-        return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
+    if (jTop(ctx) == JC_STREAM) {
+        /* first group (metadata emitted): open the "groups" array */
+        jOpenT(ctx, JC_GROUPS);
     }
 
-    jOpen(ctx, JLVL3_GROUP, "        {", "}");
+    /* close the previous group (and whatever it left open), open the next */
+    if (!jOpenNextT(ctx, JC_GROUP))
+        return invalidState(p, ctx, __func__);
+    jNewItem(ctx, JC_GROUP);
     fprintf(ctx->outfile, "\"name\": \"%s\", \"lastid\": \"%" PRIu64 "-%" PRIu64 "\", \"entriesRead\": %" PRIu64,
             grpName, meta->lastId.ms, meta->lastId.seq, meta->entriesRead);
 
-    ctx->streamState = R2J_STREAM_SUBTREE;
     return RDB_OK;
 }
 
 static RdbRes toJsonStreamCGroupPendingEntry(RdbParser *p, void *userData, RdbStreamPendingEntry *pe) {
     RdbxToJson *ctx = userData;
 
-    if (ctx->state != R2J_IN_STREAM || ctx->streamState != R2J_STREAM_SUBTREE) {
-        RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
-                        "toJsonStreamCGroupPendingEntry(): Invalid state value: %d", ctx->state);
-        return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
-    }
+    if (jTop(ctx) != JC_GPEL && /* first entry: open the group's "pending" array */
+        !jOpenUnderT(ctx, JC_GPEL))
+        return invalidState(p, ctx, __func__);
 
-    if (jTop(ctx) == JLVL4_GPEL)
-        fprintf(ctx->outfile, ", ");                   /* another entry in the open PEL */
-    else
-        jOpen(ctx, JLVL4_GPEL, ",\n         \"pending\": [ ", "]"); /* open the group's "pending" array */
-
+    jNewItem(ctx, JC_GPEL);
     fprintf(ctx->outfile, "\n           { \"sent\": %" PRIu64 ", \"id\":\"%" PRIu64 "-%" PRIu64 "\", \"count\": %" PRIu64 " }",
             pe->deliveryTime, pe->id.ms, pe->id.seq, pe->deliveryCount);
     return RDB_OK;
@@ -728,23 +712,15 @@ static RdbRes toJsonStreamCGroupPendingEntry(RdbParser *p, void *userData, RdbSt
 static RdbRes toJsonStreamNewConsumer(RdbParser *p, void *userData, RdbBulk consName, RdbStreamConsumerMeta *meta) {
     RdbxToJson *ctx = userData;
 
-    if (ctx->state != R2J_IN_STREAM || ctx->streamState != R2J_STREAM_SUBTREE) {
-        RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
-                        "toJsonStreamNewConsumer(): Invalid state value: %d", ctx->state);
-        return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
-    }
+    /* first consumer: close the global PEL if open, then open "consumers" */
+    if (!jIsOpen(ctx, JC_CONSUMERS) && !jOpenNextT(ctx, JC_CONSUMERS))
+        return invalidState(p, ctx, __func__);
 
-    if (jTop(ctx) == JLVL5_CONSUMER || jTop(ctx) == JLVL6_CPEL) {
-        /* sibling consumer: close the previous consumer (and its PEL) */
-        jUnwindTo(ctx, JLVL5_CONSUMER);
-        fprintf(ctx->outfile, ", ");
-    } else {
-        /* first consumer: close the global PEL if open, then open "consumers" */
-        jUnwindTo(ctx, JLVL4_CONSUMERS);
-        jOpen(ctx, JLVL4_CONSUMERS, ",\n         \"consumers\": [", "]");
-    }
+    /* close the previous consumer (and its PEL), open the next */
+    if (!jOpenNextT(ctx, JC_CONSUMER))
+        return invalidState(p, ctx, __func__);
 
-    jOpen(ctx, JLVL5_CONSUMER, "\n           { ", "}");
+    jNewItem(ctx, JC_CONSUMER);
     fprintf(ctx->outfile, "\"name\": \"%s\", \"activeTime\": %lld, \"seenTime\": %lld",
             consName, meta->activeTime, meta->seenTime);
 
@@ -754,17 +730,11 @@ static RdbRes toJsonStreamNewConsumer(RdbParser *p, void *userData, RdbBulk cons
 static RdbRes toJsonStreamConsumerPendingEntry(RdbParser *p, void *userData, RdbStreamID *streamId) {
     RdbxToJson *ctx = userData;
 
-    if (ctx->state != R2J_IN_STREAM || ctx->streamState != R2J_STREAM_SUBTREE) {
-        RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
-                        "toJsonStreamConsumerPendingEntry(): Invalid state value: %d", ctx->state);
-        return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
-    }
+    if (jTop(ctx) != JC_CPEL && /* first entry: open the consumer's "pending" array */
+        !jOpenUnderT(ctx, JC_CPEL))
+        return invalidState(p, ctx, __func__);
 
-    if (jTop(ctx) == JLVL6_CPEL)
-        fprintf(ctx->outfile, ", ");                   /* another id in the open consumer PEL */
-    else
-        jOpen(ctx, JLVL6_CPEL, ",\n             \"pending\": [", "]"); /* open the consumer's "pending" array */
-
+    jNewItem(ctx, JC_CPEL);
     fprintf(ctx->outfile, "\n               {\"id\":\"%" PRIu64 "-%" PRIu64 "\"}", streamId->ms, streamId->seq);
     return RDB_OK;
 }
@@ -777,20 +747,13 @@ static RdbRes toJsonStreamNackZoneEntry(RdbParser *p, void *userData, RdbStreamI
     UNUSED(itemsLeft);
     RdbxToJson *ctx = userData;
 
-    if (ctx->state != R2J_IN_STREAM || ctx->streamState != R2J_STREAM_SUBTREE) {
-        RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
-                        "toJsonStreamNackZoneEntry(): Invalid state value: %d", ctx->state);
-        return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
-    }
-
-    if (jTop(ctx) == JLVL4_NACKED) {
-        fprintf(ctx->outfile, ", \"");                 /* another id in the open array */
-    } else {
-        /* close the global PEL / consumers subtree, keep the group, open "nacked" */
-        jUnwindTo(ctx, JLVL4_NACKED);
-        jOpen(ctx, JLVL4_NACKED, ",\n         \"nacked\": [\"", "]");
-    }
-    fprintf(ctx->outfile, "%" PRIu64 "-%" PRIu64 "\"", id->ms, id->seq);
+    /* first entry: close the global PEL / consumers subtree, keep the group,
+     * open "nacked" */
+    if (jTop(ctx) != JC_NACKED &&
+        !jOpenNextT(ctx, JC_NACKED))
+        return invalidState(p, ctx, __func__);
+    jNewItem(ctx, JC_NACKED);
+    fprintf(ctx->outfile, "\"%" PRIu64 "-%" PRIu64 "\"", id->ms, id->seq);
     return RDB_OK;
 }
 
@@ -802,44 +765,33 @@ static RdbRes toJsonStreamIdmpMeta(RdbParser *p, void *userData, RdbStreamIdmpMe
         return RDB_OK;
 
     /* "idmp" is a sibling of "entries"/"groups" under the stream object. */
-    if (ctx->state == R2J_IN_KEY) {
+    if (jTop(ctx) == JC_KEY) {
         /* No entries and handleStreamMetadata not registered: open stream object */
-        jOpen(ctx, JLVL1_VALUE, "{", "}");
-        jOpen(ctx, JLVL2_IDMP, "\n      \"idmp\": {", /*close:*/"}");
-        ctx->state = R2J_IN_STREAM;
-    } else if (ctx->state == R2J_IN_STREAM) {
-        jUnwindTo(ctx, JLVL2_IDMP);  /* close whatever child is open (entries array / groups subtree) */
-        jOpen(ctx, JLVL2_IDMP, ",\n      \"idmp\": {", /*close:*/"}");
-    } else {
-        RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
-                        "toJsonStreamIdmpMeta(): Invalid state value: %d", ctx->state);
-        return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
+        jOpenT(ctx, JC_STREAM);
     }
 
+    /* close whatever child is open (entries array / groups subtree) */
+    if (!jOpenNextT(ctx, JC_IDMP))
+        return invalidState(p, ctx, __func__);
+    jNewItem(ctx, JC_IDMP);
     fprintf(ctx->outfile, "\n        \"duration\": %" PRIu64 ", \"maxEntries\": %" PRIu64 ", \"numProducers\": %" PRIu64,
             meta->duration, meta->maxEntries, meta->numProducers);
 
-    ctx->streamState = R2J_STREAM_SUBTREE;
     return RDB_OK;
 }
 
 static RdbRes toJsonStreamIdmpProducer(RdbParser *p, void *userData, RdbStreamIdmpProducer *producer) {
     RdbxToJson *ctx = userData;
 
-    if (jTop(ctx) == JLVL2_IDMP) {
-        /* first producer: open the "producers" array + producer object */
-        jOpen(ctx, JLVL3_PRODUCERS, ",\n        \"producers\": [", /*close:*/"]");
-        jOpen(ctx, JLVL4_PRODUCER, "\n          {\"pid\": ", /*close:*/"}");
-    } else if (jTop(ctx) == JLVL4_PRODUCER || jTop(ctx) == JLVL5_PENTRIES) {
-        /* sibling producer: close the previous producer (and its entries) */
-        jUnwindTo(ctx, JLVL4_PRODUCER);
-        jOpen(ctx, JLVL4_PRODUCER, ",\n          {\"pid\": ", /*close:*/"}");
-    } else {
-        RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
-                        "toJsonStreamIdmpProducer(): Invalid state value: %d", ctx->state);
-        return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
+    if (jTop(ctx) == JC_IDMP) {
+        /* first producer: open the "producers" array */
+        jOpenT(ctx, JC_PRODUCERS);
     }
 
+    /* close the previous producer (and its entries), open the next */
+    if (!jOpenNextT(ctx, JC_PRODUCER))
+        return invalidState(p, ctx, __func__);
+    jNewItem(ctx, JC_PRODUCER);
     outputQuotedEscaping(ctx, producer->pid, RDB_bulkLen(p, producer->pid));
     fprintf(ctx->outfile, ", \"numEntries\": %" PRIu64, producer->numEntries);
 
@@ -849,16 +801,11 @@ static RdbRes toJsonStreamIdmpProducer(RdbParser *p, void *userData, RdbStreamId
 static RdbRes toJsonStreamIdmpEntry(RdbParser *p, void *userData, RdbStreamIdmpEntry *entry) {
     RdbxToJson *ctx = userData;
 
-    if (jTop(ctx) == JLVL4_PRODUCER)
-        jOpen(ctx, JLVL5_PENTRIES, ",\n           \"entries\": [", "]"); /* open the producer's "entries" array */
-    else if (jTop(ctx) == JLVL5_PENTRIES)
-        fprintf(ctx->outfile, ", ");
-    else {
-        RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
-                        "toJsonStreamIdmpEntry(): Invalid state value: %d", ctx->state);
-        return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
-    }
+    if (jTop(ctx) != JC_PENTRIES && /* first entry: open the producer's "entries" array */
+        !jOpenUnderT(ctx, JC_PENTRIES))
+        return invalidState(p, ctx, __func__);
 
+    jNewItem(ctx, JC_PENTRIES);
     fprintf(ctx->outfile, "{\"iid\": ");
     outputQuotedEscaping(ctx, entry->iid, RDB_bulkLen(p, entry->iid));
     fprintf(ctx->outfile, ", \"streamId\": \"%" PRIu64 "-%" PRIu64 "\"}", entry->streamId.ms, entry->streamId.seq);
@@ -870,39 +817,28 @@ static RdbRes toJsonArrayMetadata(RdbParser *p, void *userData, uint64_t count, 
     UNUSED(p, count);
     RdbxToJson *ctx = userData;
 
-    if (unlikely(ctx->state != R2J_IN_KEY)) {
-        RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
-                        "toJsonArrayMetadata(): Invalid state value: %d", ctx->state);
-        return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
-    }
-
-    jOpen(ctx, JLVL1_VALUE, "{", /*close:*/"]}");      /* elements array + wrapper object */
+    /* One combined frame for elements array + wrapper object; the delimiter
+     * separates elements (nothing is ever appended at the wrapper level). */
+    if (unlikely(!jOpenUnderT(ctx, JC_ARRAY)))
+        return invalidState(p, ctx, __func__);
     if (insertIdx != RDB_ARRAY_INSERT_IDX_NONE)
         fprintf(ctx->outfile, "\"insert_idx\":\"%" PRIu64 "\",", insertIdx);
     fprintf(ctx->outfile, "\"elements\":[");
 
-    /* state stays R2J_IN_KEY until the first element arrives — that lets
-     * toJsonArrayElement omit the leading comma on the first record without
-     * a separate "first-element" flag. */
     return RDB_OK;
 }
 
 static RdbRes toJsonArrayElement(RdbParser *p, void *userData, uint64_t idx, RdbBulk value) {
     RdbxToJson *ctx = userData;
 
-    if (ctx->state == R2J_IN_ARRAY) {
-        fprintf(ctx->outfile, ",");
-    } else if (ctx->state != R2J_IN_KEY) {
-        RDB_reportError(p, (RdbRes) RDBX_ERR_R2J_INVALID_STATE,
-                        "toJsonArrayElement(): Invalid state value: %d", ctx->state);
-        return (RdbRes) RDBX_ERR_R2J_INVALID_STATE;
-    }
+    if (jTop(ctx) != JC_ARRAY)
+        return invalidState(p, ctx, __func__);
 
+    jNewItem(ctx, JC_ARRAY);
     fprintf(ctx->outfile, "{\"idx\":\"%" PRIu64 "\",\"val\":", idx);
     outputQuotedEscaping(ctx, value, RDB_bulkLen(p, value));
     fprintf(ctx->outfile, "}");
 
-    ctx->state = R2J_IN_ARRAY;
     return RDB_OK;
 }
 
@@ -911,7 +847,6 @@ static RdbRes toJsonArrayElement(RdbParser *p, void *userData, uint64_t idx, Rdb
 static RdbRes toJsonStruct(RdbParser *p, void *userData, RdbBulk value) {
     RdbxToJson *ctx = userData;
 
-    /* output json part */
     fprintf(ctx->outfile, "[");
     outputQuotedEscaping(ctx, value, RDB_bulkLen(p, value));
     fprintf(ctx->outfile, "]");
@@ -922,7 +857,6 @@ static RdbRes toJsonStruct(RdbParser *p, void *userData, RdbBulk value) {
 static RdbRes toJsonStreamLP(RdbParser *p, void *userData, RdbBulk nodekey, RdbBulk streamLP) {
     RdbxToJson *ctx = userData;
 
-    /* output json part */
     fprintf(ctx->outfile, "{");
     outputQuotedEscaping(ctx, nodekey, RDB_bulkLen(p, nodekey));
     fprintf(ctx->outfile, ":");
@@ -936,7 +870,6 @@ static RdbRes toJsonStreamLP(RdbParser *p, void *userData, RdbBulk nodekey, RdbB
 
 static RdbRes toJsonFrag(RdbParser *p, void *userData, RdbBulk frag) {
     RdbxToJson *ctx = userData;
-    /* output json part */
     ctx->encfunc(ctx, frag, RDB_bulkLen(p, frag));
     return RDB_OK;
 }
