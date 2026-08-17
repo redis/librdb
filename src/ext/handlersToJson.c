@@ -38,7 +38,7 @@ struct RdbxToJson;
  * structure via jSpec(ctx, id)->parent instead. The stack fully captures the
  * emission state - handlers validate against jTop() rather than a separate
  * state machine. */
-enum JContId {
+typedef enum JContId {
     /* --- LEVEL 1 --- */
     JC_DOC = 1,   /* the RDB document: array of DBs, or bare keys if flatten */
     /* --- LEVEL 2 --- */
@@ -69,7 +69,7 @@ enum JContId {
     JC_CONSUMER,  /* one consumer object */
     JC_PENTRIES,  /* producer's "entries" array */
     JC_CPEL,      /* consumer's "pending" array */
-};
+} JContId;
 
 /* Per-container nesting level, exclusive parent, and printed shape, indexed
  * directly by JContId. Every id opens under exactly one fixed parent (JC_DOC's
@@ -81,7 +81,7 @@ enum JContId {
  * JC_DOC/JC_DB's flatten=true value, kept only so every id has a full row
  * (their delim is NOT flatten-dependent, so it's the real, always-used
  * value). */
-typedef struct { int level, parent; const char *open, *delim, *close; } JContSpec;
+typedef struct { int level; JContId parent; const char *open, *delim, *close; } JContSpec;
 static const JContSpec jSpecs[] = {
     /*               level parent       open                             delim      close */
     [JC_DOC]       = { 1, 0,            "",                              ",\n",     ""       },
@@ -149,21 +149,21 @@ struct RdbxToJson {
      * bounded by the deepest nesting (doc > db > key > stream > groups > group
      * > consumers > consumer > pel). */
     struct {
-        int id;
+        JContId id;
         int nItems;
     } stack[12];
     int stackTop;
 };
 
 /* Id of the innermost open container, or 0 if the stack is empty. */
-static int jTop(RdbxToJson *ctx) {
+static JContId jTop(RdbxToJson *ctx) {
     return ctx->stackTop ? ctx->stack[ctx->stackTop - 1].id : 0;
 }
 
 /* Look up id's spec in ctx's own copy of jSpecs[] (see RdbxToJson.specs);
  * asserts open != NULL so a distinct id missing from the table (e.g. a future
  * enum addition) fails loudly instead of a NULL fputs. */
-static const JContSpec *jSpec(RdbxToJson *ctx, int id) {
+static const JContSpec *jSpec(RdbxToJson *ctx, JContId id) {
     const JContSpec *s = &ctx->specs[id];
     assert(s->open);
     return s;
@@ -171,12 +171,12 @@ static const JContSpec *jSpec(RdbxToJson *ctx, int id) {
 
 /* Nesting level of `id`, or 0 for the "nothing open" sentinel (see jTop()) -
  * always below every real level, so jUnwindTo(ctx, 0) still closes everything. */
-static int jLevel(RdbxToJson *ctx, int id) {
+static int jLevel(RdbxToJson *ctx, JContId id) {
     return id ? jSpec(ctx, id)->level : 0;
 }
 
 /* Record an open container without printing anything. */
-static void jPush(RdbxToJson *ctx, int id) {
+static void jPush(RdbxToJson *ctx, JContId id) {
     /* Every container opens directly under its declared parent - true even for
      * jOpen's "trusted" pushes, which skip jOpenUnder's own parent check. */
     assert(jTop(ctx) == jSpec(ctx, id)->parent);
@@ -194,7 +194,7 @@ static void jDelim(RdbxToJson *ctx) {
 /* Start a child in container `id`, which must be the innermost open one. The
  * child itself is printed by the caller afterwards (an inline batch of
  * scalars counts as one child). */
-static void jNewItem(RdbxToJson *ctx, int id) {
+static void jNewItem(RdbxToJson *ctx, JContId id) {
     assert(jTop(ctx) == id);
     (void) id;
     jDelim(ctx);
@@ -203,20 +203,20 @@ static void jNewItem(RdbxToJson *ctx, int id) {
 /* Open `id` as a child of the current one: apply the parent's delimiter by
  * need, print id's opening text (bracket and any label that precedes it,
  * from ctx->specs[]) and record the frame for jNewItem()/jUnwindTo(). */
-static void jOpen(RdbxToJson *ctx, int id) {
+static void jOpen(RdbxToJson *ctx, JContId id) {
     jDelim(ctx);
     fputs(jSpec(ctx, id)->open, ctx->outfile);
     jPush(ctx, id);
 }
 
 /* Close (pop + print) every open container at the level of `id` or deeper. */
-static void jUnwindTo(RdbxToJson *ctx, int id) {
+static void jUnwindTo(RdbxToJson *ctx, JContId id) {
     while (ctx->stackTop && jLevel(ctx, ctx->stack[ctx->stackTop - 1].id) >= jLevel(ctx, id))
         fputs(jSpec(ctx, ctx->stack[--ctx->stackTop].id)->close, ctx->outfile);
 }
 
 /* True if container `id` is currently open (depth is tiny, so a scan stays cheap). */
-static int jIsOpen(RdbxToJson *ctx, int id) {
+static int jIsOpen(RdbxToJson *ctx, JContId id) {
     for (int i = 0; i < ctx->stackTop; i++)
         if (ctx->stack[i].id == id) return 1;
     return 0;
@@ -225,7 +225,7 @@ static int jIsOpen(RdbxToJson *ctx, int id) {
 /* Open `id` as a child of its declared (ctx->specs[]) parent, or fail (return
  * 0) if that parent is not the innermost open container - the callback fired
  * in a state it can't accept. */
-static int jOpenUnder(RdbxToJson *ctx, int id) {
+static int jOpenUnder(RdbxToJson *ctx, JContId id) {
     if (jTop(ctx) != jSpec(ctx, id)->parent) return 0;
     jOpen(ctx, id);
     return 1;
@@ -235,7 +235,7 @@ static int jOpenUnder(RdbxToJson *ctx, int id) {
  * (everything at `id`'s level or deeper). For advancing to the next section
  * or element within its parent; a failed parent check may thus follow emitted
  * closers, but the conversion is aborted then anyway. */
-static int jOpenNext(RdbxToJson *ctx, int id) {
+static int jOpenNext(RdbxToJson *ctx, JContId id) {
     jUnwindTo(ctx, id);
     return jOpenUnder(ctx, id);
 }
