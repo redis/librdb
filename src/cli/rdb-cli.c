@@ -135,7 +135,7 @@ static void printUsage(int shortUsage) {
 
     printf("FORMAT_OPTIONS ('stat'):\n");
     printf("\t-t, --top <N>                 Show the top N keys by estimated memory (Default: 10)\n");
-    printf("\t-h, --histogram <0|1|2>       Append full per-type histograms: 0=both, 1=items/key, 2=memory/key\n\n");
+    printf("\t-h, --histogram <0|1|2>       Append full per-type histograms: 0=items/key, 1=memory/key, 2=both\n\n");
 
     printf("FORMAT_OPTIONS ('json'):\n");
     printf("\t-i, --include <EXTRAS>        To include: {aux-val|func|stream-meta|db-info}\n");
@@ -265,7 +265,7 @@ static RdbRes formatPrint(RdbParser *parser, int argc, char **argv) {
 static RdbRes formatStat(RdbParser *parser, int argc, char **argv) {
     const char *topArg;
     int topN = 0;          /* 0 => handler default (10)         */
-    int flags = 0, histSet = 0, histWhich = 0;   /* histWhich: 0=all 1=items 2=memory */
+    int flags = 0, histSet = 0, histWhich = 0;   /* histWhich: 0=items 1=memory 2=both */
 
     /* parse specific command options */
     for (int at = 1; at < argc; ++at) {
@@ -278,8 +278,8 @@ static RdbRes formatStat(RdbParser *parser, int argc, char **argv) {
     }
 
     if (histSet) {
-        if (histWhich != 2) flags |= RDBX_STAT_HIST_ITEMS;   /* 0=all, 1=items */
-        if (histWhich != 1) flags |= RDBX_STAT_HIST_MEM;     /* 0=all, 2=memory */
+        if (histWhich != 1) flags |= RDBX_STAT_HIST_ITEMS;   /* 0=items, 2=both */
+        if (histWhich != 0) flags |= RDBX_STAT_HIST_MEM;     /* 1=memory, 2=both */
     }
 
     if (RDBX_createHandlersToStat(parser, topN, nowSecs, flags, NULL) == NULL)
