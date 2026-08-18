@@ -37,38 +37,38 @@ struct RdbxToJson;
  * required to equal the container's literal stack depth; jPush validates
  * structure via jSpec(ctx, id)->parent instead. The stack fully captures the
  * emission state - handlers validate against jTop() rather than a separate
- * state machine. */
+ * state machine.
+ *
+ * The declarations below are indented to mirror this parent/child tree, purely
+ * for readability; jSpecs[] (via its designated initializers) is what jPush
+ * actually validates against, so keep the indentation in sync by hand when
+ * adding an id. */
 typedef enum JContId {
-    /* --- LEVEL 1 --- */
-    JC_DOC = 1,   /* the RDB document: array of DBs, or bare keys if flatten */
-    /* --- LEVEL 2 --- */
-    JC_AUX,       /* "aux" object; sibling of the DBs */
-    JC_FUNC,      /* "func" object; sibling of the DBs */
-    JC_DB,        /* one DB object (a no-op frame if flatten) */
-    /* --- LEVEL 3 --- */
-    JC_KEY,       /* marker for a key awaiting/holding its value */
-    /* --- LEVEL 4 : a key's value: */
-    JC_LIST,      /* list value: array of elements */
-    JC_SET,       /* set value: array of members */
-    JC_HASH,      /* hash value: object of field:value */
-    JC_ZSET,      /* zset value: object of member:score */
-    JC_ARRAY,     /* (v14+) elements array + wrapper object */
-    JC_STREAM,    /* stream object */
-    /* direct children of the stream object: */
-    JC_ENTRIES,   /* "entries" array of the stream */
-    JC_GROUPS,    /* "groups" array of consumer groups */
-    JC_IDMP,      /* "idmp" object: idempotent-producers state */
-    JC_ENTRY,     /* one stream entry */
-    JC_GROUP,     /* one consumer group object */
-    JC_PRODUCERS, /* "producers" array of the idmp object */
-    JC_ITEMS,     /* "items" object of one stream entry */
-    JC_GPEL,      /* group's "pending" array (global PEL) */
-    JC_NACKED,    /* group's "nacked" array of entry IDs */
-    JC_CONSUMERS, /* group's "consumers" array */
-    JC_PRODUCER,  /* one producer object */
-    JC_CONSUMER,  /* one consumer object */
-    JC_PENTRIES,  /* producer's "entries" array */
-    JC_CPEL,      /* consumer's "pending" array */
+    JC_DOC = 1,             /* the RDB document: array of DBs, or bare keys if flatten */
+        JC_AUX,             /* "aux" object: RDB metadata key:value pairs */
+        JC_FUNC,            /* "func" object: dumped Lua functions */
+        JC_DB,              /* one DB object (a no-op frame if flatten) */
+            JC_KEY,         /* marker for a key awaiting/holding its value */
+                JC_LIST,        /* list value: array of elements */
+                JC_SET,         /* set value: array of members */
+                JC_HASH,        /* hash value: object of field:value */
+                JC_ZSET,        /* zset value: object of member:score */
+                JC_ARRAY,       /* (v14+) elements array + wrapper object */
+                JC_STREAM,      /* stream object */
+                    JC_ENTRIES,     /* "entries" array */
+                        JC_ENTRY,       /* one entry */
+                            JC_ITEMS,       /* "items" object: the entry's field:value pairs */
+                    JC_GROUPS,      /* "groups" array */
+                        JC_GROUP,       /* one consumer group */
+                            JC_GPEL,        /* "pending" array (global PEL) */
+                            JC_NACKED,      /* "nacked" array of entry IDs */
+                            JC_CONSUMERS,   /* "consumers" array */
+                                JC_CONSUMER,    /* one consumer */
+                                    JC_CPEL,        /* "pending" array (per-consumer PEL) */
+                    JC_IDMP,        /* "idmp" object: idempotent-producers state */
+                        JC_PRODUCERS,   /* "producers" array */
+                            JC_PRODUCER,    /* one producer */
+                                JC_PENTRIES,    /* "entries" array */
 } JContId;
 
 /* Per-container nesting level, exclusive parent, and printed shape, indexed
@@ -83,32 +83,32 @@ typedef enum JContId {
  * value). */
 typedef struct { int level; JContId parent; const char *open, *delim, *close; } JContSpec;
 static const JContSpec jSpecs[] = {
-    /*               level parent       open                             delim      close */
-    [JC_DOC]       = { 1, 0,            "",                              ",\n",     ""       },
-    [JC_AUX]       = { 2, JC_DOC,       "",                              ",\n       ", "\n}" },
-    [JC_FUNC]      = { 2, JC_DOC,       "",                              ",\n",     "\n}"    },
-    [JC_DB]        = { 2, JC_DOC,       "",                              ",\n",     ""       },
-    [JC_KEY]       = { 3, JC_DB,        "    ",                          "",        ""       },
-    [JC_LIST]      = { 4, JC_KEY,       "[",                             ",",       "]"      },
-    [JC_SET]       = { 4, JC_KEY,       "[",                             ",",       "]"      },
-    [JC_HASH]      = { 4, JC_KEY,       "{",                             ",",       "}"      },
-    [JC_ZSET]      = { 4, JC_KEY,       "{",                             ",",       "}"      },
-    [JC_ARRAY]     = { 4, JC_KEY,       "{",                             ",",       "]}"     },
-    [JC_STREAM]    = { 4, JC_KEY,       "{",                             ",",       "}"      },
-    [JC_ENTRIES]   = { 5, JC_STREAM,    "\n      \"entries\":[",         ",",       "]"      },
-    [JC_GROUPS]    = { 5, JC_STREAM,    "\n      \"groups\": [\n",       ",\n",     "]"      },
-    [JC_IDMP]      = { 5, JC_STREAM,    "\n      \"idmp\": {",           ",",       "}"      },
-    [JC_ENTRY]     = { 6, JC_ENTRIES,   "\n        { ",                  "",        " }"     },
-    [JC_GROUP]     = { 6, JC_GROUPS,    "        {",                     ",",       "}"      },
-    [JC_PRODUCERS] = { 6, JC_IDMP,      "\n        \"producers\": [",    ",",       "]"      },
-    [JC_ITEMS]     = { 7, JC_ENTRY,     "\"items\":{",                   ", ",      "}"      },
-    [JC_GPEL]      = { 7, JC_GROUP,     "\n         \"pending\": [ ",    ",",       "]"      },
-    [JC_NACKED]    = { 7, JC_GROUP,     "\n         \"nacked\": [",      ",",       "]"      },
-    [JC_CONSUMERS] = { 7, JC_GROUP,     "\n         \"consumers\": [",   ",",       "]"      },
-    [JC_PRODUCER]  = { 7, JC_PRODUCERS, "\n          {\"pid\": ",        ",",       "}"      },
-    [JC_CONSUMER]  = { 8, JC_CONSUMERS, "\n           { ",               ",",       "}"      },
-    [JC_PENTRIES]  = { 8, JC_PRODUCER,  "\n           \"entries\": [",   ",",       "]"      },
-    [JC_CPEL]      = { 9, JC_CONSUMER,  "\n             \"pending\": [", ",",       "]"      },
+    /*                 level parent        open                             delim         close */
+    [JC_DOC]       = { 1,    0,            "",                              ",\n",        ""       },
+    [JC_AUX]       = { 2,    JC_DOC,       "",                              ",\n       ", "\n}"    },
+    [JC_FUNC]      = { 2,    JC_DOC,       "",                              ",\n",        "\n}"    },
+    [JC_DB]        = { 2,    JC_DOC,       "",                              ",\n",        ""       },
+    [JC_KEY]       = { 3,    JC_DB,        "    ",                          "",           ""       },
+    [JC_LIST]      = { 4,    JC_KEY,       "[",                             ",",          "]"      },
+    [JC_SET]       = { 4,    JC_KEY,       "[",                             ",",          "]"      },
+    [JC_HASH]      = { 4,    JC_KEY,       "{",                             ",",          "}"      },
+    [JC_ZSET]      = { 4,    JC_KEY,       "{",                             ",",          "}"      },
+    [JC_ARRAY]     = { 4,    JC_KEY,       "{",                             ",",          "]}"     },
+    [JC_STREAM]    = { 4,    JC_KEY,       "{",                             ",",          "}"      },
+    [JC_ENTRIES]   = { 5,    JC_STREAM,    "\n      \"entries\":[",         ",",          "]"      },
+    [JC_GROUPS]    = { 5,    JC_STREAM,    "\n      \"groups\": [\n",       ",\n",        "]"      },
+    [JC_IDMP]      = { 5,    JC_STREAM,    "\n      \"idmp\": {",           ",",          "}"      },
+    [JC_ENTRY]     = { 6,    JC_ENTRIES,   "\n        { ",                  "",           " }"     },
+    [JC_GROUP]     = { 6,    JC_GROUPS,    "        {",                     ",",          "}"      },
+    [JC_PRODUCERS] = { 6,    JC_IDMP,      "\n        \"producers\": [",    ",",          "]"      },
+    [JC_ITEMS]     = { 7,    JC_ENTRY,     "\"items\":{",                   ", ",         "}"      },
+    [JC_GPEL]      = { 7,    JC_GROUP,     "\n         \"pending\": [ ",    ",",          "]"      },
+    [JC_NACKED]    = { 7,    JC_GROUP,     "\n         \"nacked\": [",      ",",          "]"      },
+    [JC_CONSUMERS] = { 7,    JC_GROUP,     "\n         \"consumers\": [",   ",",          "]"      },
+    [JC_PRODUCER]  = { 7,    JC_PRODUCERS, "\n          {\"pid\": ",        ",",          "}"      },
+    [JC_CONSUMER]  = { 8,    JC_CONSUMERS, "\n           { ",               ",",          "}"      },
+    [JC_PENTRIES]  = { 8,    JC_PRODUCER,  "\n           \"entries\": [",   ",",          "]"      },
+    [JC_CPEL]      = { 9,    JC_CONSUMER,  "\n             \"pending\": [", ",",          "]"      },
 };
 
 struct RdbxToJson {
