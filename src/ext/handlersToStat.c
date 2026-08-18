@@ -26,8 +26,8 @@ typedef struct TopEntry {
     int            dbnum;
 } TopEntry;
 
-/* Per-data-type running aggregate (one instance per RDB_DATA_TYPE_*). */
-typedef struct TypeAgg {
+/* Per-data-type running stat totals (one instance per RDB_DATA_TYPE_*). */
+typedef struct TypeStat {
     uint64_t count;
     uint64_t bytes;
     uint64_t items;
@@ -37,7 +37,7 @@ typedef struct TypeAgg {
     uint64_t maxMem;
     Hist     itemsHist;
     Hist     memHist;
-} TypeAgg;
+} TypeStat;
 
 struct RdbxToStat {
     RdbxHandlersBase base;   /* MUST be first (shared callbacks cast userData) */
@@ -52,7 +52,7 @@ struct RdbxToStat {
     int topCap;
     int nTop;  /* top-N largest keys, kept as a min-heap (see heapTopInsert) */
     
-    TypeAgg typeAgg[RDB_DATA_TYPE_MAX]; /* Aggregate statistics per type */
+    TypeStat typeStat[RDB_DATA_TYPE_MAX]; /* Running stat totals per type */
 };
 
 /* Bucket-array bytes of a hashtable holding `n` entries: next-power-of-two slots
@@ -163,26 +163,26 @@ static void heapTopInsert(RdbxToStat *ctx) {
     }
 }
 
-static void aggregateKey(RdbxToStat *ctx) {
+static void updateTypeStat(RdbxToStat *ctx) {
     RdbxKeyCtx *kc = &ctx->base.keyCtx;
     int t = kc->info.dataType;
     ctx->dbKeys++;
     if (kc->info.expiretime != -1) ctx->dbExpires++;
     if (t >= 0 && t < RDB_DATA_TYPE_MAX) {
-        ctx->typeAgg[t].count++;
-        ctx->typeAgg[t].bytes += kc->memBytes;
-        ctx->typeAgg[t].items += kc->items;
-        if (kc->items > ctx->typeAgg[t].maxItems) 
-            ctx->typeAgg[t].maxItems = kc->items;
-        if (kc->memBytes > ctx->typeAgg[t].maxMem)   
-            ctx->typeAgg[t].maxMem   = kc->memBytes;
-        histAdd(&ctx->typeAgg[t].itemsHist, kc->items);
-        histAdd(&ctx->typeAgg[t].memHist, kc->memBytes);
+        ctx->typeStat[t].count++;
+        ctx->typeStat[t].bytes += kc->memBytes;
+        ctx->typeStat[t].items += kc->items;
+        if (kc->items > ctx->typeStat[t].maxItems) 
+            ctx->typeStat[t].maxItems = kc->items;
+        if (kc->memBytes > ctx->typeStat[t].maxMem)   
+            ctx->typeStat[t].maxMem   = kc->memBytes;
+        histAdd(&ctx->typeStat[t].itemsHist, kc->items);
+        histAdd(&ctx->typeStat[t].memHist, kc->memBytes);
         if (kc->info.expiretime != -1) {
-            ctx->typeAgg[t].nVolatile++;
+            ctx->typeStat[t].nVolatile++;
             ctx->volatileBytes += kc->memBytes;
             if ((uint64_t) kc->info.expiretime < ctx->nowMs)
-                ctx->typeAgg[t].nExpired++;
+                ctx->typeStat[t].nExpired++;
         }
     }
     heapTopInsert(ctx);
@@ -262,11 +262,11 @@ static void renderHistograms(RdbxToStat *ctx, const int *order, int nTypes) {
                "share = %% of type, cum%% = cumulative share):\n");
     for (int idx = 0; idx < nTypes; idx++) {
         int t = order[idx];
-        uint64_t total = ctx->typeAgg[t].count;   /* every key is recorded once */
+        uint64_t total = ctx->typeStat[t].count;   /* every key is recorded once */
         for (int which = 0; which < 2; which++) {
             int want = which ? RDBX_STAT_HIST_MEM : RDBX_STAT_HIST_ITEMS;
             if (!(ctx->histFlags & want)) continue;
-            const Hist *h = which ? &ctx->typeAgg[t].memHist : &ctx->typeAgg[t].itemsHist;
+            const Hist *h = which ? &ctx->typeStat[t].memHist : &ctx->typeStat[t].itemsHist;
             int any = 0;
             for (int i = 0; i < HIST_NBUCKETS && !any; i++) any = (h->bucket[i] != 0);
             if (!any) continue;
@@ -295,15 +295,15 @@ static void renderPretty(RdbxToStat *ctx) {
     int order[RDB_DATA_TYPE_MAX], nTypes = 0;
 
     for (int t = 0; t < RDB_DATA_TYPE_MAX; t++) {
-        if (!ctx->typeAgg[t].count) continue;
+        if (!ctx->typeStat[t].count) continue;
         order[nTypes++] = t;
-        totalKeys  += ctx->typeAgg[t].count;
-        totalBytes += ctx->typeAgg[t].bytes;
+        totalKeys  += ctx->typeStat[t].count;
+        totalBytes += ctx->typeStat[t].bytes;
     }
     /* sort type rows by memory desc (simple selection; <=9 rows) */
     for (int i = 0; i < nTypes; i++)
         for (int j = i + 1; j < nTypes; j++)
-            if (ctx->typeAgg[order[j]].bytes > ctx->typeAgg[order[i]].bytes) {
+            if (ctx->typeStat[order[j]].bytes > ctx->typeStat[order[i]].bytes) {
                 int tmp = order[i]; 
                 order[i] = order[j]; 
                 order[j] = tmp;
@@ -312,9 +312,9 @@ static void renderPretty(RdbxToStat *ctx) {
     uint64_t totalItems = 0, totalVol = 0, totalExp = 0;
     for (int i = 0; i < nTypes; i++) {
         int t = order[i];
-        totalItems += ctx->typeAgg[t].items;
-        totalVol   += ctx->typeAgg[t].nVolatile;
-        totalExp   += ctx->typeAgg[t].nExpired;
+        totalItems += ctx->typeStat[t].items;
+        totalVol   += ctx->typeStat[t].nVolatile;
+        totalExp   += ctx->typeStat[t].nExpired;
     }
 
     fprintf(o, "Statistics (Memory is estimated):\n");
@@ -327,21 +327,21 @@ static void renderPretty(RdbxToStat *ctx) {
             "avg", "p90", "p99", "max", "avg", "p90", "p99", "max");
     for (int i = 0; i < nTypes; i++) {
         int t = order[i];
-        uint64_t c = ctx->typeAgg[t].count, b = ctx->typeAgg[t].bytes, it = ctx->typeAgg[t].items;
+        uint64_t c = ctx->typeStat[t].count, b = ctx->typeStat[t].bytes, it = ctx->typeStat[t].items;
         double pct = totalBytes ? (b * 100.0 / totalBytes) : 0;
         fprintf(o, "  %-8s %12llu %13s %9llu %8llu %10s %5.1f%% %8s %8s %8s %8s %6s %6s %6s %7s\n",
                 rdbxTypeName(t), (unsigned long long) c, countOrDash(it),
-                (unsigned long long) ctx->typeAgg[t].nVolatile,
-                (unsigned long long) ctx->typeAgg[t].nExpired,
+                (unsigned long long) ctx->typeStat[t].nVolatile,
+                (unsigned long long) ctx->typeStat[t].nExpired,
                 human(b), pct,
                 human(c ? b / c : 0),
-                human(histPct(&ctx->typeAgg[t].memHist, c, 90)),
-                human(histPct(&ctx->typeAgg[t].memHist, c, 99)),
-                human(ctx->typeAgg[t].maxMem),
+                human(histPct(&ctx->typeStat[t].memHist, c, 90)),
+                human(histPct(&ctx->typeStat[t].memHist, c, 99)),
+                human(ctx->typeStat[t].maxMem),
                 humanCount(c ? it / c : 0),
-                humanCount(histPct(&ctx->typeAgg[t].itemsHist, c, 90)),
-                humanCount(histPct(&ctx->typeAgg[t].itemsHist, c, 99)),
-                humanCount(ctx->typeAgg[t].maxItems));
+                humanCount(histPct(&ctx->typeStat[t].itemsHist, c, 90)),
+                humanCount(histPct(&ctx->typeStat[t].itemsHist, c, 99)),
+                humanCount(ctx->typeStat[t].maxItems));
     }
     fprintf(o, "  %-8s %12llu %13llu %9llu %8llu %10s %6s %8s %8s %8s %8s %6s %6s %6s %7s\n\n", "TOTAL",
             (unsigned long long) totalKeys, (unsigned long long) totalItems,
@@ -445,9 +445,9 @@ static RdbRes toStatArrayElement(RdbParser *p, void *userData, uint64_t idx, Rdb
 static RdbRes toStatEndKey(RdbParser *p, void *userData) {
     RdbxToStat *ctx = userData;
 
-    if (ctx->base.keyCtx.skip == 0) {  /* aggregate types (strings handled at value) */
+    if (ctx->base.keyCtx.skip == 0) {  /* update stats (strings handled at value) */
         rdbxComputeMemBytes(&ctx->base.keyCtx);
-        aggregateKey(ctx);
+        updateTypeStat(ctx);
     }
     RDB_bulkCopyFree(p, ctx->base.keyCtx.key);
     ctx->base.keyCtx.key = NULL;
@@ -457,7 +457,7 @@ static RdbRes toStatEndKey(RdbParser *p, void *userData) {
 static RdbRes toStatString(RdbParser *p, void *userData, RdbBulk string) {
     RdbxToStat *ctx = userData;
     rdbxKeyCtxSetString(&ctx->base.keyCtx, string, RDB_bulkLen(p, string));
-    aggregateKey(ctx);
+    updateTypeStat(ctx);
     ctx->base.keyCtx.skip = 1;   /* fully handled here; don't re-handle at endKey */
     return RDB_OK;
 }
