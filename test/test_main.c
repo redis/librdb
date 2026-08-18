@@ -291,7 +291,8 @@ int main(int argc, char *argv[]) {
                         "  -f, --redis-folder <folder>      Specify the Redis folder to use for the tests\n"
                         "  -g, --test-group <group-prefix>  Selected test group to run\n"
                         "  -t, --test <filter>              Selected test to run\n"
-                        "  -v, --valgrind                   Run tests under valgrind";
+                        "  -v, --valgrind                   Run tests under valgrind\n"
+                        "  -s, --slow-tests                 Also run long-running tests (e.g. socket timeout/retry)";
 
 
 
@@ -308,6 +309,8 @@ int main(int argc, char *argv[]) {
             testFilter = argv[++i];
         } else if ((strcmp(argv[i], "-v") == 0 || strcmp(argv[i], "--valgrind") == 0)) {
             setValgrind();
+        } else if ((strcmp(argv[i], "-s") == 0 || strcmp(argv[i], "--slow-tests") == 0)) {
+            setRunSlowTests();
         } else {
             printf("Invalid argument: %s\n%s\n", argv[i], USAGE);
             exit(EXIT_FAILURE);

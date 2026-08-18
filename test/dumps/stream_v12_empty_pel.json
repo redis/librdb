@@ -1,0 +1,14 @@
+    "mystream":{
+      "entries":[ 
+        { "id":"1-1", "items":{"field1":"value1"} },
+        { "id":"2-1", "items":{"field2":"value2"} },
+        { "id":"3-1", "items":{"field3":"value3"} }],
+      "length": 3, 
+      "entriesAdded": 3, 
+      "firstID": "1-1", 
+      "lastID": "3-1", 
+      "maxDelEntryID": "0-0",
+      "groups": [
+        {"name": "mygroup", "lastid": "3-1", "entriesRead": 3,
+         "consumers": [
+           { "name": "consumer1", "activeTime": 1784539423913, "seenTime": 1784539423913}]}]}

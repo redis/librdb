@@ -75,8 +75,10 @@ def service():
 
         except Exception as e:
             logging.error(f"Error processing file: {file_path}, Error: {str(e)}")
-            print(f"Error: {str(e)}", file=sys.stderr)
-            sys.stderr.flush()
+            # Always reply with exactly one line so the reader stays in sync and
+            # never blocks; the caller treats this sentinel as a clean failure.
+            print("INVALID_JSON")
+            sys.stdout.flush()
             continue
 
 if __name__ == "__main__":

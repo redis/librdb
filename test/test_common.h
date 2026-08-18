@@ -44,6 +44,8 @@ void setRedisInstallFolder(const char *path);
 int getRedisPort(void);
 int getRedisTlsPort(void); /* Get TLS port (only valid after setupRedisServerTls) */
 void setValgrind(void);
+void setRunSlowTests(void);
+int isRunSlowTests(void); /* long-running tests run only when --slow-tests is passed */
 int setupRedisServer(const char *extraArgs, int useTls); /* Returns 1 on success, 0 on failure */
 const char *getTargetRedisVersion(int *major, int *minor); /* call only after setupRedisServer() */
 void teardownRedisServer(void);

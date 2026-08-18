@@ -1,3 +1,24 @@
+## [Unreleased]
+
+### New Features
+- **RDB v15 Support (Redis 8.10)**: accept format version 15 and parse the new
+  hinted hash templates, where a hash's field names are stored once per
+  template — either in a top-level `RDB_OPCODE_HASH_TEMPLATE` section referenced
+  by `RDB_TYPE_HASH_TMPL_LP_REF`/`_ARRAY_REF` (written by RDB save), or inlined
+  in the payload by `RDB_TYPE_HASH_TMPL_LP`/`_ARRAY` (written by `DUMP`, and
+  accepted from an RDB file as Redis's own loader does). Either form surfaces
+  through the existing hash callbacks (`handleHashField` at DATA level,
+  `handleHashPlain` at STRUCT level) — no new API.
+  - `--support-restore`: a REF-encoded hash points at the out-of-band template
+    section, so its bytes can't be RESTORE'd as-is. Against a v15+ target the
+    parser inlines the field names into a self-contained payload and emits
+    `RESTORE`, preserving the source encoding (`_LP_REF` → `_LP` with the values
+    listpack copied verbatim, `_ARRAY_REF` → `_ARRAY`) so the destination keeps
+    the same memory layout. Against an older target it falls back to `HSET`.
+  - New error codes `RDB_ERR_HASH_TMPL_INVLD`, `RDB_ERR_HASH_TMPL_UNKNOWN_ID`.
+    Template ids and declared field counts read off the wire no longer size
+    allocations, so a hand-crafted RDB can't crash the parser.
+
 ## [2.3.0] - 2026-06-03
 
 ### New Features

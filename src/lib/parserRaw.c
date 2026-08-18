@@ -31,6 +31,8 @@ static inline RdbStatus cbHandleFrag(RdbParser *p, BulkInfo *binfo);
 static inline RdbStatus cbHandleEnd(RdbParser *p);
 
 /* Aggregator of bulks for raw data until read entire key */
+static RdbStatus aggWriteRawString(RdbParser *p, const unsigned char *s, size_t len);
+static RdbStatus aggWriteTmplHeader(RdbParser *p, HashTemplate *t, int selfContainedType);
 static inline void aggReset(RdbParser *p); /* On new key or start of aux-module */
 static inline void aggFlushBulks(RdbParser *p);
 static inline void aggAllocFirstBulk(RdbParser *p);
@@ -1467,6 +1469,225 @@ RdbStatus elementRawArray(RdbParser *p) {
     }
 }
 
+/*** hash templates (v15): raw -> self-contained RESTORE ***/
+
+/* RDB_TYPE_HASH_TMPL_ARRAY_REF at raw level: [id][value_1]...[value_N] ->
+ * self-contained RDB_TYPE_HASH_TMPL_ARRAY payload for RESTORE. */
+RdbStatus elementRawHashTmplArrayRef(RdbParser *p) {
+    ElementCtx *ctx = &p->elmCtx;
+    enum { ST_HDR = 0, ST_NEXT };
+
+    switch (ctx->state) {
+        case ST_HDR: {
+            uint64_t id;
+            IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &id, NULL, NULL));
+
+            /*** ENTER SAFE STATE ***/
+
+            HashTemplate *t = hashTemplateGetById(p, id);
+            if (t == NULL) return RDB_STATUS_ERROR;
+
+            IF_NOT_OK_RETURN(aggWriteTmplHeader(p, t, RDB_TYPE_HASH_TMPL_ARRAY));
+            ctx->hashTmpl.tmpl = t;
+            ctx->hashTmpl.numFields = t->fieldCount;
+            ctx->hashTmpl.visitingField = 0;
+            updateElementState(p, ST_NEXT, 0);
+        }
+        /* fall-thru */
+        case ST_NEXT: {
+            while (ctx->hashTmpl.visitingField < ctx->hashTmpl.numFields) {
+                BulkInfo *valueBulk;
+                IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC_APP_BULK, NULL, &valueBulk));
+
+                /*** ENTER SAFE STATE ***/
+
+                IF_NOT_OK_RETURN(aggWriteRawString(p, valueBulk->ref, valueBulk->len));
+                ctx->hashTmpl.visitingField++;
+                updateElementState(p, ST_NEXT, 0);
+            }
+            return nextParsingElement(p, PE_RAW_END_KEY);
+        }
+        default:
+            RDB_reportError(p, RDB_ERR_HASH_TMPL_INVLD,
+                            "elementRawHashTmplArrayRef(): invalid state: %d", ctx->state);
+            return RDB_STATUS_ERROR;
+    }
+}
+
+/* RDB_TYPE_HASH_TMPL_LP_REF at raw level: listpack blob whose first entry is the
+ * template id and the rest are values -> self-contained RDB_TYPE_HASH_TMPL_LP
+ * payload for RESTORE. The self-contained LP values blob has the exact same
+ * layout as the REF blob (leading id entry + values), so it is copied verbatim
+ * after the field section - the LP encoding (and its memory cost) is preserved
+ * on the destination. The whole blob loads in one shot, so a single pass. */
+RdbStatus elementRawHashTmplLpRef(RdbParser *p) {
+    BulkInfo *lpBulk;
+    IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC_APP_BULK, NULL, &lpBulk));
+
+    /*** ENTER SAFE STATE ***/
+
+    unsigned char *lp = (unsigned char *) lpBulk->ref;
+    if (!lpValidateIntegrity(lp, lpBulk->len, p->deepIntegCheck, NULL, NULL)) {
+        RDB_reportError(p, RDB_ERR_HASH_TMPL_INVLD,
+                        "elementRawHashTmplLpRef(): listpack integrity check failed");
+        return RDB_STATUS_ERROR;
+    }
+
+    unsigned char *iter = lpFirst(lp);
+    unsigned int slen;
+    long long idVal;
+    if (iter == NULL || lpGetValue(iter, &slen, &idVal) != NULL || idVal < 0) {
+        RDB_reportError(p, RDB_ERR_HASH_TMPL_INVLD,
+                        "elementRawHashTmplLpRef(): missing/invalid template id entry");
+        return RDB_STATUS_ERROR;
+    }
+
+    HashTemplate *t = hashTemplateGetById(p, (uint64_t) idVal);
+    if (t == NULL) return RDB_STATUS_ERROR;
+
+    if (lpLength(lp) != t->fieldCount + 1) {
+        RDB_reportError(p, RDB_ERR_HASH_TMPL_INVLD,
+                        "elementRawHashTmplLpRef(): listpack has %lu entries, expected %llu",
+                        lpLength(lp), (unsigned long long) (t->fieldCount + 1));
+        return RDB_STATUS_ERROR;
+    }
+
+    IF_NOT_OK_RETURN(aggWriteTmplHeader(p, t, RDB_TYPE_HASH_TMPL_LP));
+    /* Emit the values listpack (id entry + values) verbatim. */
+    IF_NOT_OK_RETURN(aggWriteRawString(p, lp, lpBulk->len));
+
+    return nextParsingElement(p, PE_RAW_END_KEY);
+}
+
+/* RDB_TYPE_HASH_TMPL_LP / _ARRAY (self-contained) at raw level. The payload is
+ * already self-contained (field names inline, no template-section reference), so
+ * it is re-emitted structurally for RESTORE - the type byte and value encoding
+ * are preserved. Layout walked: [fields_fmt][field names][values]. String length
+ * prefixes are re-encoded canonically (as the REF raw handlers do). */
+RdbStatus elementRawHashTmplSelfContained(RdbParser *p) {
+    ElementCtx *ctx = &p->elmCtx;
+    ElementHashTmplCtx *h = &ctx->hashTmpl;
+    RawContext *rawCtx = &p->rawCtx;
+    enum { ST_FMT = 0, ST_FIELDS_RAW_LOOP, ST_VALUES_ARRAY, ST_VALUES_LP };
+
+    switch (ctx->state) {
+        case ST_FMT: {
+            uint64_t fmt, count = 0;
+            int hdrLen = 0, cntLen = 0;
+
+            /* Reserve room for both length words up front so the two reads stay
+             * contiguous. Status safely ignored: first bulk surely has room, and
+             * a maxRawSize failure is re-caught by the next checked call. */
+            aggMakeRoom(p, 18); /* worst case 9 bytes each for fmt + count */
+            IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &fmt, (unsigned char *) rawCtx->at, &hdrLen));
+
+            if (fmt == 1) {
+                /* FIELDS_RAW: [count] then count field-name strings. */
+                IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &count,
+                                            (unsigned char *) rawCtx->at + hdrLen, &cntLen));
+
+                /*** ENTER SAFE STATE ***/
+
+                IF_NOT_OK_RETURN(hashTmplValidateFieldCount(p, count, NULL));
+                IF_NOT_OK_RETURN(cbHandleBegin(p, DATA_SIZE_UNKNOWN_AHEAD));
+                IF_NOT_OK_RETURN(aggUpdateWritten(p, hdrLen + cntLen));
+                h->numFields = count;
+                h->visitingField = 0;
+                return updateElementState(p, ST_FIELDS_RAW_LOOP, 0);
+            }
+
+            if (fmt != 0) {
+                RDB_reportError(p, RDB_ERR_HASH_TMPL_INVLD,
+                                "Unknown hash-template fields format %llu",
+                                (unsigned long long) fmt);
+                return RDB_STATUS_ERROR;
+            }
+
+            /* FIELDS_LP: one listpack blob of field names. Read it so we can
+             * validate it and count the fields (needed for the ARRAY value
+             * section). */
+            BulkInfo *blobBulk;
+            IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC_APP_BULK, NULL, &blobBulk));
+
+            /*** ENTER SAFE STATE ***/
+
+            unsigned char *blob = (unsigned char *) blobBulk->ref;
+            if (blobBulk->len == 0 ||
+                !lpValidateIntegrity(blob, blobBulk->len, p->deepIntegCheck, NULL, NULL)) {
+                RDB_reportError(p, RDB_ERR_HASH_TMPL_INVLD,
+                                "elementRawHashTmplSelfContained(): field blob integrity check failed");
+                return RDB_STATUS_ERROR;
+            }
+            IF_NOT_OK_RETURN(hashTmplValidateFieldCount(p, lpLength(blob), NULL));
+
+            IF_NOT_OK_RETURN(cbHandleBegin(p, DATA_SIZE_UNKNOWN_AHEAD));
+            IF_NOT_OK_RETURN(aggUpdateWritten(p, hdrLen));  /* fields_fmt byte */
+            IF_NOT_OK_RETURN(aggWriteRawString(p, blob, blobBulk->len));
+            h->numFields = lpLength(blob);
+            h->visitingField = 0;
+            return updateElementState(p,
+                (p->currOpcode == RDB_TYPE_HASH_TMPL_LP) ? ST_VALUES_LP : ST_VALUES_ARRAY, 0);
+        }
+
+        case ST_FIELDS_RAW_LOOP: {
+            while (h->visitingField < h->numFields) {
+                BulkInfo *fieldBulk;
+                IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC_APP_BULK, NULL, &fieldBulk));
+
+                /*** ENTER SAFE STATE ***/
+
+                IF_NOT_OK_RETURN(aggWriteRawString(p, fieldBulk->ref, fieldBulk->len));
+                h->visitingField++;
+                updateElementState(p, ST_FIELDS_RAW_LOOP, 0);
+            }
+            h->visitingField = 0;
+            return updateElementState(p,
+                (p->currOpcode == RDB_TYPE_HASH_TMPL_LP) ? ST_VALUES_LP : ST_VALUES_ARRAY, 0);
+        }
+
+        case ST_VALUES_ARRAY: {
+            while (h->visitingField < h->numFields) {
+                BulkInfo *valueBulk;
+                IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC_APP_BULK, NULL, &valueBulk));
+
+                /*** ENTER SAFE STATE ***/
+
+                IF_NOT_OK_RETURN(aggWriteRawString(p, valueBulk->ref, valueBulk->len));
+                h->visitingField++;
+                updateElementState(p, ST_VALUES_ARRAY, 0);
+            }
+            return nextParsingElement(p, PE_RAW_END_KEY);
+        }
+
+        case ST_VALUES_LP: {
+            BulkInfo *lpBulk;
+            IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC_APP_BULK, NULL, &lpBulk));
+
+            /*** ENTER SAFE STATE ***/
+
+            unsigned char *lp = (unsigned char *) lpBulk->ref;
+            if (!lpValidateIntegrity(lp, lpBulk->len, p->deepIntegCheck, NULL, NULL)) {
+                RDB_reportError(p, RDB_ERR_HASH_TMPL_INVLD,
+                                "elementRawHashTmplSelfContained(): values listpack integrity check failed");
+                return RDB_STATUS_ERROR;
+            }
+            if (lpLength(lp) != h->numFields + 1) {
+                RDB_reportError(p, RDB_ERR_HASH_TMPL_INVLD,
+                                "elementRawHashTmplSelfContained(): listpack has %lu entries, expected %llu",
+                                lpLength(lp), (unsigned long long) (h->numFields + 1));
+                return RDB_STATUS_ERROR;
+            }
+            IF_NOT_OK_RETURN(aggWriteRawString(p, lp, lpBulk->len));
+            return nextParsingElement(p, PE_RAW_END_KEY);
+        }
+
+        default:
+            RDB_reportError(p, RDB_ERR_HASH_TMPL_INVLD,
+                            "elementRawHashTmplSelfContained(): invalid state: %d", ctx->state);
+            return RDB_STATUS_ERROR;
+    }
+}
+
 /*** various functions ***/
 
 static inline RdbStatus cbHandleFrag(RdbParser *p, BulkInfo *binfo) {
@@ -1606,6 +1827,55 @@ static RdbStatus singleStringTypeHandling(RdbParser *p,
 }
 
 /*** raw aggregator of data ***/
+
+/* Write an RDB length-encoded integer into the raw aggregation buffer. */
+static RdbStatus aggWriteLen(RdbParser *p, uint64_t len) {
+    unsigned char buf[9];
+    int n;
+    if (len < (1 << 6)) {
+        buf[0] = (RDB_6BITLEN << 6) | (len & 0xFF);
+        n = 1;
+    } else if (len < (1 << 14)) {
+        buf[0] = (RDB_14BITLEN << 6) | ((len >> 8) & 0xFF);
+        buf[1] = len & 0xFF;
+        n = 2;
+    } else if (len <= UINT32_MAX) {
+        buf[0] = RDB_32BITLEN;
+        buf[1] = (len >> 24) & 0xFF; buf[2] = (len >> 16) & 0xFF;
+        buf[3] = (len >> 8) & 0xFF;  buf[4] = len & 0xFF;
+        n = 5;
+    } else {
+        buf[0] = RDB_64BITLEN;
+        for (int i = 0; i < 8; i++) buf[1 + i] = (len >> (56 - 8 * i)) & 0xFF;
+        n = 9;
+    }
+    IF_NOT_OK_RETURN(aggMakeRoom(p, n));
+    memcpy(p->rawCtx.at, buf, n);
+    return aggUpdateWritten(p, n);
+}
+
+/* Write an RDB string (length prefix + raw bytes) into the aggregation buffer. */
+static RdbStatus aggWriteRawString(RdbParser *p, const unsigned char *s, size_t len) {
+    IF_NOT_OK_RETURN(aggWriteLen(p, len));
+    IF_NOT_OK_RETURN(aggMakeRoom(p, len));
+    memcpy(p->rawCtx.at, s, len);
+    return aggUpdateWritten(p, len);
+}
+
+/* Rewrite the already-aggregated REF type byte to 'selfContainedType' and
+ * append the self-contained field section: [fields_fmt=1(FIELDS_RAW)][count]
+ * [field_1]...[field_N]. Values are appended by the caller. The output form
+ * matches the source REF form (LP_REF->LP, ARRAY_REF->ARRAY) so the destination
+ * keeps the same memory encoding. */
+static RdbStatus aggWriteTmplHeader(RdbParser *p, HashTemplate *t, int selfContainedType) {
+    p->rawCtx.at[-1] = (char) selfContainedType; /* was the *_REF type byte */
+    IF_NOT_OK_RETURN(cbHandleBegin(p, DATA_SIZE_UNKNOWN_AHEAD));
+    IF_NOT_OK_RETURN(aggWriteLen(p, 1));                /* fields_fmt = FIELDS_RAW */
+    IF_NOT_OK_RETURN(aggWriteLen(p, t->fieldCount));
+    for (uint64_t i = 0; i < t->fieldCount; i++)
+        IF_NOT_OK_RETURN(aggWriteRawString(p, t->fields[i], t->fieldLens[i]));
+    return RDB_STATUS_OK;
+}
 
 static RdbStatus aggUpdateWritten(RdbParser *p, size_t bytesWritten) {
     RawContext *ctx = &p->rawCtx;
