@@ -701,45 +701,46 @@ void start_json_sign_service(void) {
     }
 }
 
+/* Send a file path to the signature service and read back its one-line reply
+ * (a SHA256 signature, or the "INVALID_JSON" sentinel for unparseable input).
+ * Trailing newline is stripped. Returns bytes read, or <= 0 on EOF/error. */
+static ssize_t requestJsonSignature(const char *filename, char *out, size_t outSize) {
+    char buffer[BUFFER_SIZE];
+    snprintf(buffer, BUFFER_SIZE, "%s\n", filename);
+    write(pipe_in[1], buffer, strlen(buffer));
+
+    ssize_t n = read(pipe_out[0], out, outSize - 1);
+    if (n <= 0) return n;
+    out[n] = '\0';
+    while (n > 0 && (out[n - 1] == '\n' || out[n - 1] == '\r')) out[--n] = '\0';
+    return n;
+}
+
 int cmp_json_signatures(const char* filename1, const char* filename2) {
     /* Run service if not already running */
     if (pid == -1)
         start_json_sign_service();
 
-    char buffer[BUFFER_SIZE];
-    snprintf(buffer, BUFFER_SIZE, "%s\n", filename1);
-    write(pipe_in[1], buffer, strlen(buffer));
+    char signature1[BUFFER_SIZE], signature2[BUFFER_SIZE];
 
-    ssize_t bytes_read = read(pipe_out[0], buffer, BUFFER_SIZE - 1);
-    if (bytes_read <= 0) {
-        perror("read");
+    /* The service always replies with exactly one line per request, so reads
+     * stay in sync and never block - even when a file isn't valid JSON. */
+    if (requestJsonSignature(filename1, signature1, sizeof(signature1)) <= 0 ||
+        requestJsonSignature(filename2, signature2, sizeof(signature2)) <= 0) {
+        printf("Error: JSON signature service returned no output\n");
         return 0;
     }
-    buffer[bytes_read] = '\0'; /* Null-terminate the string */
-    char signature1[BUFFER_SIZE];
-    strcpy(signature1, buffer);
 
-    snprintf(buffer, BUFFER_SIZE, "%s\n", filename2);
-    write(pipe_in[1], buffer, strlen(buffer));
-
-    bytes_read = read(pipe_out[0], buffer, BUFFER_SIZE - 1);
-
-    /* Verify that the signature is of the expected length (SHA256) */
-    if (bytes_read != 65) {
-        printf("strlen(buffer)=%ld %s\n", strlen(buffer), buffer);
-        perror("read");
+    if (strcmp(signature1, "INVALID_JSON") == 0) {
+        printf("Error: '%s' is not valid JSON\n", filename1);
         return 0;
     }
-    buffer[bytes_read] = '\0'; /* Null-terminate the string */
-    char signature2[BUFFER_SIZE];
-    strcpy(signature2, buffer);
-
-    /* Compare signatures */
-    if (strcmp(signature1, signature2) == 0) {
-        return 1;
-    } else {
+    if (strcmp(signature2, "INVALID_JSON") == 0) {
+        printf("Error: '%s' is not valid JSON\n", filename2);
         return 0;
     }
+
+    return strcmp(signature1, signature2) == 0;
 }
 
 void cleanup_json_sign_service(void) {
