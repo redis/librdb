@@ -282,6 +282,7 @@ destruction, or when newer block replacing old one.
     
     FORMAT_OPTIONS ('stat'):
             -t, --top <N>                 Show the top N keys by estimated memory (Default: 10)
+            -h, --histogram <0|1|2>       Append full per-type histograms: 0=items/key, 1=memory/key, 2=both
     
     FORMAT_OPTIONS ('json'):
             -i, --include <EXTRAS>        To include: {aux-val|func|stream-meta|db-info}
