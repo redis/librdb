@@ -16,6 +16,7 @@ typedef struct RdbxFilter RdbxFilter;
 typedef struct RdbxToJson RdbxToJson;
 typedef struct RdbxToResp RdbxToResp;
 typedef struct RdbxToPrint RdbxToPrint;
+typedef struct RdbxToStat RdbxToStat;
 typedef struct RdbxRespToRedisLoader RdbxRespToRedisLoader;
 
 /****************************************************************
@@ -122,12 +123,40 @@ _LIBRDB_API RdbxToJson *RDBX_createHandlersToJson(RdbParser *p,
  *          %r = LRU
  *          %f = LFU
  *          %i = Items
+ *          %n = Encoding
+ *          %z = Estimated in-memory size in bytes
+ *          %g = Size in bytes of the largest element
  *
  ****************************************************************/
 _LIBRDB_API RdbxToPrint *RDBX_createHandlersToPrint(RdbParser *p,
                                                     const char *auxFmt,
                                                     const char *keyFmt,
                                                     const char *outFilename);
+
+/****************************************************************
+ * Create STAT Handlers
+ *
+ * Aggregates while parsing and, on end-of-RDB, prints a built-in, human-formatted
+ * memory-statistics report (estimated):
+ *   - a by-type table: keys, items, volatile, expired, mem, mem%, and the
+ *     avg/p90/p99/max of both items-per-key and memory-per-key, + a TOTAL row
+ *   - the top `topN` keys by estimated memory (topN <= 0 => default 10)
+ *   - an appendix dumping every non-empty bucket of the per-type histograms, for
+ *     whichever of the RDBX_STAT_HIST_* histograms are selected in `flags`
+ *
+ * `nowSecs` is the reference Unix time in seconds used to decide whether a key with
+ * an expiry is already expired; pass 0 to use the current wall-clock time.
+ *
+ * Memory use is bounded (per-type aggregates + the top-N buffer), independent of
+ * the number of keys in the dump. Output goes to outFilename (NULL => stdout).
+ ****************************************************************/
+#define RDBX_STAT_HIST_ITEMS  (1 << 0)   /* `flags`: append items-per-key histograms  */
+#define RDBX_STAT_HIST_MEM    (1 << 1)   /* `flags`: append memory-per-key histograms */
+_LIBRDB_API RdbxToStat *RDBX_createHandlersToStat(RdbParser *p,
+                                                  int topN,
+                                                  long long nowSecs,
+                                                  int flags,
+                                                  const char *outFilename);
 
 /****************************************************************
  * Create Filter Handlers
@@ -145,7 +174,9 @@ _LIBRDB_API RdbxFilter *RDBX_createHandlersFilterDbNum(RdbParser *p,
                                                        int dbnum,
                                                        uint32_t exclude);
 
+/* `nowSecs` is Unix time to decide if a key is expired. Pass 0 to use current time */
 _LIBRDB_API RdbxFilter *RDBX_createHandlersFilterExpired(RdbParser *p,
+                                                         long long nowSecs,
                                                          uint32_t exclude);
 
 /****************************************************************

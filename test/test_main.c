@@ -336,6 +336,7 @@ int main(int argc, char *argv[]) {
     RUN_TEST_GROUP(group_rdb_to_resp);
     RUN_TEST_GROUP(group_misc);
     RUN_TEST_GROUP(group_rdb_to_json);
+    RUN_TEST_GROUP(group_rdb_to_mem_stat); /*external (live drift sub-test)*/
     RUN_TEST_GROUP(group_mem_management);
     RUN_TEST_GROUP(group_bulk_ops);
     RUN_TEST_GROUP(group_pause);

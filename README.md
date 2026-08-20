@@ -1,6 +1,6 @@
 # librdb
 
-This is C library for parsing RDB files.
+This is a C library for parsing RDB files.
 
 The Parser is implemented in the spirit of SAX parser. It fires off a series of events as
 it reads the RDB file from beginning to end, and callbacks to handlers registered on
@@ -52,9 +52,33 @@ To run CLI extension of this library and let it parse RDB file to json:
 
 To generate formatted print:
 
-    rdb-cli dump.rdb print --key "db%d,%k,%v"
-    db0,key1,value1
-    db0,key2,value2
+    rdb-cli dump.rdb print --key "db=%d,key=%k,type=%t,enc=%n,bytes=%z,largest=%g,count=%i"
+    db=0,key=mylist,type=list,enc=quicklist,bytes=116,largest=2,count=2
+    db=0,key=myhash,type=hash,enc=listpack,bytes=240,largest=7,count=6
+    db=0,key=myset,type=set,enc=intset,bytes=96,largest=10,count=6
+    ...
+
+To print a formatted memory statistics report (add --histogram for a more detailed breakdown of each type’s distribution):
+
+    rdb-cli dump.rdb stat
+    Statistics (Memory is estimated):
+                                        [     Expiry     ] [     Memory    ] [          Memory per key         ] [      Items per key       ]
+    type             keys         items  volatile  expired        mem   mem%      avg      p90      p99      max    avg    p90    p99     max
+    hash          1560278      81456780         0        0       6.9G  73.2%     4.6K    15.0K    36.0K    98.0K     52     88    352    1.2K
+    set           7651482      27952535         3        3       1.7G  17.7%     232B     144B     144B    61.2M      3      1      4    1.4M
+    list          6017862       7906342         0        0     811.7M   8.5%     141B     144B     176B     2.1M      1      1      5    4.2K
+    string         106018             -         2        2      65.1M   0.7%     644B     704B     704B     1.0M      -      -      -       -
+    stream              1           948         0        0      22.3K   0.0%    22.3K    22.0K    22.0K    22.0K    948    960    960     960
+    TOTAL        15335641     117316605         5        5       9.4G
+    Volatile keys hold 2.0K (0.0% of memory)
+    Estimated keyspace tables (dict overhead): 192.0M
+    Estimated dataset memory: 9.3G (objects + tables; excludes server/client/frag)
+
+    Top 10 keys by memory:
+          memory type        db        items   avg item      ttl  key
+           61.2M set          0      1369515        46B     none  App:AccessGroup:001
+           57.4M set          0      1290404        46B     none  App:EntityIndex:All
+           38.2M hash         0       858814        46B     none  App:EntityMetadata:002
     ...
 
 To generate RESP commands:
@@ -77,6 +101,33 @@ To run against live Redis server and upload RDB file, assuming Redis is installe
     4) "mylist1"
     5) "string1"
     6) "lzf_compressed"
+
+## Memory by key prefix, as a flame graph
+
+For a per-namespace view of where memory goes, render a flame graph with Brendan
+Gregg's [`flamegraph.pl`](https://github.com/brendangregg/FlameGraph): stream the
+estimated size of every key into it and let it do the aggregation.
+
+    SEP=":"   # key-namespace separator to split on (e.g. "foo:bar:baz")
+
+    rdb-cli /path/to/rdb-file print --key "%z %k" \
+    | awk -v sep="$SEP" '{
+        size = $1                 # first field is the memory size in bytes
+        $1   = ""                 # drop the size, leaving just the key
+        sub(/^ /, "")             # strip the leading space left behind
+        gsub(/;/, "_")            # escape literal ";" (flame graph frame separator)
+        gsub(sep, ";")            # split the key on SEP into flame-graph frames
+        print $0 " " size         # emit: folded.stack<space>count
+    }' \
+    | flamegraph.pl --title "Keyspace memory" --countname bytes \
+    > /tmp/keys.svg && xdg-open /tmp/keys.svg
+
+Each frame is a `SEP`-delimited key prefix, and its width is proportional to the
+memory of everything beneath it, so the largest namespaces stand out at a glance:
+
+![Keyspace memory flame graph](docs/keyspace-flamegraph.svg)
+
+Swap `%z` for `%i` to weight by item count instead of estimated memory.
 
 ## Motivation behind this project
 There is a genuine need by the Redis community for a versatile RDB file parser that can
@@ -129,9 +180,9 @@ another framework, then we better register our callbacks at level2.
 
 ### Handlers
 The **Handlers** represent a set of builtin or user-defined functions that will 
-be called on the parsed data. Currently, librdb supports 2 built-in Handlers that 
-converts to JSON and RESSP and one extension to RESP handlers that in addition 
-can play it against live server.
+be called on the parsed data. Currently, librdb ships built-in Handlers that convert
+to JSON, RESP, a formatted print, and a memory-statistics report, plus an extension
+to the RESP handlers that in addition can play it against a live server.
 
 It is possible to attach to parser more than one set of handlers at the same level.
 That is, for a given data at a given level, the parser will call each of the handlers that
@@ -207,7 +258,7 @@ destruction, or when newer block replacing old one.
 
 ### rdb-cli usage
 
-    Usage: rdb-cli /path/to/dump.rdb [OPTIONS] {print|json|resp|redis} [FORMAT_OPTIONS]
+    Usage: rdb-cli /path/to/dump.rdb [OPTIONS] {print|json|resp|redis|stat} [FORMAT_OPTIONS]
     OPTIONS:
             -l, --log-file <PATH>         Path to the log file or stdout (Default: './rdb-cli.log')
             -i, --ignore-checksum         Ignore RDB file checksum verification
@@ -220,15 +271,23 @@ destruction, or when newer block replacing old one.
             -D, --no-dbnum <DBNUM>        Exclude DB number
             -e, --expired                 Include only expired keys
             -E, --no-expired              Exclude expired keys
+            -n, --now <UNIX-TIME-SEC>     Reference time for expiry evaluation (Default: now)
 
     FORMAT_OPTIONS ('print'):
             -a, --aux-val <FMT>           %f=Auxiliary-Field, %v=Auxiliary-Value (Default: "")
             -k, --key <FMT>               %d=Db %k=Key %v=Value %t=Type %e=Expiry %r=LRU %f=LFU
-                                          %i=Items %m=NumMeta (Default: "%d,%k,%v,%t,%e,%i")
+                                          %i=Items %m=NumMeta %n=Encoding %z=MemBytes(estimate) %g=LargestElement
+                                          Specifiers accept optional width, e.g. %-20k %10z (Default: "%d,%k,%v,%t,%e,%i")
             -o, --output <FILE>           Specify the output file. If not specified, output to stdout
     
+    FORMAT_OPTIONS ('stat'):
+            -t, --top <N>                 Show the top N keys by estimated memory (Default: 10)
+            -h, --histogram <0|1|2>       Append full per-type histograms: 0=items/key, 1=memory/key, 2=both
+    
     FORMAT_OPTIONS ('json'):
-            -i, --include <EXTRAS>        To include: {aux-val|func|stream-meta}
+            -i, --include <EXTRAS>        To include: {aux-val|func|stream-meta|db-info}
+            -m, --meta-prefix <PREFIX>    To distinct EXTRAS from actual data, Prefix it (Default:"__")
+            -e, --encoding <ENC>          Encoding: {plain|utf8} plain escapes non-ASCII as \u00XX (Default: plain)
             -f, --flatten                 Print flatten json, without DBs Parenthesis
             -o, --output <FILE>           Specify the output file. If not specified, output to stdout
     
@@ -239,6 +298,23 @@ destruction, or when newer block replacing old one.
             -u, --user <USER>             Redis username for authentication
             -P, --password <PWD>          Redis password for authentication (or use LIBRDB_AUTH env var)
             -a, --auth N [ARG1 ... ARGN]  An alternative authentication command. Given as vector of arguments
+            ------------ TLS - Available only when built with `BUILD_TLS=yes` ------------------------------
+            --tls                         Enable TLS/SSL connection
+            --sni <HOSTNAME>              Server Name Indication for TLS handshake
+            --cacert <FILE>               Path to CA certificate file for server verification
+            --cacertdir <DIR>             Path to directory containing CA certificates
+                                          If neither cacert nor cacertdir are specified, the default
+                                          system-wide trusted root certs configuration will apply.
+            --insecure                    Skip server certificate verification (not recommended)
+            --cert <FILE>                 Path to client certificate file (for mutual TLS)
+            --key <FILE>                  Path to client private key file (for mutual TLS)
+            --tls-ciphers <LIST>          Sets the list of preferred ciphers (TLSv1.2 and below)
+                                          in order of preference from highest to lowest separated by colon (":")
+                                          See the ciphers(1ssl) manpage for more information about the syntax.
+            --tls-ciphersuites <LIST>     Sets the list of preferred ciphersuites (TLSv1.3)
+                                          in order of preference from highest to lowest separated by colon (":")
+                                          See the ciphers(1ssl) manpage for TLSv1.3 ciphersuites syntax.
+            ------------------------------------------------------------------------------------------------
     
     FORMAT_OPTIONS ('redis'|'resp'):
             -r, --support-restore         Use the RESTORE command when possible
