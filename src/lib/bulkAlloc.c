@@ -415,6 +415,8 @@ static inline RdbBulk bulkHeapAlloc(RdbParser *p, size_t size) {
 }
 
 static inline void bulkHeapDecrRef(RdbParser *p, RdbBulk b) {
+    /* A failed bulkHeapAlloc() leaves a NULL ref queued as BULK_TYPE_HEAP */
+    if (b == NULL) return;
     BulkHeapHdr *header = (BulkHeapHdr *)b - 1;
     assert(header->magic == BULK_MAGIC);
     if (--header->refcount == 0) {
