@@ -1,4 +1,4 @@
-## [Unreleased]
+## [2.4.0] - 2026-10-05
 
 ### New Features
 - **RDB v15 Support (Redis 8.10)**: accept format version 15 and parse the new
@@ -18,6 +18,23 @@
   - New error codes `RDB_ERR_HASH_TMPL_INVLD`, `RDB_ERR_HASH_TMPL_UNKNOWN_ID`.
     Template ids and declared field counts read off the wire no longer size
     allocations, so a hand-crafted RDB can't crash the parser.
+- **JSON UTF-8 Encoding**: Add opt-in UTF-8 output encoding for JSON conversion (#102)
+  - New `RDBX_CONV_JSON_ENC_UTF8` value for `RdbxToJsonConf.encoding`; CLI
+    `-e/--encoding {plain|utf8}`. Well-formed UTF-8 sequences pass through
+    verbatim, any other byte still escapes as `\u00XX`, so binary values
+    remain valid, lossless JSON. Default stays `plain`.
+
+### Bug Fixes
+- **Networking**: Retry RESP loader socket writes on send timeout (#104)
+  - Mirrors the recv() side: set `SO_SNDTIMEO`, retry `EAGAIN` while the
+    transfer makes progress, and fail only after consecutive zero-progress
+    windows. Fixes multi-GB `RESTORE` syncs aborting when the destination
+    briefly stops draining the socket.
+- **JSON Output**: Fix stream consumer-group emission when the pending-entries
+  list is empty, and replace hand-counted closing brackets with a container
+  stack so nesting balances by construction (#105)
+- **JSON Output**: Fix undefined behaviour in the plain encoding path where a
+  possibly-negative `char` was passed to `isprint()` (#102)
 
 ## [2.3.0] - 2026-06-03
 
