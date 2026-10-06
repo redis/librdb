@@ -52,6 +52,7 @@ void teardownRedisServer(void);
 void cleanup_json_sign_service(void);
 int isSetRedisServer(void);
 char *sendRedisCmd(const char *cmd, int expRetType, char *expRsp);
+void sendRedisCmdLoop(const char *cmdFmt, int n); /* send cmd n times, substituting index 0..n-1 into %d */
 int isSupportRestoreModuleAux(void);
 
 /* TLS Support */
@@ -65,6 +66,7 @@ int group_rdb_to_resp(void);
 int group_examples(void);
 int group_main(void);
 int group_rdb_to_json(void);
+int group_rdb_to_mem_stat(void);
 int group_mem_management(void);
 int group_pause(void);
 int group_bulk_ops(void);

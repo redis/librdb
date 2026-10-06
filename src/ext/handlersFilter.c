@@ -12,6 +12,7 @@ struct RdbxFilter {
     int regexInitialized;  /* for filter keys */
     RdbDataType type;      /* for filter types */
     int isExpireFilter;   /* for filter expired */
+    long long nowMs;      /* for filter expired: reference time in ms; 0 => wall-clock */
     int dbnum;             /* for filter db */
 };
 
@@ -52,9 +53,12 @@ static RdbRes filterNewKeyByExpiry(RdbParser *p, void *userData, RdbBulk key, Rd
     if (info->expiretime == -1)
         return ctx->cbReturnValue = (ctx->exclude) ? RDB_OK : RDB_OK_DONT_PROPAGATE;
 
-    struct timeval te;
-    gettimeofday(&te, NULL);
-    long long milliseconds = te.tv_sec*1000LL + te.tv_usec/1000;
+    long long milliseconds = ctx->nowMs;
+    if (milliseconds == 0) {
+        struct timeval te;
+        gettimeofday(&te, NULL);
+        milliseconds = te.tv_sec*1000LL + te.tv_usec/1000;
+    }
 
     if (info->expiretime > milliseconds)
         return ctx->cbReturnValue = (ctx->exclude) ? RDB_OK : RDB_OK_DONT_PROPAGATE;
@@ -379,6 +383,7 @@ static RdbxFilter *createHandlersFilterCommon(RdbParser *p,
                                               RdbDataType *type,
                                               int *dbnum,
                                               int isExpireFilter,
+                                              long long nowSecs,
                                               uint32_t exclude) {
     RdbRes (*handleNewKey)(RdbParser *p, void *userData, RdbBulk key, RdbKeyInfo *info) = filterNewKey;
     RdbRes (*handleNewDb)(RdbParser *p, void *userData,  int dbnum) = filterNewDb;
@@ -407,6 +412,7 @@ static RdbxFilter *createHandlersFilterCommon(RdbParser *p,
         handleNewKey = filterNewKeyByType;
     } else if (isExpireFilter) {
         ctx->isExpireFilter = 1;
+        ctx->nowMs = nowSecs * 1000LL;
         handleNewKey = filterNewKeyByExpiry;
     } else {  /* filter by dbnum */
         ctx->dbnum = *dbnum;
@@ -451,17 +457,17 @@ static RdbxFilter *createHandlersFilterCommon(RdbParser *p,
 /*** API ***/
 
 _LIBRDB_API RdbxFilter *RDBX_createHandlersFilterKey(RdbParser *p, const char *keyRegex, uint32_t exclude) {
-    return createHandlersFilterCommon(p, keyRegex, NULL, NULL, 0, exclude);
+    return createHandlersFilterCommon(p, keyRegex, NULL, NULL, 0, 0, exclude);
 }
 
 _LIBRDB_API RdbxFilter *RDBX_createHandlersFilterType(RdbParser *p, RdbDataType type, uint32_t exclude) {
-    return createHandlersFilterCommon(p, NULL, &type, NULL, 0, exclude);
+    return createHandlersFilterCommon(p, NULL, &type, NULL, 0, 0, exclude);
 }
 
 _LIBRDB_API RdbxFilter *RDBX_createHandlersFilterDbNum(RdbParser *p, int dbnum, uint32_t exclude) {
-    return createHandlersFilterCommon(p, NULL, NULL, &dbnum, 0, exclude);
+    return createHandlersFilterCommon(p, NULL, NULL, &dbnum, 0, 0, exclude);
 }
 
-_LIBRDB_API RdbxFilter *RDBX_createHandlersFilterExpired(RdbParser *p, uint32_t exclude) {
-    return createHandlersFilterCommon(p, NULL, NULL, NULL, 1, exclude);
+_LIBRDB_API RdbxFilter *RDBX_createHandlersFilterExpired(RdbParser *p, long long nowSecs, uint32_t exclude) {
+    return createHandlersFilterCommon(p, NULL, NULL, NULL, 1, nowSecs, exclude);
 }

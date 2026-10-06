@@ -19,6 +19,9 @@
 FILE* logfile = NULL;
 #define LOG_FILE_PATH_DEF "./rdb-cli.log"
 
+/* Reference Unix time (sec) for expiry evaluation */
+long long nowSecs = 0;
+
 /* common options to all FORMATTERS */
 typedef struct Options {
     const char *logfilePath;
@@ -108,7 +111,7 @@ static void printUsage(int shortUsage) {
         return;
     }
     printf("[v%s] ", RDB_getLibVersion(NULL,NULL,NULL));
-    printf("Usage: rdb-cli /path/to/dump.rdb [OPTIONS] {print|json|resp|redis} [FORMAT_OPTIONS]\n");
+    printf("Usage: rdb-cli /path/to/dump.rdb [OPTIONS] {print|json|resp|redis|stat} [FORMAT_OPTIONS]\n");
     printf("OPTIONS:\n");
     printf("\t-l, --log-file <PATH>         Path to the log file or stdout (Default: './rdb-cli.log')\n");
     printf("\t-i, --ignore-checksum         Ignore RDB file checksum verification\n");
@@ -120,13 +123,19 @@ static void printUsage(int shortUsage) {
     printf("\t-d, --dbnum <DBNUM>           Include only selected db number\n");
     printf("\t-D, --no-dbnum <DBNUM>        Exclude DB number\n");
     printf("\t-e, --expired                 Include only expired keys\n");
-    printf("\t-E, --no-expired              Exclude expired keys\n\n");
+    printf("\t-E, --no-expired              Exclude expired keys\n");
+    printf("\t-n, --now <UNIX-TIME-SEC>     Reference time for expiry evaluation (Default: now)\n\n");
 
     printf("FORMAT_OPTIONS ('print'):\n");
     printf("\t-a, --aux-val <FMT>           %%f=Auxiliary-Field, %%v=Auxiliary-Value (Default: \"\") \n");
     printf("\t-k, --key <FMT>               %%d=Db %%k=Key %%v=Value %%t=Type %%e=Expiry %%r=LRU %%f=LFU\n");
-    printf("\t                              %%i=Items %%m=NumMeta (Default: \"%%d,%%k,%%v,%%t,%%e,%%i\")\n");
+    printf("\t                              %%i=Items %%m=NumMeta %%n=Encoding %%z=MemBytes(estimate) %%g=LargestElement\n");
+    printf("\t                              Specifiers accept optional width, e.g. %%-20k %%10z (Default: \"%%d,%%k,%%v,%%t,%%e,%%i\")\n");
     printf("\t-o, --output <FILE>           Specify the output file. If not specified, output to stdout\n\n");
+
+    printf("FORMAT_OPTIONS ('stat'):\n");
+    printf("\t-t, --top <N>                 Show the top N keys by estimated memory (Default: 10)\n");
+    printf("\t-h, --histogram <0|1|2>       Append full per-type histograms: 0=items/key, 1=memory/key, 2=both\n\n");
 
     printf("FORMAT_OPTIONS ('json'):\n");
     printf("\t-i, --include <EXTRAS>        To include: {aux-val|func|stream-meta|db-info}\n");
@@ -173,7 +182,7 @@ static void printUsage(int shortUsage) {
     printf("\t                              aligned the parser will generate higher-level commands instead.\n");
     printf("\t-o, --output <FILE>           Specify the output file (For 'resp' only: if not specified, output to stdout)\n");
     printf("\t-1, --single-db               Avoid SELECT command. DBs in RDB will be stored to db 0. Watchout for conflicts\n");
-    printf("\t-n, --start-cmd-num <NUM>     Start writing redis from command number\n");
+    printf("\t-s, --start-cmd-num <NUM>     Start writing redis from command number\n");
     printf("\t-e, --enum-commands           Command enumeration and tracing by preceding each generated RESP command\n");
     printf("\t                              with debug command of type: `SET _RDB_CLI_CMD_ID_ <CMD-ID>`\n");
     printf("\t    --scripts-in-aux          For auxiliary field \"lua\", Apply `SCRIPT LOAD <aux-val>` (For RedisEnt.)\n");
@@ -248,6 +257,32 @@ static RdbRes formatPrint(RdbParser *parser, int argc, char **argv) {
     }
 
     if (RDBX_createHandlersToPrint(parser, auxFmt, keyFmt, output) == NULL)
+        return RDB_ERR_GENERAL;
+
+    return RDB_OK;
+}
+
+static RdbRes formatStat(RdbParser *parser, int argc, char **argv) {
+    const char *topArg;
+    int topN = 0;          /* 0 => handler default (10)         */
+    int flags = 0, histSet = 0, histWhich = 0;   /* histWhich: 0=items 1=memory 2=both */
+
+    /* parse specific command options */
+    for (int at = 1; at < argc; ++at) {
+        char *opt = argv[at];
+        if (getOptArg(argc, argv, &at, "-t", "--top", NULL, &topArg)) { topN = atoi(topArg); continue; }
+        if (getOptArgVal(argc, argv, &at, "-h", "--histogram", &histSet, &histWhich, 0, 2)) continue;
+        loggerWrap(RDB_LOG_ERR, "Invalid 'stat' [FORMAT_OPTIONS] argument: %s\n", opt);
+        printUsage(1);
+        return RDB_ERR_GENERAL;
+    }
+
+    if (histSet) {
+        if (histWhich != 1) flags |= RDBX_STAT_HIST_ITEMS;   /* 0=items, 2=both */
+        if (histWhich != 0) flags |= RDBX_STAT_HIST_MEM;     /* 1=memory, 2=both */
+    }
+
+    if (RDBX_createHandlersToStat(parser, topN, nowSecs, flags, NULL) == NULL)
         return RDB_ERR_GENERAL;
 
     return RDB_OK;
@@ -467,7 +502,7 @@ int matchRdbDataType(const char *dataTypeStr) {
 }
 
 int readCommonOptions(RdbParser *p, int argc, char* argv[], Options *options, int applyFilters) {
-    const char *typeFilter, *keyFilter;
+    const char *typeFilter, *keyFilter, *nowArg;
     int dbNumFilter;
     int at;
 
@@ -489,6 +524,11 @@ int readCommonOptions(RdbParser *p, int argc, char* argv[], Options *options, in
 
         if (getOptArgVal(argc, argv, &at, "-s", "--show-progress", NULL, &options->progressMb, 0, INT_MAX))
             continue;
+        
+        if (getOptArg(argc, argv, &at, "-n", "--now", NULL, &nowArg)) {
+            nowSecs = atoll(nowArg);
+            continue;
+        }        
 
         if (getOptArg(argc, argv, &at, "-k", "--key", NULL, &keyFilter)) {
             if (applyFilters && (!RDBX_createHandlersFilterKey(p, keyFilter, 0)))
@@ -527,13 +567,13 @@ int readCommonOptions(RdbParser *p, int argc, char* argv[], Options *options, in
         }
 
         if (getOptArg(argc, argv, &at, "-e", "--expired", NULL, NULL)) {
-            if ((applyFilters) && (!RDBX_createHandlersFilterExpired(p, 0)))
+            if ((applyFilters) && (!RDBX_createHandlersFilterExpired(p, nowSecs, 0)))
                 exit(1);
             continue;
         }
 
         if (getOptArg(argc, argv, &at, "-E", "--no-expired", NULL, NULL)) {
-            if ((applyFilters) && (!RDBX_createHandlersFilterExpired(p, 1)))
+            if ((applyFilters) && (!RDBX_createHandlersFilterExpired(p, nowSecs, 1)))
                 exit(1);
             continue;
         }
@@ -542,6 +582,7 @@ int readCommonOptions(RdbParser *p, int argc, char* argv[], Options *options, in
         else if (strcmp(opt, "resp") == 0) { options->formatFunc = formatResp; break; }
         else if (strcmp(opt, "redis") == 0) { options->formatFunc = formatRedis; break; }
         else if (strcmp(opt, "print") == 0) { options->formatFunc = formatPrint; break; }
+        else if (strcmp(opt, "stat") == 0) { options->formatFunc = formatStat; break; }
 
         loggerWrap(RDB_LOG_ERR, "At argv[%d], unexpected OPTIONS argument: %s\n", at, opt);
         printUsage(1);
