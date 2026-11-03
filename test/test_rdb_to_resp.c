@@ -222,6 +222,38 @@ static void test_r2r_set_lp(void **state) {
     runWithAndWithoutRestore("set_is_v11.rdb");
 }
 
+/* set with expiry on members (RDB v17). Supported since 8.12 */
+static void test_r2r_set_ex(void **state) {
+    UNUSED(state);
+    runWithAndWithoutRestore("set_with_sexpire_v17.rdb");
+}
+
+/* set-listpack with expiry on members (RDB v17). Supported since 8.12 */
+static void test_r2r_set_lp_ex(void **state) {
+    UNUSED(state);
+    runWithAndWithoutRestore("set_lp_with_sexpire_v17.rdb");
+}
+
+/* Member TTLs become SPEXPIREAT against a 8.12+ target and are dropped
+ * (SADD only) against an older one that doesn't know the command. */
+static void test_r2r_set_ex_target_version(void **state) {
+    UNUSED(state);
+    RdbxToRespConf r2rConf;
+    const char *spexpireat = "$10\r\nSPEXPIREAT\r\n";
+    const char *files[] = {"set_with_sexpire_v17.rdb", "set_lp_with_sexpire_v17.rdb"};
+
+    for (unsigned i = 0; i < sizeof(files)/sizeof(files[0]); ++i) {
+        memset(&r2rConf, 0, sizeof(r2rConf));
+        r2rConf.supportRestore = 0;
+
+        r2rConf.dstRedisVersion = "8.10";
+        testRdbToRespCommon(files[i], &r2rConf, (char *) spexpireat, strlen(spexpireat), M_SUBSTR, 0);
+
+        r2rConf.dstRedisVersion = "8.12";
+        testRdbToRespCommon(files[i], &r2rConf, (char *) spexpireat, strlen(spexpireat), M_SUBSTR, 1);
+    }
+}
+
 static void test_r2r_plain_zset(void **state) {
     UNUSED(state);
     runWithAndWithoutRestore("plain_zset_v6.rdb");
@@ -473,6 +505,9 @@ int group_rdb_to_resp(void) {
             cmocka_unit_test(test_r2r_plain_set),
             cmocka_unit_test(test_r2r_set_is),
             cmocka_unit_test(test_r2r_set_lp),
+            cmocka_unit_test(test_r2r_set_ex),
+            cmocka_unit_test(test_r2r_set_lp_ex),
+            cmocka_unit_test(test_r2r_set_ex_target_version),
             /* zset */
             cmocka_unit_test(test_r2r_plain_zset),
             cmocka_unit_test(test_r2r_plain_zset_2),

@@ -76,8 +76,10 @@ struct ParsingElementInfo peInfo[PE_MAX] = {
         [PE_HASH_ZM]          = {elementHashZM, "elementHashZM", "Parsing hash Zipmap"},
         /* set */
         [PE_SET]              = {elementSet, "elementSet", "Parsing set"},
+        [PE_SET_META]         = {elementSet, "elementSetMeta", "Parsing set with expiry on members"},
         [PE_SET_IS]           = {elementSetIS, "elementSetIS", "Parsing set Intset"},
         [PE_SET_LP]           = {elementSetLP, "elementSetLP", "Parsing set Listpack"},
+        [PE_SET_LP_EX]        = {elementSetLPEx, "elementSetLPEx", "Parsing set ListpackEx (with expiry)"},
         /* zset */
         [PE_ZSET]             = {elementZset, "elementZset", "Parsing zset"},
         [PE_ZSET_2]           = {elementZset, "elementZset", "Parsing zset_2"},
@@ -118,8 +120,10 @@ struct ParsingElementInfo peInfo[PE_MAX] = {
         [PE_RAW_HASH_ZM]      = {elementRawHashZM, "elementRawHashZM", "Parsing raw hash Zipmap"},
         /* set */
         [PE_RAW_SET]          = {elementRawSet, "elementRawSet", "Parsing raw set"},
+        [PE_RAW_SET_META]     = {elementRawSet, "elementRawSetMeta", "Parsing raw set with expiry"},
         [PE_RAW_SET_IS]       = {elementRawSetIS, "elementRawSetIS", "Parsing raw set Intset"},
         [PE_RAW_SET_LP]       = {elementRawSetLP, "elementRawSetLP", "Parsing raw set Listpack"},
+        [PE_RAW_SET_LP_EX]    = {elementRawSetLPEx, "elementRawSetLPEx", "Parsing raw set ListpackEx"},
         /* zset */
         [PE_RAW_ZSET]         = {elementRawZset, "elementRawZset", "Parsing raw zset"},
         [PE_RAW_ZSET_2]       = {elementRawZset, "elementRawZset", "Parsing raw zset_2"},
@@ -633,6 +637,8 @@ _LIBRDB_API int RDB_handleByLevel(RdbParser *p, RdbDataType type, RdbHandlersLev
             p->handleTypeObjByLevel[RDB_TYPE_SET] = lvl;
             p->handleTypeObjByLevel[RDB_TYPE_SET_INTSET] = lvl;
             p->handleTypeObjByLevel[RDB_TYPE_SET_LISTPACK] = lvl;
+            p->handleTypeObjByLevel[RDB_TYPE_SET_LISTPACK_EX] = lvl;
+            p->handleTypeObjByLevel[RDB_TYPE_SET_METADATA] = lvl;
             break;
         case RDB_DATA_TYPE_ZSET:
             p->handleTypeObjByLevel[RDB_TYPE_ZSET] = lvl;
@@ -703,6 +709,8 @@ static inline RdbDataType getDataType(int opcode) {
         case RDB_TYPE_SET:
         case RDB_TYPE_SET_INTSET:
         case RDB_TYPE_SET_LISTPACK:
+        case RDB_TYPE_SET_LISTPACK_EX:
+        case RDB_TYPE_SET_METADATA:
             return RDB_DATA_TYPE_SET;
 
         case RDB_TYPE_ZSET:
@@ -1650,6 +1658,8 @@ RdbStatus elementNextRdbType(RdbParser *p) {
         case RDB_TYPE_SET:                  return nextParsingElementKeyValue(p, PE_RAW_SET, PE_SET);
         case RDB_TYPE_SET_LISTPACK:         return nextParsingElementKeyValue(p, PE_RAW_SET_LP, PE_SET_LP);
         case RDB_TYPE_SET_INTSET:           return nextParsingElementKeyValue(p, PE_RAW_SET_IS, PE_SET_IS);
+        case RDB_TYPE_SET_METADATA:         return nextParsingElementKeyValue(p, PE_RAW_SET_META, PE_SET_META);
+        case RDB_TYPE_SET_LISTPACK_EX:      return nextParsingElementKeyValue(p, PE_RAW_SET_LP_EX, PE_SET_LP_EX);
         /* zset */
         case RDB_TYPE_ZSET:                 return nextParsingElementKeyValue(p, PE_RAW_ZSET, PE_ZSET);
         case RDB_TYPE_ZSET_2:               return nextParsingElementKeyValue(p, PE_RAW_ZSET, PE_ZSET);
@@ -2048,6 +2058,11 @@ RdbStatus elementSet(RdbParser *p) {
     } ;
     switch (ctx->state) {
         case ST_SET_HEADER:
+            /* RDB_TYPE_SET_METADATA (v17): earliest member expiry precedes the count.
+             * Each member's TTL is then saved relative to it (see ST_SET_NEXT_ITEM). */
+            if (p->currOpcode == RDB_TYPE_SET_METADATA)
+                IF_NOT_OK_RETURN(rdbLoadMillisecTime(p, &ctx->set.sexpireMinMsec));
+
             IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, (uint64_t *) &(ctx->key.numItemsHint), NULL, NULL));
 
             /*** ENTER SAFE STATE ***/
@@ -2059,6 +2074,17 @@ RdbStatus elementSet(RdbParser *p) {
         case ST_SET_NEXT_ITEM:
             while(ctx->set.left) {
                 BulkInfo *binfoItem;
+                int64_t expireAt = -1;
+
+                /* With member expirations (PE_SET_META), each member is preceded by
+                 * its TTL: 0 means none, otherwise (expiry - minExpire + 1). */
+                if (p->parsingElement == PE_SET_META) {
+                    uint64_t val;
+                    IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &val, NULL, NULL));
+                    if (val != 0)
+                        expireAt = (int64_t) val + ctx->set.sexpireMinMsec - 1;
+                }
+
                 IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC_APP_BULK, NULL, &binfoItem));
 
                 /*** ENTER SAFE STATE ***/
@@ -2067,9 +2093,9 @@ RdbStatus elementSet(RdbParser *p) {
 
                 registerAppBulkForNextCb(p, binfoItem);
                 if (p->elmCtx.key.handleByLevel == RDB_LEVEL_STRUCT)
-                    CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_STRUCT, rdbStruct.handleSetPlain, binfoItem->ref);
+                    CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_STRUCT, rdbStruct.handleSetPlain, binfoItem->ref, expireAt);
                 else
-                    CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_DATA, rdbData.handleSetMember, binfoItem->ref);
+                    CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_DATA, rdbData.handleSetMember, binfoItem->ref, expireAt);
 
                 updateElementState(p, ST_SET_NEXT_ITEM, 0);
             }
@@ -2109,7 +2135,7 @@ RdbStatus elementSetIS(RdbParser *p) {
             bulkInt->len = ll2string(bulkInt->ref, buflen, intele);
 
             registerAppBulkForNextCb(p, bulkInt);
-            CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_DATA, rdbData.handleSetMember, bulkInt->ref);
+            CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_DATA, rdbData.handleSetMember, bulkInt->ref, (int64_t) -1);
         }
     }
 
@@ -2151,10 +2177,81 @@ RdbStatus elementSetLP(RdbParser *p) {
                              restoreEmbeddedBulk(p, &embBulk), /*finalize*/
                              RDB_LEVEL_DATA,
                              rdbData.handleSetMember,
-                             embBulk.binfo.ref);
+                             embBulk.binfo.ref,
+                             (int64_t) -1);
 
             iterator = lpNext(listpackBulk->ref, iterator);
         }
+    }
+    return nextParsingElement(p, PE_END_KEY);
+}
+
+/* RDB_TYPE_SET_LISTPACK_EX (v17): [minExpire:8 bytes][listpack]. The listpack
+ * holds (member, ttl) pairs ordered by ttl; ttl is an absolute unix time in
+ * msec stored as an integer, 0 for a member without expiry (placed last). */
+RdbStatus elementSetLPEx(RdbParser *p) {
+    BulkInfo *listpackBulk, *binfoExpire;
+    size_t items;
+
+    /* digest min expiration time. No need to pass it to handlers as each
+     * member reports its own expiration time anyway */
+    IF_NOT_OK_RETURN(rdbLoad(p, 8, RQ_ALLOC, NULL, &binfoExpire));
+
+    IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC_APP_BULK, NULL, &listpackBulk));
+
+    /*** ENTER SAFE STATE ***/
+
+    /* Doesn't check for duplication */
+    if (!lpValidateIntegrity(listpackBulk->ref, listpackBulk->len, p->deepIntegCheck, NULL, 0)) {
+        RDB_reportError(p, RDB_ERR_SET_LP_INTEG_CHECK, "elementSetLPEx(): LISTPACK integrity check failed");
+        return RDB_STATUS_ERROR;
+    }
+
+    /* [member][ttl] pairs */
+    items = lpLength(listpackBulk->ref);
+    if (unlikely((items % 2) != 0)) {
+        RDB_reportError(p, RDB_ERR_SET_LP_INTEG_CHECK,
+                        "elementSetLPEx(): listpack has unexpected number of items.");
+        return RDB_STATUS_ERROR;
+    }
+
+    p->elmCtx.key.numItemsHint = items / 2;
+
+    if (p->elmCtx.key.handleByLevel == RDB_LEVEL_STRUCT) {
+        registerAppBulkForNextCb(p, listpackBulk);
+        CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_STRUCT, rdbStruct.handleSetLPEx, listpackBulk->ref);
+        return nextParsingElement(p, PE_END_KEY);
+    }
+
+    unsigned char *iterator = lpFirst(listpackBulk->ref);
+    while (iterator) {
+        EmbeddedBulk embBulk;
+        unsigned char *member;
+        unsigned int memberLen;
+        long long memberVal;
+        int64_t expiryVal = -1;
+
+        member = lpGetValue(iterator, &memberLen, &memberVal);
+        iterator = lpNext(listpackBulk->ref, iterator);
+
+        if (lpGet(iterator, &expiryVal, NULL) != NULL) {
+            RDB_reportError(p, RDB_ERR_SET_LP_INTEG_CHECK,
+                            "elementSetLPEx(): integrity check failed. Expiry is a string instead of value.");
+            return RDB_STATUS_ERROR;
+        }
+        if (expiryVal == 0) expiryVal = -1; /* If expiry not set */
+        iterator = lpNext(listpackBulk->ref, iterator);
+
+        if (!allocEmbeddedBulk(p, member, memberLen, memberVal, &embBulk))
+            return RDB_STATUS_ERROR;
+
+        registerAppBulkForNextCb(p, &embBulk.binfo);
+        CALL_HANDLERS_CB(p,
+                         restoreEmbeddedBulk(p, &embBulk), /*finalize*/
+                         RDB_LEVEL_DATA,
+                         rdbData.handleSetMember,
+                         embBulk.binfo.ref,
+                         (int64_t) expiryVal);
     }
     return nextParsingElement(p, PE_END_KEY);
 }

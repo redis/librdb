@@ -556,7 +556,8 @@ static RdbRes toJsonList(RdbParser *p, void *userData, RdbBulk item) {
     return RDB_OK;
 }
 
-static RdbRes toJsonSet(RdbParser *p, void *userData, RdbBulk member) {
+static RdbRes toJsonSet(RdbParser *p, void *userData, RdbBulk member, int64_t expireAt) {
+    UNUSED(expireAt);
     RdbxToJson *ctx = userData;
 
     if (jTop(ctx) != JC_SET && /* first member: open the set's array */
@@ -974,6 +975,7 @@ RdbxToJson *RDBX_createHandlersToJson(RdbParser *p, const char *filename, RdbxTo
                 toJsonSet,
                 toJsonStruct, /* handleSetIS*/
                 toJsonStruct, /* handleSetLP*/
+                toJsonStruct, /* handleSetLPEx*/
                 /*zset*/
                 toJsonZset,
                 toJsonStruct, /* handleZsetZL*/

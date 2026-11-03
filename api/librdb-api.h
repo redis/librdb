@@ -294,12 +294,14 @@ typedef struct RdbHandlersStructCallbacks {
     /* Callback to handle a zipmap-based hash value */
     RdbRes (*handleHashZM)(RdbParser *p, void *userData, RdbBulk zipmap);
 
-    /* Callback to handle an item from a plain-set */
-    RdbRes (*handleSetPlain)(RdbParser *p, void *userData, RdbBulk item);
+    /* Callback to handle an item from a plain-set. expireAt -1 if not set. */
+    RdbRes (*handleSetPlain)(RdbParser *p, void *userData, RdbBulk item, int64_t expireAt);
     /* Callback to handle an intset-based set value */
     RdbRes (*handleSetIS)(RdbParser *p, void *userData, RdbBulk intset);
     /* Callback to handle a listpack-based set value */
     RdbRes (*handleSetLP)(RdbParser *p, void *userData, RdbBulk listpack);
+    /* Callback to handle a listpackex-based set (with expiry on members) */
+    RdbRes (*handleSetLPEx)(RdbParser *p, void *userData, RdbBulk listpackEx);
 
     /* Callback to handle an item from a plain sorted set */
     RdbRes (*handleZsetPlain)(RdbParser *p, void *userData, RdbBulk item, double score);
@@ -334,8 +336,8 @@ typedef struct RdbHandlersDataCallbacks {
     RdbRes (*handleListItem)(RdbParser *p, void *userData, RdbBulk item);
     /* Callback to handle a field-value pair within a hash */
     RdbRes (*handleHashField)(RdbParser *p, void *userData, RdbBulk field, RdbBulk value, int64_t expireAt);
-    /* Callback to handle a member within a set */
-    RdbRes (*handleSetMember)(RdbParser *p, void *userData, RdbBulk member);
+    /* Callback to handle a member within a set. expireAt -1 if not set. */
+    RdbRes (*handleSetMember)(RdbParser *p, void *userData, RdbBulk member, int64_t expireAt);
     /* Callback to handle a member within a sorted set along with its score */
     RdbRes (*handleZsetMember)(RdbParser *p, void *userData, RdbBulk member, double score);
     /* Callback to handle function code */

@@ -563,9 +563,15 @@ RdbStatus elementRawSetLP(RdbParser *p) {
     return singleStringTypeHandling(p, listpackValidateIntegrityCb, 0, "elementRawSetLP");
 }
 
+/* RDB_TYPE_SET_LISTPACK_EX (v17): 8 bytes min-expire header, then the listpack */
+RdbStatus elementRawSetLPEx(RdbParser *p) {
+    return singleStringTypeHandling(p, listpackValidateIntegrityCb, 8, "elementRawSetLPEx");
+}
+
 RdbStatus elementRawSet(RdbParser *p) {
     enum RAW_SET_STATES {
         ST_RAW_SET_HEADER=0,             /* Retrieve number of items */
+        ST_RAW_SET_NEXT_ITEM_READ_EXPIRE,/* Read member expiry (if PE_RAW_SET_META) */
         ST_RAW_SET_NEXT_ITEM_CALL_STR,   /* Process next item. Call PE_RAW_STRING as sub-element */
         ST_RAW_SET_NEXT_ITEM_STR_RETURN, /* integ check of the returned string from PE_RAW_STRING */
         /* If more items, goto state #1, else next PE is END_KEY */
@@ -577,19 +583,42 @@ RdbStatus elementRawSet(RdbParser *p) {
     switch (p->elmCtx.state) {
 
         case ST_RAW_SET_HEADER: {
-            int headerLen = 0;
+            int offset = 0, headerLen = 0;
+            BulkInfo *binfo;
 
-            aggMakeRoom(p, 10); /* worse case 9 bytes for len */
+            aggMakeRoom(p, 8 /*optional*/ + 10); /* worse case 9 bytes for len */
+
+            if (p->currOpcode == RDB_TYPE_SET_METADATA) {
+                /* Load min expiration time (RDB_TYPE_SET_METADATA, v17) */
+                IF_NOT_OK_RETURN(rdbLoad(p, 8, RQ_ALLOC_REF, rawCtx->at, &binfo));
+                offset = headerLen = 8;
+            }
 
             IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &setCtx->numItems,
-                                        (unsigned char *) rawCtx->at, &headerLen));
+                                        (unsigned char *) rawCtx->at + offset, &headerLen));
 
             /*** ENTER SAFE STATE ***/
 
             IF_NOT_OK_RETURN(cbHandleBegin(p, DATA_SIZE_UNKNOWN_AHEAD));
             IF_NOT_OK_RETURN(aggUpdateWritten(p, headerLen));
+
+            if (setCtx->numItems == 0)
+                return nextParsingElement(p, PE_RAW_END_KEY); /* empty-key */
         }
-        updateElementState(p, ST_RAW_SET_NEXT_ITEM_CALL_STR, 0); /* fall-thru */
+        updateElementState(p, ST_RAW_SET_NEXT_ITEM_READ_EXPIRE, 0); /* fall-thru */
+
+        case ST_RAW_SET_NEXT_ITEM_READ_EXPIRE:
+            if (p->parsingElement == PE_RAW_SET_META) {
+                uint64_t expireAt;
+                int processedBytes = 0;
+                aggMakeRoom(p, 10);
+                IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &expireAt,
+                                            (unsigned char *) rawCtx->at,
+                                            &processedBytes));
+                /*** ENTER SAFE STATE ***/
+                IF_NOT_OK_RETURN(aggUpdateWritten(p, processedBytes));
+            }
+            updateElementState(p, ST_RAW_SET_NEXT_ITEM_CALL_STR, 0); /* fall-thru */
 
         case ST_RAW_SET_NEXT_ITEM_CALL_STR:
             return subElementCall(p, PE_RAW_STRING, ST_RAW_SET_NEXT_ITEM_STR_RETURN);
@@ -606,7 +635,7 @@ RdbStatus elementRawSet(RdbParser *p) {
             if (--setCtx->numItems == 0)
                 return nextParsingElement(p, PE_RAW_END_KEY); /* done */
 
-            return updateElementState(p, ST_RAW_SET_NEXT_ITEM_CALL_STR, 1);
+            return updateElementState(p, ST_RAW_SET_NEXT_ITEM_READ_EXPIRE, 1);
         }
 
         default:

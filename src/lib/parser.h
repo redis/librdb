@@ -148,8 +148,10 @@ typedef enum ParsingElementType {
     PE_HASH_LP_EX,
     PE_HASH_ZM,
     PE_SET,
+    PE_SET_META,           /* RDB_TYPE_SET_METADATA (v17): plain set with member expiry */
     PE_SET_IS,
     PE_SET_LP,
+    PE_SET_LP_EX,          /* RDB_TYPE_SET_LISTPACK_EX (v17): listpack set with member expiry */
     PE_ZSET,
     PE_ZSET_2,
     PE_ZSET_ZL,
@@ -178,8 +180,10 @@ typedef enum ParsingElementType {
     PE_RAW_HASH_LP_EX,
     PE_RAW_HASH_ZM,
     PE_RAW_SET,
+    PE_RAW_SET_META,
     PE_RAW_SET_IS,
     PE_RAW_SET_LP,
+    PE_RAW_SET_LP_EX,
     PE_RAW_ZSET,
     PE_RAW_ZSET_2,
     PE_RAW_ZSET_ZL,
@@ -219,6 +223,7 @@ typedef struct {
 
 typedef struct {
     uint64_t left;
+    int64_t sexpireMinMsec; /* RDB_TYPE_SET_METADATA: min expiry, member TTLs are relative to it */
 } ElementSetCtx;
 
 typedef struct {
@@ -615,6 +620,7 @@ RdbStatus elementHashZM(RdbParser *p);
 RdbStatus elementSet(RdbParser *p);
 RdbStatus elementSetIS(RdbParser *p);
 RdbStatus elementSetLP(RdbParser *p);
+RdbStatus elementSetLPEx(RdbParser *p);
 RdbStatus elementZset(RdbParser *p);
 RdbStatus elementZsetZL(RdbParser *p);
 RdbStatus elementZsetLP(RdbParser *p);
@@ -641,6 +647,7 @@ RdbStatus elementRawHashZM(RdbParser *p);
 RdbStatus elementRawSet(RdbParser *p);
 RdbStatus elementRawSetIS(RdbParser *p);
 RdbStatus elementRawSetLP(RdbParser *p);
+RdbStatus elementRawSetLPEx(RdbParser *p);
 RdbStatus elementRawZset(RdbParser *p);
 RdbStatus elementRawZsetLP(RdbParser *p);
 RdbStatus elementRawZsetZL(RdbParser *p);

@@ -42,7 +42,10 @@
 #define RDB_TYPE_HASH_TMPL_LP_REF   30        /* Hash template (v15): with template ref (RDB save): [tid][lp_blob] */
 #define RDB_TYPE_HASH_TMPL_ARRAY    31        /* Hash template (v15): self-contained (DUMP): [fields_fmt][fields][v0]...[vN-1] */
 #define RDB_TYPE_HASH_TMPL_ARRAY_REF 32       /* Hash template (v15): with template ref (RDB save): [tid][v0]...[vN-1] */
-#define RDB_TYPE_MAX                33
+#define RDB_TYPE_BITMAP             33        /* Compressed (roaring) bitmap (v16): [byte_len][portable blob] */
+#define RDB_TYPE_SET_LISTPACK_EX    34        /* Set LP with member expirations (v17). Attach min TTL at start */
+#define RDB_TYPE_SET_METADATA       35        /* Set with member expirations (v17). Attach min TTL at start */
+#define RDB_TYPE_MAX                36
 
 
 /* Highest hash-template id the registry accepts (v15). The saver assigns

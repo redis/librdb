@@ -559,8 +559,9 @@ static RdbRes toRespHash(RdbParser *p, void *userData, RdbBulk field, RdbBulk va
     return writevWrap(ctx, iov, 9, &hpexpireatCmd, 1);
 }
 
-static RdbRes toRespSet(RdbParser *p, void *userData, RdbBulk member) {
-    struct iovec iov[7];
+static RdbRes toRespSet(RdbParser *p, void *userData, RdbBulk member, int64_t expireAt) {
+    char expireTimeStr[32], expireTimeLenStr[32];
+    struct iovec iov[10];
     RdbxToResp *ctx = userData;
     char keyLenStr[32], valLenStr[32];
 
@@ -568,7 +569,7 @@ static RdbRes toRespSet(RdbParser *p, void *userData, RdbBulk member) {
 
     RdbxRespWriterStartCmd startCmd = {"SADD", ctx->keyCtx.key, 0};
 
-    /* write RPUSH */
+    /* write SADD */
     IOV_CONST(&iov[0], "*3\r\n$4\r\nSADD");
     /* write key */
     IOV_LENGTH(&iov[1], ctx->keyCtx.keyLen, keyLenStr);
@@ -577,7 +578,30 @@ static RdbRes toRespSet(RdbParser *p, void *userData, RdbBulk member) {
     IOV_LENGTH(&iov[3], valLen, valLenStr);
     IOV_STRING(&iov[4], member, valLen);
     IOV_CONST(&iov[5], "\r\n");
-    return writevWrap(ctx, iov, 6, &startCmd, 1);
+    IF_NOT_OK_RETURN(writevWrap(ctx, iov, 6, &startCmd, 1));
+
+    if (expireAt == -1) return RDB_OK;
+
+    /* Set member expiration landed in 8.12 (RDB v17). Older targets reject
+     * SPEXPIREAT, so the member is loaded without its TTL. */
+    if (ctx->targetRedisVerVal < VER_VAL(8, 12))
+        return RDB_OK;
+
+    RdbxRespWriterStartCmd spexpireatCmd = {"SPEXPIREAT", ctx->keyCtx.key, 0};
+
+    /* write SPEXPIREAT */
+    IOV_CONST(&iov[0], "*6\r\n$10\r\nSPEXPIREAT");
+    /* write key */
+    IOV_LENGTH(&iov[1], ctx->keyCtx.keyLen, keyLenStr);
+    IOV_STRING(&iov[2], ctx->keyCtx.key, ctx->keyCtx.keyLen);
+    /* write expiration-time in msec */
+    IOV_LEN_AND_VAL(&iov[3], expireAt, expireTimeLenStr, expireTimeStr);
+    IOV_CONST(&iov[5], "$7\r\nMEMBERS\r\n$1\r\n1");
+    /* write member */
+    IOV_LENGTH(&iov[6], valLen, valLenStr);
+    IOV_STRING(&iov[7], member, valLen);
+    IOV_CONST(&iov[8], "\r\n");
+    return writevWrap(ctx, iov, 9, &spexpireatCmd, 1);
 }
 
 static RdbRes toRespZset(RdbParser *p, void *userData, RdbBulk member, double score) {

@@ -1,3 +1,26 @@
+## [Unreleased]
+
+### Breaking Changes
+- **Set callbacks carry member expiry**: `handleSetMember` (DATA level) and
+  `handleSetPlain` (STRUCT level) take a trailing `int64_t expireAt` (-1 when the
+  member has no TTL), mirroring `handleHashField`/`handleHashPlain`. New STRUCT
+  callback `handleSetLPEx` for the listpack-with-expiry encoding. Positional
+  initializers of `RdbHandlersStructCallbacks` must account for the new slot
+  after `handleSetLP`.
+
+### New Features
+- **RDB v17 Support (Redis 8.12), part 1 - set member expiration**: accept format
+  version 17 and parse the two new set encodings, `RDB_TYPE_SET_METADATA`
+  (hashtable, min-expiry header + per-member relative TTL) and
+  `RDB_TYPE_SET_LISTPACK_EX` (min-expiry header + listpack of `[member][ttl]`
+  pairs). Member TTLs surface through the set callbacks' new `expireAt`.
+  - RESP/redis targets: `SADD` followed by `SPEXPIREAT <key> <ms> MEMBERS 1 <member>`
+    against Redis 8.12+. Older targets don't know the command, so the member is
+    loaded without its TTL. `--support-restore` passes the payload through as-is
+    when the destination is 8.12+.
+  - `rdbversion` 17 fixtures under `test/dumps/` (`set_with_sexpire_v17.rdb`,
+    `set_lp_with_sexpire_v17.rdb`).
+
 ## [2.4.0] - 2026-10-05
 
 ### New Features

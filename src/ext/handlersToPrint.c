@@ -272,8 +272,8 @@ static RdbRes toPrintList(RdbParser *p, void *userData, RdbBulk item) {
     return RDB_OK;
 }
 
-static RdbRes toPrintSet(RdbParser *p, void *userData, RdbBulk member) {
-    UNUSED(p, member);
+static RdbRes toPrintSet(RdbParser *p, void *userData, RdbBulk member, int64_t expireAt) {
+    UNUSED(p, member, expireAt);
     RdbxToPrint *ctx = userData;
     ctx->keyCtx.items++;
     return RDB_OK;

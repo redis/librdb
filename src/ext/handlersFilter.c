@@ -213,8 +213,8 @@ static RdbRes filterHashPlain(RdbParser *p, void *userData, RdbBulk field, RdbBu
     return ((RdbxFilter *) userData)->cbReturnValue;
 }
 
-static RdbRes filterSetMember(RdbParser *p, void *userData, RdbBulk member) {
-    UNUSED(p, member);
+static RdbRes filterSetMember(RdbParser *p, void *userData, RdbBulk member, int64_t expireAt) {
+    UNUSED(p, member, expireAt);
     return ((RdbxFilter *) userData)->cbReturnValue;
 }
 
@@ -223,8 +223,8 @@ static RdbRes filterZsetMember(RdbParser *p, void *userData, RdbBulk member, dou
     return ((RdbxFilter *) userData)->cbReturnValue;
 }
 
-static RdbRes filterSetPlain(RdbParser *p, void *userData, RdbBulk item) {
-    UNUSED(p, item);
+static RdbRes filterSetPlain(RdbParser *p, void *userData, RdbBulk item, int64_t expireAt) {
+    UNUSED(p, item, expireAt);
     return ((RdbxFilter *) userData)->cbReturnValue;
 }
 
@@ -235,6 +235,11 @@ static RdbRes filterSetIS(RdbParser *p, void *userData, RdbBulk intset) {
 
 static RdbRes filterSetLP(RdbParser *p, void *userData, RdbBulk listpack) {
     UNUSED(p, listpack);
+    return ((RdbxFilter *) userData)->cbReturnValue;
+}
+
+static RdbRes filterSetLPEx(RdbParser *p, void *userData, RdbBulk listpackEx) {
+    UNUSED(p, listpackEx);
     return ((RdbxFilter *) userData)->cbReturnValue;
 }
 
@@ -346,6 +351,7 @@ static void defaultFilterStructCb(RdbHandlersStructCallbacks *structCb) {
         filterSetPlain,                     /*handleSetPlain*/
         filterSetIS,                        /*handleSetIS*/
         filterSetLP,                        /*handleSetLP*/
+        filterSetLPEx,                      /*handleSetLPEx*/
         filterZsetPlain,                    /*handleZsetPlain*/
         filterZsetZL,                       /*handleZsetZL*/
         filterZsetLP,                       /*handleZsetLP*/

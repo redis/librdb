@@ -357,6 +357,53 @@ static void test_rdb_to_redis_set_lp(void **state) {
     test_rdb_to_redis_common(DUMP_FOLDER("set_lp_v11.rdb"), 1, "$4\r\nSADD", NULL);
 }
 
+/* Live round-trip of set member expiration (RDB v17): let the server build both
+ * encodings (hashtable -> RDB_TYPE_SET_METADATA, listpack -> RDB_TYPE_SET_LISTPACK_EX),
+ * save, replay through librdb in plain and RESTORE modes, and verify the member
+ * TTLs survive. */
+static void test_rdb_to_redis_set_with_expire(void **state) {
+    UNUSED(state);
+    const char* configs[] = {
+        "CONFIG SET SET-MAX-LISTPACK-ENTRIES 0",   /*HT*/
+        "CONFIG SET SET-MAX-LISTPACK-ENTRIES 128", /*listpack*/
+    };
+
+    /* set-member-expiration available since 8.12 */
+    if ((serverMajorVer<8) || ((serverMajorVer==8) && (serverMinorVer<12)))
+        skip();
+
+    setupRedisServer("--enable-debug-command yes --dbfilename expire.rdb", 0);
+    for (int i = 0; i < 2; i++) {
+        sendRedisCmd("FLUSHALL", REDIS_REPLY_STATUS, NULL);
+        sendRedisCmd(configs[i], REDIS_REPLY_STATUS, NULL);
+        sendRedisCmd("SADD myset m4 m5 m6", REDIS_REPLY_INTEGER, "3");
+        sendRedisCmd("SPEXPIREAT myset 70368744177663 MEMBERS 2 m4 m5",
+                     REDIS_REPLY_ARRAY, "1 1");  /*time=0x3fffffffffff*/
+        rdb_save_librdb_reload_eq(0 /*restore*/, TMP_FOLDER("expire.rdb"));
+        rdb_save_librdb_reload_eq(1 /*restore*/, TMP_FOLDER("expire.rdb"));
+        sendRedisCmd("SPEXPIRETIME myset MEMBERS 3 m4 m5 m6", REDIS_REPLY_ARRAY,
+                     "70368744177663 70368744177663 -1"); /* verify expected output */
+    }
+    teardownRedisServer();
+}
+
+/* Fixture-driven coverage of the v17 set encodings, portable to any target
+ * version: against < 8.12 the TTLs are dropped and the members load via SADD;
+ * against 8.12+ they are re-applied with SPEXPIREAT. */
+static void test_rdb_to_redis_set_ex(void **state) {
+    UNUSED(state);
+    int supportSetEx = (serverMajorVer > 8) || ((serverMajorVer == 8) && (serverMinorVer >= 12));
+    char *expCmd = supportSetEx ? "$10\r\nSPEXPIREAT" : "$4\r\nSADD";
+    test_rdb_to_redis_common(DUMP_FOLDER("set_with_sexpire_v17.rdb"), 1, expCmd, NULL);
+}
+
+static void test_rdb_to_redis_set_lp_ex(void **state) {
+    UNUSED(state);
+    int supportSetEx = (serverMajorVer > 8) || ((serverMajorVer == 8) && (serverMinorVer >= 12));
+    char *expCmd = supportSetEx ? "$10\r\nSPEXPIREAT" : "$4\r\nSADD";
+    test_rdb_to_redis_common(DUMP_FOLDER("set_lp_with_sexpire_v17.rdb"), 1, expCmd, NULL);
+}
+
 static void test_rdb_to_redis_plain_zset(void **state) {
     UNUSED(state);
     test_rdb_to_redis_common(DUMP_FOLDER("plain_zset_v6.rdb"), 1, "$4\r\nZADD", NULL);
@@ -1067,6 +1114,9 @@ int group_rdb_to_redis(void) {
             cmocka_unit_test_setup(test_rdb_to_redis_plain_set, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_set_is, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_set_lp, setupTest),
+            cmocka_unit_test_setup(test_rdb_to_redis_set_with_expire, setupTest),
+            cmocka_unit_test_setup(test_rdb_to_redis_set_ex, setupTest),
+            cmocka_unit_test_setup(test_rdb_to_redis_set_lp_ex, setupTest),
             /* zset */
             cmocka_unit_test_setup(test_rdb_to_redis_plain_zset, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_plain_zset_2, setupTest),
