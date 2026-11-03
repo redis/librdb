@@ -404,6 +404,29 @@ static void test_rdb_to_redis_set_lp_ex(void **state) {
     test_rdb_to_redis_common(DUMP_FOLDER("set_lp_with_sexpire_v17.rdb"), 1, expCmd, NULL);
 }
 
+/* Listpacks saved by Redis 8.8 - 8.10 (RDB v14) with the compact boundary
+ * backlen: one 16378-byte entry per encoding (hash LP, hash LP with HFE, set LP,
+ * zset LP, quicklist2 node, stream). Replayed as commands (parser rewrites the
+ * listpacks) and via RESTORE (forwarded verbatim; destination reads them by the
+ * source RDB version in the payload footer). The 16KB members leave the small
+ * encodings on the destination, so set order is ignored. */
+static void test_rdb_to_redis_compact_backlen_v14(void **state) {
+    UNUSED(state);
+    test_rdb_to_redis_common(DUMP_FOLDER("compact_backlen_v14.rdb"), 1, "$4\r\nHSET", NULL);
+}
+
+/* Same for v15 hash templates (Redis 8.10): REF form from an RDB save and the
+ * self-contained (DUMP) form. RESTORE pass only against a template-aware target. */
+static void test_rdb_to_redis_compact_backlen_tmpl_v15(void **state) {
+    UNUSED(state);
+    int maxMode = ((serverMajorVer>8) || ((serverMajorVer==8) && (serverMinorVer>=10))) ? 1 : 0;
+    const char *fixtures[] = { DUMP_FOLDER("compact_backlen_tmpl_v15.rdb"),
+                               DUMP_FOLDER("compact_backlen_tmpl_self_v15.rdb") };
+    for (unsigned i = 0 ; i < sizeof(fixtures)/sizeof(fixtures[0]) ; ++i)
+        for (int isRestore = 0 ; isRestore <= maxMode ; ++isRestore)
+            test_rdb_to_redis_common_mode(fixtures[i], 0, "$4\r\nHSET", NULL, isRestore);
+}
+
 static void test_rdb_to_redis_plain_zset(void **state) {
     UNUSED(state);
     test_rdb_to_redis_common(DUMP_FOLDER("plain_zset_v6.rdb"), 1, "$4\r\nZADD", NULL);
@@ -1117,6 +1140,8 @@ int group_rdb_to_redis(void) {
             cmocka_unit_test_setup(test_rdb_to_redis_set_with_expire, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_set_ex, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_set_lp_ex, setupTest),
+            cmocka_unit_test_setup(test_rdb_to_redis_compact_backlen_v14, setupTest),
+            cmocka_unit_test_setup(test_rdb_to_redis_compact_backlen_tmpl_v15, setupTest),
             /* zset */
             cmocka_unit_test_setup(test_rdb_to_redis_plain_zset, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_plain_zset_2, setupTest),

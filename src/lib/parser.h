@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include "defines.h"
 #include "../../api/librdb-api.h"
+#include "../../deps/redis/listpack.h"
 
 
 /* Max error message length. Chain one or more recorded error messages. */
@@ -571,6 +572,11 @@ RdbStatus rdbLoadLen(RdbParser *p, int *isencoded, uint64_t *lenptr, unsigned ch
 RdbStatus rdbLoadInteger(RdbParser *p, int enctype, AllocTypeRq type, char *refBuf, BulkInfo **out);
 RdbStatus rdbLoadString(RdbParser *p, AllocTypeRq type, char *refBuf, BulkInfo **out);
 RdbStatus rdbLoadLzfString(RdbParser *p, AllocTypeRq type, char *refBuf, BulkInfo **out);
+
+/*** Listpacks of RDB v14/15 (Redis 8.8 - 8.10, compact boundary backlen) ***/
+RdbStatus rdbUpgradeListpack(RdbParser *p, BulkInfo **binfo);
+int rdbLpValidateIntegrity(RdbParser *p, unsigned char *lp, size_t size, int deep,
+                           listpackValidateEntryCB cb, void *cbArg);
 static inline RdbStatus rdbLoad(RdbParser *p, size_t len, AllocTypeRq type, char *refBuf, BulkInfo **out) {
     return p->readRdbFunc(p, len, type, refBuf, out);
 }

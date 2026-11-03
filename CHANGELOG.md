@@ -21,6 +21,22 @@
   - `rdbversion` 17 fixtures under `test/dumps/` (`set_with_sexpire_v17.rdb`,
     `set_lp_with_sexpire_v17.rdb`).
 
+### Bug Fixes
+- **Listpacks saved by Redis 8.8 - 8.10 (RDB v14/v15)**: those versions wrote
+  the backlen of listpack entries whose encoded length is exactly 16383, 2097151
+  or 268435455 one byte shorter than every other Redis version (redis/redis#15151,
+  reverted in 8.12 by redis/redis#16099). Such entries (e.g. a 16378-byte hash
+  value, set/zset member, list element or stream field value) failed the parser's
+  listpack integrity check. The parser now rewrites these listpacks in the
+  historical width on load, as Redis 8.12 does, for every listpack-backed
+  encoding (hash, hash with HFE, set, zset, quicklist, stream, hash templates).
+  STRUCT-level callbacks (`handleHashLP`, `handleSetLP`, ...) receive the
+  rewritten listpack. `--support-restore` still forwards the source bytes
+  verbatim: the RESTORE payload footer carries the source RDB version, by which
+  the destination reads them (8.8 - 8.10 natively, 8.12+ rewriting them itself).
+  Fixtures: `compact_backlen_v14.rdb`, `compact_backlen_tmpl_v15.rdb`,
+  `compact_backlen_tmpl_self_v15.rdb`.
+
 ## [2.4.0] - 2026-10-05
 
 ### New Features

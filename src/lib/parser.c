@@ -1042,6 +1042,57 @@ RdbStatus allocFromCache(RdbParser *p,
     return RDB_STATUS_OK;
 }
 
+/*** Listpacks of RDB v14/15 (Redis 8.8 - 8.10) ***/
+
+/* RDB versions that may hold the compact boundary backlen written by
+ * Redis 8.8 - 8.10 (redis/redis#15151). See lpCompactBacklenEntries(). */
+#define RDB_VERSION_COMPACT_BACKLEN_MIN 14
+#define RDB_VERSION_COMPACT_BACKLEN_MAX 15
+
+static inline int rdbMayHoldCompactBacklen(RdbParser *p) {
+    return (p->rdbversion >= RDB_VERSION_COMPACT_BACKLEN_MIN &&
+            p->rdbversion <= RDB_VERSION_COMPACT_BACKLEN_MAX);
+}
+
+/* A listpack just loaded from an RDB of version 14 or 15 may carry compact
+ * backlens (Redis 8.8 - 8.10). If so, replace *binfo by a new app-bulk holding
+ * the listpack rewritten in the historical width, the only one the bundled
+ * listpack code (and every Redis other than 8.8 - 8.10) reads. Must run before
+ * the integrity check and before anything else reads the listpack. The source
+ * bulk stays valid until the pool is flushed, so a caller that must forward the
+ * source bytes verbatim can keep a pointer to it. */
+RdbStatus rdbUpgradeListpack(RdbParser *p, BulkInfo **binfo) {
+    if (likely(!rdbMayHoldCompactBacklen(p))) return RDB_STATUS_OK;
+
+    unsigned char *lp = (unsigned char *) (*binfo)->ref;
+    size_t compact = lpCompactBacklenEntries(lp, (*binfo)->len);
+    if (likely(compact == 0)) return RDB_STATUS_OK;
+
+    BulkInfo *upgraded;
+    IF_NOT_OK_RETURN(allocFromCache(p, (*binfo)->len + compact, RQ_ALLOC_APP_BULK, NULL, &upgraded));
+    lpUpgradeCompactBacklen((unsigned char *) upgraded->ref, lp, (*binfo)->len);
+    RDB_log(p, RDB_LOG_DBG, "Rewrote %zu compact listpack backlen(s) (RDB v%d)", compact, p->rdbversion);
+    *binfo = upgraded;
+    return RDB_STATUS_OK;
+}
+
+/* lpValidateIntegrity() for a listpack that is forwarded verbatim (RAW level,
+ * RESTORE payload): if it carries compact backlens (see rdbUpgradeListpack())
+ * validate an upgraded temporary copy instead. The destination reads the
+ * forwarded bytes by the RDB version carried in the RESTORE payload footer. */
+int rdbLpValidateIntegrity(RdbParser *p, unsigned char *lp, size_t size, int deep,
+                           listpackValidateEntryCB cb, void *cbArg) {
+    size_t compact = 0;
+    if (rdbMayHoldCompactBacklen(p)) compact = lpCompactBacklenEntries(lp, size);
+    if (likely(compact == 0)) return lpValidateIntegrity(lp, size, deep, cb, cbArg);
+
+    unsigned char *upgraded = RDB_alloc(p, size + compact);
+    size_t newsize = lpUpgradeCompactBacklen(upgraded, lp, size);
+    int ret = lpValidateIntegrity(upgraded, newsize, deep, cb, cbArg);
+    RDB_free(p, upgraded);
+    return ret;
+}
+
 static inline RdbStatus unpackList(RdbParser *p, unsigned char *lp) {
     unsigned char *eptr, *item;
     unsigned int itemLen = 0;
@@ -1217,6 +1268,8 @@ static RdbStatus hashZiplist(RdbParser *p, BulkInfo *ziplistBulk) {
 
 static RdbStatus hashListPack(RdbParser *p, BulkInfo *lpBulk, int withExpiry) {
     size_t items = 0;
+
+    IF_NOT_OK_RETURN(rdbUpgradeListpack(p, &lpBulk));
 
     if (unlikely(0 == lpValidateIntegrity(lpBulk->ref, lpBulk->len, p->deepIntegCheck, counterCallback, &items))) {
         RDB_reportError(p, RDB_ERR_HASH_LP_INTEG_CHECK,
@@ -1875,9 +1928,9 @@ RdbStatus elementQuickList(RdbParser *p) {
 
                 } else {
 
-                    unsigned char *lp = (unsigned char *) binfoNode->ref;
-
                     if (p->currOpcode == RDB_TYPE_LIST_QUICKLIST_2) {
+                        IF_NOT_OK_RETURN(rdbUpgradeListpack(p, &binfoNode));
+                        unsigned char *lp = (unsigned char *) binfoNode->ref;
                         if (!lpValidateIntegrity(lp, binfoNode->len, p->deepIntegCheck, NULL, NULL)) {
                             RDB_reportError(p, RDB_ERR_QUICK_LIST_INTEG_CHECK,
                                             "elementQuickList(2): Quicklist integrity check failed");
@@ -2152,6 +2205,8 @@ RdbStatus elementSetLP(RdbParser *p) {
 
     /*** ENTER SAFE STATE ***/
 
+    IF_NOT_OK_RETURN(rdbUpgradeListpack(p, &listpackBulk));
+
     /* Doesn't check for duplication */
     if (!lpValidateIntegrity(listpackBulk->ref, listpackBulk->len, p->deepIntegCheck, NULL, 0)) {
         RDB_reportError(p, RDB_ERR_SET_LP_INTEG_CHECK, "elementSetLP(): LISTPACK integrity check failed");
@@ -2200,6 +2255,8 @@ RdbStatus elementSetLPEx(RdbParser *p) {
     IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC_APP_BULK, NULL, &listpackBulk));
 
     /*** ENTER SAFE STATE ***/
+
+    IF_NOT_OK_RETURN(rdbUpgradeListpack(p, &listpackBulk));
 
     /* Doesn't check for duplication */
     if (!lpValidateIntegrity(listpackBulk->ref, listpackBulk->len, p->deepIntegCheck, NULL, 0)) {
@@ -2328,6 +2385,8 @@ RdbStatus elementZsetLP(RdbParser *p) {
     IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC_APP_BULK, NULL, &listpackBulk));
 
     /*** ENTER SAFE STATE ***/
+
+    IF_NOT_OK_RETURN(rdbUpgradeListpack(p, &listpackBulk));
 
     /* Doesn't check for duplication */
     if (!lpValidateIntegrity(listpackBulk->ref, listpackBulk->len, p->deepIntegCheck, NULL, 0)) {
@@ -2586,6 +2645,8 @@ RdbStatus elementStreamLP(RdbParser *p) {
                     IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC_APP_BULK, NULL, &binfoListPack));
 
                     /*** ENTER SAFE STATE ***/
+
+                    IF_NOT_OK_RETURN(rdbUpgradeListpack(p, &binfoListPack));
 
                     if (unlikely(!lpValidateIntegrity(binfoListPack->ref, binfoListPack->len,
                                                       p->deepIntegCheck, NULL, 0)))
@@ -3387,6 +3448,8 @@ RdbStatus elementHashTmplLpRef(RdbParser *p) {
 
     /*** ENTER SAFE STATE ***/
 
+    IF_NOT_OK_RETURN(rdbUpgradeListpack(p, &lpBulk));
+
     unsigned char *lp = (unsigned char *) lpBulk->ref;
     if (!lpValidateIntegrity(lp, lpBulk->len, p->deepIntegCheck, NULL, NULL)) {
         RDB_reportError(p, RDB_ERR_HASH_TMPL_INVLD,
@@ -3456,6 +3519,7 @@ RdbStatus elementHashTmplSelfContained(RdbParser *p) {
 
                 /*** ENTER SAFE STATE ***/
 
+                IF_NOT_OK_RETURN(rdbUpgradeListpack(p, &blobBulk));
                 IF_NOT_OK_RETURN(hashTemplateParseFieldsLp(p, blobBulk->ref,
                                                            blobBulk->len, &h->selfTmpl));
             } else if (fmt == 1) {
@@ -3533,6 +3597,8 @@ RdbStatus elementHashTmplSelfContained(RdbParser *p) {
             IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC_APP_BULK, NULL, &lpBulk));
 
             /*** ENTER SAFE STATE ***/
+
+            IF_NOT_OK_RETURN(rdbUpgradeListpack(p, &lpBulk));
 
             unsigned char *lp = (unsigned char *) lpBulk->ref;
             HashTemplate *t = h->tmpl;

@@ -234,6 +234,15 @@ static void test_r2r_set_lp_ex(void **state) {
     runWithAndWithoutRestore("set_lp_with_sexpire_v17.rdb");
 }
 
+/* RDB v14 listpacks with the compact boundary backlen of Redis 8.8 - 8.10: the
+ * parser must both replay them as commands and forward them verbatim via RESTORE
+ * (the payload footer carries the source RDB version, so the destination reads
+ * them by that version). */
+static void test_r2r_compact_backlen_v14(void **state) {
+    UNUSED(state);
+    runWithAndWithoutRestore("compact_backlen_v14.rdb");
+}
+
 /* Member TTLs become SPEXPIREAT against a 8.12+ target and are dropped
  * (SADD only) against an older one that doesn't know the command. */
 static void test_r2r_set_ex_target_version(void **state) {
@@ -478,6 +487,14 @@ static void test_r2r_hash_template_self_lp_v15(void **state) {
     checkTemplateResp("hash_template_self_lp_v15.rdb");
 }
 
+/* v15 templates whose listpacks (values, and field names) hold the compact
+ * boundary backlen of Redis 8.10 */
+static void test_r2r_hash_template_compact_backlen_v15(void **state) {
+    UNUSED(state);
+    checkTemplateResp("compact_backlen_tmpl_v15.rdb");
+    checkTemplateResp("compact_backlen_tmpl_self_v15.rdb");
+}
+
 /*************************** group_rdb_to_resp *******************************/
 int group_rdb_to_resp(void) {
     const struct CMUnitTest tests[] = {
@@ -507,6 +524,7 @@ int group_rdb_to_resp(void) {
             cmocka_unit_test(test_r2r_set_lp),
             cmocka_unit_test(test_r2r_set_ex),
             cmocka_unit_test(test_r2r_set_lp_ex),
+            cmocka_unit_test(test_r2r_compact_backlen_v14),
             cmocka_unit_test(test_r2r_set_ex_target_version),
             /* zset */
             cmocka_unit_test(test_r2r_plain_zset),
@@ -534,6 +552,7 @@ int group_rdb_to_resp(void) {
             cmocka_unit_test(test_r2r_hash_template_array_ref_v15),
             cmocka_unit_test(test_r2r_hash_template_self_array_v15),
             cmocka_unit_test(test_r2r_hash_template_self_lp_v15),
+            cmocka_unit_test(test_r2r_hash_template_compact_backlen_v15),
             /* misc */
             cmocka_unit_test(test_r2r_misc_with_stream),
             cmocka_unit_test(test_r2r_multiple_lists_and_strings),

@@ -1244,6 +1244,86 @@ int lpValidateIntegrity(unsigned char *lp, size_t size, int deep,
     return 1;
 }
 
+/* Smallest listpack that can hold an entry of encoded length 16383:
+ * header + entry + compact backlen + EOF. */
+#define LP_COMPACT_BACKLEN_MIN_BYTES (LP_HDR_SIZE + 16383 + 2 + 1)
+#define lpIsBacklenBoundary(l) ((l) == 16383 || (l) == 2097151 || (l) == 268435455)
+
+/* The compact backlen of a boundary length is 7f followed by ff bytes. */
+static const unsigned char lpCompactBacklenForm[] = {0x7f, 0xff, 0xff, 0xff};
+
+/* Redis 8.8 - 8.10 (redis/redis#15151, RDB v14 and v15) wrote the backlen of
+ * entries whose encoded length is 16383, 2097151 or 268435455 one byte shorter
+ * than any other version: 7f ff, 7f ff ff and 7f ff ff ff instead of 00 ff ff,
+ * 00 ff ff ff and 00 ff ff ff ff. Redis 8.12 restored the historical width
+ * (redis/redis#16099), the only one this file reads, and rewrites such entries
+ * on load. This is a port of lpUpgradeCompactBacklen() of Redis, split in two
+ * so the caller owns both buffers (the source is a parser bulk, not malloc'ed).
+ *
+ * Return the number of compact entries in 'lp' of 'size' bytes, i.e. how many
+ * bytes the listpack grows by once rewritten. Every read is bounds-checked. A
+ * malformed listpack returns 0, so the caller's integrity check (or a later
+ * traversal assertion) reports it exactly as without this function. The whole
+ * compact encoding is matched, so corruption is never "repaired". */
+size_t lpCompactBacklenEntries(unsigned char *lp, size_t size) {
+    if (size < LP_COMPACT_BACKLEN_MIN_BYTES) return 0;
+    if (lpGetTotalBytes(lp) != size || lp[size-1] != LP_EOF) return 0;
+
+    unsigned char *end = lp + size - 1; /* EOF byte */
+    unsigned char *p = lp + LP_HDR_SIZE;
+    size_t compact = 0;
+    while (p < end) {
+        size_t avail = end - p;
+        uint32_t lenbytes = lpCurrentEncodedSizeBytes(p);
+        if (!lenbytes || p[0] == LP_EOF || avail <= lenbytes) return 0;
+        uint64_t entrylen = lpCurrentEncodedSizeUnsafe(p);
+        /* A 32 bit string length close to UINT32_MAX wraps the encoded size. */
+        if (entrylen < lenbytes || entrylen >= avail) return 0;
+        unsigned long backlen = lpEncodeBacklen(NULL, entrylen);
+        if (lpIsBacklenBoundary(entrylen) && avail - entrylen >= backlen - 1 &&
+            !memcmp(p + entrylen, lpCompactBacklenForm, backlen - 1))
+        {
+            backlen--;
+            compact++;
+        }
+        if (entrylen + backlen > avail) return 0;
+        p += entrylen + backlen;
+    }
+    if (p != end || size + compact > UINT32_MAX) return 0;
+    return compact;
+}
+
+/* Copy the listpack 'lp' of 'size' bytes into 'dst', widening every compact
+ * backlen to the historical width. 'dst' must hold size + the value returned
+ * by lpCompactBacklenEntries(lp, size) bytes, and that value must be non-zero
+ * (it is the proof that 'lp' is well-formed enough to be walked here). Returns
+ * the number of bytes written to 'dst'. */
+size_t lpUpgradeCompactBacklen(unsigned char *dst, unsigned char *lp, size_t size) {
+    unsigned char *end = lp + size - 1; /* EOF byte */
+    unsigned char *d = dst + LP_HDR_SIZE;
+    memcpy(dst, lp, LP_HDR_SIZE);
+    for (unsigned char *p = lp + LP_HDR_SIZE; p < end; ) {
+        uint64_t entrylen = lpCurrentEncodedSizeUnsafe(p);
+        unsigned long backlen = lpEncodeBacklen(NULL, entrylen);
+        memcpy(d, p, entrylen);
+        d += entrylen;
+        if (lpIsBacklenBoundary(entrylen) &&
+            !memcmp(p + entrylen, lpCompactBacklenForm, backlen - 1))
+        {
+            d += lpEncodeBacklen(d, entrylen);
+            backlen--;
+        } else {
+            memcpy(d, p + entrylen, backlen);
+            d += backlen;
+        }
+        p += entrylen + backlen;
+    }
+    *d++ = LP_EOF;
+    size_t newsize = d - dst;
+    lpSetTotalBytes(dst, newsize);
+    return newsize;
+}
+
 /* Compare entry pointer to by 'p' with string 's' of length 'slen'.
  * Return 1 if equal. */
 unsigned int lpCompare(unsigned char *p, unsigned char *s, uint32_t slen) {
