@@ -39,6 +39,7 @@
 #ifndef LISTPACK_ALLOC_H
 #define LISTPACK_ALLOC_H
 
+/* librdb: plain libc allocator instead of zmalloc */
 #ifdef __APPLE__
 #include <malloc/malloc.h>
 #else

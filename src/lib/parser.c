@@ -1045,7 +1045,7 @@ RdbStatus allocFromCache(RdbParser *p,
 /*** Listpacks of RDB v14/15 (Redis 8.8 - 8.10) ***/
 
 /* RDB versions that may hold the compact boundary backlen written by
- * Redis 8.8 - 8.10 (redis/redis#15151). See lpCompactBacklenEntries(). */
+ * Redis 8.8 - 8.10 (redis/redis#15151). See lpUpgradeCompactBacklen(). */
 #define RDB_VERSION_COMPACT_BACKLEN_MIN 14
 #define RDB_VERSION_COMPACT_BACKLEN_MAX 15
 
@@ -1060,18 +1060,30 @@ static inline int rdbMayHoldCompactBacklen(RdbParser *p) {
  * listpack code (and every Redis other than 8.8 - 8.10) reads. Must run before
  * the integrity check and before anything else reads the listpack. The source
  * bulk stays valid until the pool is flushed, so a caller that must forward the
- * source bytes verbatim can keep a pointer to it. */
+ * source bytes verbatim can keep a pointer to it.
+ *
+ * The rewrite itself is Redis' own lpUpgradeCompactBacklen() (8.12), which
+ * returns a malloc'ed copy only when there is something to rewrite. That copy
+ * is moved into the bulk pool: an extra memcpy on a rare path, in return for
+ * keeping the bundled listpack code identical to upstream. */
 RdbStatus rdbUpgradeListpack(RdbParser *p, BulkInfo **binfo) {
     if (likely(!rdbMayHoldCompactBacklen(p))) return RDB_STATUS_OK;
 
     unsigned char *lp = (unsigned char *) (*binfo)->ref;
-    size_t compact = lpCompactBacklenEntries(lp, (*binfo)->len);
-    if (likely(compact == 0)) return RDB_STATUS_OK;
+    size_t newsize = (*binfo)->len;
+    unsigned char *rewritten = lpUpgradeCompactBacklen(lp, &newsize);
+    if (likely(rewritten == lp)) return RDB_STATUS_OK;
 
     BulkInfo *upgraded;
-    IF_NOT_OK_RETURN(allocFromCache(p, (*binfo)->len + compact, RQ_ALLOC_APP_BULK, NULL, &upgraded));
-    lpUpgradeCompactBacklen((unsigned char *) upgraded->ref, lp, (*binfo)->len);
-    RDB_log(p, RDB_LOG_DBG, "Rewrote %zu compact listpack backlen(s) (RDB v%d)", compact, p->rdbversion);
+    RdbStatus res = allocFromCache(p, newsize, RQ_ALLOC_APP_BULK, NULL, &upgraded);
+    if (res != RDB_STATUS_OK) {
+        lpFree(rewritten);
+        return res;
+    }
+    memcpy(upgraded->ref, rewritten, newsize);
+    lpFree(rewritten);
+    RDB_log(p, RDB_LOG_DBG, "Rewrote %zu compact listpack backlen(s) (RDB v%d)",
+            newsize - (*binfo)->len, p->rdbversion);
     *binfo = upgraded;
     return RDB_STATUS_OK;
 }
@@ -1082,14 +1094,14 @@ RdbStatus rdbUpgradeListpack(RdbParser *p, BulkInfo **binfo) {
  * forwarded bytes by the RDB version carried in the RESTORE payload footer. */
 int rdbLpValidateIntegrity(RdbParser *p, unsigned char *lp, size_t size, int deep,
                            listpackValidateEntryCB cb, void *cbArg) {
-    size_t compact = 0;
-    if (rdbMayHoldCompactBacklen(p)) compact = lpCompactBacklenEntries(lp, size);
-    if (likely(compact == 0)) return lpValidateIntegrity(lp, size, deep, cb, cbArg);
+    if (likely(!rdbMayHoldCompactBacklen(p))) return lpValidateIntegrity(lp, size, deep, cb, cbArg);
 
-    unsigned char *upgraded = RDB_alloc(p, size + compact);
-    size_t newsize = lpUpgradeCompactBacklen(upgraded, lp, size);
-    int ret = lpValidateIntegrity(upgraded, newsize, deep, cb, cbArg);
-    RDB_free(p, upgraded);
+    size_t newsize = size;
+    unsigned char *rewritten = lpUpgradeCompactBacklen(lp, &newsize);
+    if (likely(rewritten == lp)) return lpValidateIntegrity(lp, size, deep, cb, cbArg);
+
+    int ret = lpValidateIntegrity(rewritten, newsize, deep, cb, cbArg);
+    lpFree(rewritten);
     return ret;
 }
 

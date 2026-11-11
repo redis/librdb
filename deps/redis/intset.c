@@ -31,7 +31,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <assert.h>
+#include <assert.h> /* librdb: instead of redisassert.h; is_malloc instead of zmalloc */
 #include "intset.h"
 #include "endianconv.h"
 
@@ -264,6 +264,7 @@ int64_t intsetRandom(intset *is) {
     return _intsetGet(is,rand()%len);
 }
 
+/* librdb: intsetMax()/intsetMin() are additions, not in Redis. */
 /* Return the largest member. */
 int64_t intsetMax(intset *is) {
     uint32_t len = intrev32ifbe(is->length);

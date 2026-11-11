@@ -44,7 +44,7 @@
 #include "listpack.h"
 #include "listpack_malloc.h"
 
-//#include "redisassert.h"
+//#include "redisassert.h" /* librdb: <assert.h> is used instead */
 #include "util.h"
 
 #define LP_HDR_SIZE 6       /* 32 bit total len + 16 bit number of elements. */
@@ -294,6 +294,23 @@ static inline unsigned long lpEncodeBacklen(unsigned char *buf, uint64_t l) {
             buf[3] = ((l>>7)&127)|128;
             buf[4] = (l&127)|128;
         }
+        return 5;
+    }
+}
+
+/* librdb: backported from Redis 8.12 (redis/redis#16099), used by
+ * lpUpgradeCompactBacklen() below. */
+/* Return the number of bytes required to encode the backlen of 'l'. */
+static inline unsigned long lpEncodeBacklenBytes(uint64_t l) {
+    if (l <= 127) {
+        return 1;
+    } else if (l < 16383) {
+        return 2;
+    } else if (l < 2097151) {
+        return 3;
+    } else if (l < 268435455) {
+        return 4;
+    } else {
         return 5;
     }
 }
@@ -1244,72 +1261,69 @@ int lpValidateIntegrity(unsigned char *lp, size_t size, int deep,
     return 1;
 }
 
+/* librdb: begin backport from Redis 8.12 (redis/redis#16099, commit da925a2ca).
+ * Verbatim except for two marked lines: the vendored lpCurrentEncodedSizeBytes()
+ * takes a pointer, and the source listpack is not freed (it is a parser bulk,
+ * owned by the caller, not lp_malloc'ed). */
+
 /* Smallest listpack that can hold an entry of encoded length 16383:
  * header + entry + compact backlen + EOF. */
 #define LP_COMPACT_BACKLEN_MIN_BYTES (LP_HDR_SIZE + 16383 + 2 + 1)
 #define lpIsBacklenBoundary(l) ((l) == 16383 || (l) == 2097151 || (l) == 268435455)
 
-/* The compact backlen of a boundary length is 7f followed by ff bytes. */
-static const unsigned char lpCompactBacklenForm[] = {0x7f, 0xff, 0xff, 0xff};
-
-/* Redis 8.8 - 8.10 (redis/redis#15151, RDB v14 and v15) wrote the backlen of
- * entries whose encoded length is 16383, 2097151 or 268435455 one byte shorter
- * than any other version: 7f ff, 7f ff ff and 7f ff ff ff instead of 00 ff ff,
- * 00 ff ff ff and 00 ff ff ff ff. Redis 8.12 restored the historical width
- * (redis/redis#16099), the only one this file reads, and rewrites such entries
- * on load. This is a port of lpUpgradeCompactBacklen() of Redis, split in two
- * so the caller owns both buffers (the source is a parser bulk, not malloc'ed).
+/* Redis 8.8 - 8.10 (#15151) wrote the backlen of entries whose encoded length
+ * is 16383, 2097151 or 268435455 one byte shorter than any other version.
+ * Rewrite those entries in the historical width, the only one the rest of
+ * this file reads. Entries already in the historical width are kept as is.
  *
- * Return the number of compact entries in 'lp' of 'size' bytes, i.e. how many
- * bytes the listpack grows by once rewritten. Every read is bounds-checked. A
- * malformed listpack returns 0, so the caller's integrity check (or a later
- * traversal assertion) reports it exactly as without this function. The whole
- * compact encoding is matched, so corruption is never "repaired". */
-size_t lpCompactBacklenEntries(unsigned char *lp, size_t size) {
-    if (size < LP_COMPACT_BACKLEN_MIN_BYTES) return 0;
-    if (lpGetTotalBytes(lp) != size || lp[size-1] != LP_EOF) return 0;
+ * Returns the listpack, possibly reallocated, and updates '*size'. A malformed
+ * listpack is returned unchanged, so the caller's integrity check (or a later
+ * traversal assertion) reports it exactly as without this function. */
+unsigned char *lpUpgradeCompactBacklen(unsigned char *lp, size_t *size) {
+    /* The compact backlen of a boundary length is 7f followed by ff bytes. */
+    static const unsigned char compact_form[] = {0x7f, 0xff, 0xff, 0xff};
+    size_t bytes = *size;
+    if (bytes < LP_COMPACT_BACKLEN_MIN_BYTES) return lp;
+    if (lpGetTotalBytes(lp) != bytes || lp[bytes-1] != LP_EOF) return lp;
 
-    unsigned char *end = lp + size - 1; /* EOF byte */
+    /* First pass: count compact entries, bounds-checking every read. */
+    unsigned char *end = lp + bytes - 1; /* EOF byte */
     unsigned char *p = lp + LP_HDR_SIZE;
     size_t compact = 0;
     while (p < end) {
         size_t avail = end - p;
-        uint32_t lenbytes = lpCurrentEncodedSizeBytes(p);
-        if (!lenbytes || p[0] == LP_EOF || avail <= lenbytes) return 0;
+        uint32_t lenbytes = lpCurrentEncodedSizeBytes(p); /* librdb: upstream passes p[0] */
+        if (!lenbytes || p[0] == LP_EOF || avail <= lenbytes) return lp;
         uint64_t entrylen = lpCurrentEncodedSizeUnsafe(p);
         /* A 32 bit string length close to UINT32_MAX wraps the encoded size. */
-        if (entrylen < lenbytes || entrylen >= avail) return 0;
-        unsigned long backlen = lpEncodeBacklen(NULL, entrylen);
+        if (entrylen < lenbytes || entrylen >= avail) return lp;
+        unsigned long backlen = lpEncodeBacklenBytes(entrylen);
+        /* 'backlen' is the historical width, the compact one is a byte
+         * shorter: 7f ff, 7f ff ff and 7f ff ff ff instead of 00 ff ff,
+         * 00 ff ff ff and 00 ff ff ff ff. Match the whole compact encoding,
+         * so corruption is never "repaired". */
         if (lpIsBacklenBoundary(entrylen) && avail - entrylen >= backlen - 1 &&
-            !memcmp(p + entrylen, lpCompactBacklenForm, backlen - 1))
+            !memcmp(p + entrylen, compact_form, backlen - 1))
         {
             backlen--;
             compact++;
         }
-        if (entrylen + backlen > avail) return 0;
+        if (entrylen + backlen > avail) return lp;
         p += entrylen + backlen;
     }
-    if (p != end || size + compact > UINT32_MAX) return 0;
-    return compact;
-}
+    if (p != end || compact == 0 || bytes + compact > UINT32_MAX) return lp;
 
-/* Copy the listpack 'lp' of 'size' bytes into 'dst', widening every compact
- * backlen to the historical width. 'dst' must hold size + the value returned
- * by lpCompactBacklenEntries(lp, size) bytes, and that value must be non-zero
- * (it is the proof that 'lp' is well-formed enough to be walked here). Returns
- * the number of bytes written to 'dst'. */
-size_t lpUpgradeCompactBacklen(unsigned char *dst, unsigned char *lp, size_t size) {
-    unsigned char *end = lp + size - 1; /* EOF byte */
+    /* Second pass: copy, widening the compact backlens. */
+    size_t newbytes = bytes + compact;
+    unsigned char *dst = lp_malloc(newbytes);
     unsigned char *d = dst + LP_HDR_SIZE;
     memcpy(dst, lp, LP_HDR_SIZE);
-    for (unsigned char *p = lp + LP_HDR_SIZE; p < end; ) {
+    for (p = lp + LP_HDR_SIZE; p < end; ) {
         uint64_t entrylen = lpCurrentEncodedSizeUnsafe(p);
-        unsigned long backlen = lpEncodeBacklen(NULL, entrylen);
+        unsigned long backlen = lpEncodeBacklenBytes(entrylen);
         memcpy(d, p, entrylen);
         d += entrylen;
-        if (lpIsBacklenBoundary(entrylen) &&
-            !memcmp(p + entrylen, lpCompactBacklenForm, backlen - 1))
-        {
+        if (lpIsBacklenBoundary(entrylen) && !memcmp(p + entrylen, compact_form, backlen - 1)) {
             d += lpEncodeBacklen(d, entrylen);
             backlen--;
         } else {
@@ -1318,11 +1332,13 @@ size_t lpUpgradeCompactBacklen(unsigned char *dst, unsigned char *lp, size_t siz
         }
         p += entrylen + backlen;
     }
-    *d++ = LP_EOF;
-    size_t newsize = d - dst;
-    lpSetTotalBytes(dst, newsize);
-    return newsize;
+    *d = LP_EOF;
+    lpSetTotalBytes(dst, newbytes);
+    /* librdb: upstream calls lp_free(lp) here; our caller owns 'lp'. */
+    *size = newbytes;
+    return dst;
 }
+/* librdb: end backport from Redis 8.12. */
 
 /* Compare entry pointer to by 'p' with string 's' of length 'slen'.
  * Return 1 if equal. */

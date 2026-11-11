@@ -30,6 +30,8 @@
   listpack integrity check. The parser now rewrites these listpacks in the
   historical width on load, as Redis 8.12 does, for every listpack-backed
   encoding (hash, hash with HFE, set, zset, quicklist, stream, hash templates).
+  The rewrite is Redis 8.12's own `lpUpgradeCompactBacklen()`, backported into
+  the bundled `deps/redis/listpack.c` (now documented in `deps/redis/README.md`).
   STRUCT-level callbacks (`handleHashLP`, `handleSetLP`, ...) receive the
   rewritten listpack. `--support-restore` still forwards the source bytes
   verbatim: the RESTORE payload footer carries the source RDB version, by which

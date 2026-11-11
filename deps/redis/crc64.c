@@ -123,6 +123,7 @@ uint64_t crc64(uint64_t crc, const unsigned char *s, uint64_t l) {
 }
 
 /* Not sure if it is really required to use mutex here, but just in case */
+/* librdb: addition, not in Redis. */
 void crc64_init_thread_safe(void) {
     static int crcInitalized = 0;
     static pthread_mutex_t mutex = PTHREAD_MUTEX_INITIALIZER;
