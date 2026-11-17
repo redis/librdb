@@ -154,6 +154,7 @@ typedef struct RdbKeyInfo {
     int opcode;
     int dataType;           /* See enum RdbDataType */
     int numMeta;            /* number of metadata attached to the key */
+    int noEvict;            /* 1 if the key is blessed NO-EVICT (Redis 8.12+, RDB v17), else 0 */
 } RdbKeyInfo;
 
 typedef struct RdbSlotInfo {

@@ -404,6 +404,26 @@ static void test_rdb_to_redis_set_lp_ex(void **state) {
     test_rdb_to_redis_common(DUMP_FOLDER("set_lp_with_sexpire_v17.rdb"), 1, expCmd, NULL);
 }
 
+/* RDB v17 keys blessed NO-EVICT (Redis 8.12). Against 8.12+ the flag is replayed
+ * as BLESS SET, after the key's commands or its RESTORE, and verified with
+ * BLESS GET. Older targets load the keys without it. */
+static void test_rdb_to_redis_key_noevict_v17(void **state) {
+    UNUSED(state);
+    int supportBless = (serverMajorVer > 8) || ((serverMajorVer == 8) && (serverMinorVer >= 12));
+    if (!supportBless) {
+        test_rdb_to_redis_common(DUMP_FOLDER("key_noevict_v17.rdb"), 0, "$3\r\nSET", NULL);
+        return;
+    }
+    for (int isRestore = 0; isRestore <= 1; ++isRestore) {
+        test_rdb_to_redis_common_mode(DUMP_FOLDER("key_noevict_v17.rdb"), 0, "$5\r\nBLESS", NULL, isRestore);
+        sendRedisCmd("BLESS GET s_noevict", REDIS_REPLY_ARRAY, "NO-EVICT");
+        sendRedisCmd("BLESS GET s_noevict_ttl", REDIS_REPLY_ARRAY, "NO-EVICT");
+        sendRedisCmd("BLESS GET h_noevict", REDIS_REPLY_ARRAY, "NO-EVICT");
+        assert_null(strstr(sendRedisCmd("BLESS GET s_plain", REDIS_REPLY_ARRAY, NULL), "NO-EVICT"));
+        sendRedisCmd("PEXPIRETIME s_noevict_ttl", REDIS_REPLY_INTEGER, "4102444800000");
+    }
+}
+
 /* Listpacks saved by Redis 8.8 - 8.10 (RDB v14) with the compact boundary
  * backlen: one 16378-byte entry per encoding (hash LP, hash LP with HFE, set LP,
  * zset LP, quicklist2 node, stream). Replayed as commands (parser rewrites the
@@ -1140,6 +1160,7 @@ int group_rdb_to_redis(void) {
             cmocka_unit_test_setup(test_rdb_to_redis_set_with_expire, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_set_ex, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_set_lp_ex, setupTest),
+            cmocka_unit_test_setup(test_rdb_to_redis_key_noevict_v17, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_compact_backlen_v14, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_compact_backlen_tmpl_v15, setupTest),
             /* zset */

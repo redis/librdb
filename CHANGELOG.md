@@ -20,6 +20,16 @@
     when the destination is 8.12+.
   - `rdbversion` 17 fixtures under `test/dumps/` (`set_with_sexpire_v17.rdb`,
     `set_lp_with_sexpire_v17.rdb`).
+- **RDB v17 Support (Redis 8.12), part 2 - keys blessed NO-EVICT**: parse
+  `RDB_OPCODE_KEY_NOEVICT` (241, no payload), written before a key that was
+  blessed with `BLESS SET <key> NO-EVICT`. The flag surfaces as the new field
+  `RdbKeyInfo.noEvict` (appended to the struct, passed to `handleNewKey`) and as
+  `%b` in `rdb-cli print`.
+  - RESP/redis targets 8.12+: `BLESS SET <key> NO-EVICT` is emitted after the
+    key, in command mode and after `RESTORE` alike (RESTORE has no such option
+    and the DUMP payload doesn't carry the flag). Older targets load the key
+    without it.
+  - Fixture `key_noevict_v17.rdb`.
 
 ### Bug Fixes
 - **Listpacks saved by Redis 8.8 - 8.10 (RDB v14/v15)**: those versions wrote

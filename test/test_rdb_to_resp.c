@@ -234,6 +234,26 @@ static void test_r2r_set_lp_ex(void **state) {
     runWithAndWithoutRestore("set_lp_with_sexpire_v17.rdb");
 }
 
+/* RDB v17 keys blessed NO-EVICT (Redis 8.12): replayed as `BLESS SET <key>
+ * NO-EVICT` right after the key, in command mode and after RESTORE alike
+ * (RESTORE has no such option and the DUMP payload doesn't carry the flag).
+ * Targets before 8.12 don't know BLESS and get none. */
+static void test_r2r_key_noevict_v17(void **state) {
+    UNUSED(state);
+    RdbxToRespConf r2rConf;
+    char *bless = "$5\r\nBLESS\r\n$3\r\nSET\r\n$9\r\ns_noevict\r\n$8\r\nNO-EVICT\r\n";
+    memset(&r2rConf, 0, sizeof(r2rConf));
+
+    for (int restore = 0; restore <= 1; ++restore) {
+        r2rConf.supportRestore = restore;
+        r2rConf.dstRedisVersion = "8.12";
+        testRdbToRespCommon("key_noevict_v17.rdb", &r2rConf, bless, strlen(bless), M_SUBSTR, 1);
+        testRdbToRespCommon("key_noevict_v17.rdb", &r2rConf, "RESTORE", 7, M_SUBSTR, restore);
+        r2rConf.dstRedisVersion = "8.10";
+        testRdbToRespCommon("key_noevict_v17.rdb", &r2rConf, "BLESS", 5, M_SUBSTR, 0);
+    }
+}
+
 /* RDB v14 listpacks with the compact boundary backlen of Redis 8.8 - 8.10: the
  * parser must both replay them as commands and forward them verbatim via RESTORE
  * (the payload footer carries the source RDB version, so the destination reads
@@ -524,6 +544,7 @@ int group_rdb_to_resp(void) {
             cmocka_unit_test(test_r2r_set_lp),
             cmocka_unit_test(test_r2r_set_ex),
             cmocka_unit_test(test_r2r_set_lp_ex),
+            cmocka_unit_test(test_r2r_key_noevict_v17),
             cmocka_unit_test(test_r2r_compact_backlen_v14),
             cmocka_unit_test(test_r2r_set_ex_target_version),
             /* zset */

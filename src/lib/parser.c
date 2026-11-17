@@ -54,6 +54,7 @@ struct ParsingElementInfo peInfo[PE_MAX] = {
         [PE_EXPIRETIMEMSEC]   = {elementExpireTimeMsec, "elementExpireTimeMsec", "Parsing expire-time-msec"},
         [PE_FREQ]             = {elementFreq, "elementFreq", "Parsing LFU frequency"},
         [PE_IDLE]             = {elementIdle, "elementIdle", "Parsing LRU idle time"},
+        [PE_KEY_NOEVICT]      = {elementKeyNoEvict, "elementKeyNoEvict", "Parsing key NO-EVICT attribute"},
 
         [PE_NEW_KEY]          = {elementNewKey, "elementNewKey", "Parsing new key-value"},
         [PE_END_KEY]          = {elementEndKey, "elementEndKey", "Parsing end key"},
@@ -286,6 +287,7 @@ _LIBRDB_API RdbParser *RDB_createParserRdb(RdbMemAlloc *memAlloc) {
     p->elmCtx.key.info.expiretime = -1;
     p->elmCtx.key.info.lruIdle = -1;
     p->elmCtx.key.info.lfuFreq = -1;
+    p->elmCtx.key.info.noEvict = 0;
     p->elmCtx.key.numItemsHint = -1;
 
     p->currOpcode = UINT32_MAX;
@@ -1641,6 +1643,7 @@ RdbStatus elementNewKey(RdbParser *p) {
     p->elmCtx.key.info.expiretime = -1;
     p->elmCtx.key.info.lruIdle = -1;
     p->elmCtx.key.info.lfuFreq = -1;
+    p->elmCtx.key.info.noEvict = 0;
     p->elmCtx.key.numItemsHint = -1;
     /* Read value */
     return nextParsingElement(p, p->elmCtx.key.parsingElemType);
@@ -1702,6 +1705,7 @@ RdbStatus elementNextRdbType(RdbParser *p) {
         case RDB_OPCODE_RESIZEDB:           return nextParsingElement(p, PE_RESIZE_DB);
         case RDB_OPCODE_FREQ:               return nextParsingElement(p, PE_FREQ);
         case RDB_OPCODE_IDLE:               return nextParsingElement(p, PE_IDLE);
+        case RDB_OPCODE_KEY_NOEVICT:        return nextParsingElement(p, PE_KEY_NOEVICT);
         case RDB_OPCODE_KEY_META:           return nextParsingElement(p, PE_RAW_KEY_META);
 
         /* Redis Enterprise only */
@@ -1809,6 +1813,13 @@ RdbStatus elementIdle(RdbParser *p) {
     IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &lruIdle, NULL, NULL));
     /*** ENTER SAFE STATE ***/
     p->elmCtx.key.info.lruIdle = lruIdle;
+    return nextParsingElement(p, PE_NEXT_RDB_TYPE);
+}
+
+/* RDB_OPCODE_KEY_NOEVICT (Redis 8.12, RDB v17): the next key is blessed
+ * NO-EVICT. The opcode has no payload; its presence flags the key. */
+RdbStatus elementKeyNoEvict(RdbParser *p) {
+    p->elmCtx.key.info.noEvict = 1;
     return nextParsingElement(p, PE_NEXT_RDB_TYPE);
 }
 

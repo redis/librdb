@@ -177,6 +177,9 @@ static void printKeyFmt(RdbxToPrint *ctx, RdbBulk string) {
                 case 'm':
                     fprintf(ctx->outfile, "%d", ctx->keyCtx.info.numMeta);
                     break;
+                case 'b':
+                    fprintf(ctx->outfile, "%d", ctx->keyCtx.info.noEvict);
+                    break;
                 case 'i':
                     fprintf(ctx->outfile, "%ld", ctx->keyCtx.items);
                     break;

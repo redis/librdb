@@ -55,6 +55,7 @@
 #define RDB_HASH_TMPL_MAX_ID  (1<<23) /* 8M entries */
 
 /* Special RDB opcodes (saved/loaded with rdbSaveType/rdbLoadType). */
+#define RDB_OPCODE_KEY_NOEVICT 241  /* Per-key attribute: BLESS NO-EVICT. No payload; presence flags the key (v17). */
 #define RDB_OPCODE_HASH_TEMPLATE 242 /* One hash template record (v15). */
 #define RDB_OPCODE_KEY_META   243   /* Key metadata (module metadata classes). */
 #define RDB_OPCODE_SLOT_INFO  244   /* Individual slot info, such as slot id and size (cluster mode only). */

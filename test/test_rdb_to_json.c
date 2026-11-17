@@ -304,6 +304,15 @@ static void test_r2j_set_lp_ex_data(void **state) {
     testRdbToJsonCommon(DUMP_FOLDER("set_lp_with_sexpire_v17.rdb"), DUMP_FOLDER("set_lp_ex_v17_data.json"), &r2jConf);
 }
 
+/* RDB v17 keys blessed NO-EVICT (Redis 8.12): RDB_OPCODE_KEY_NOEVICT precedes
+ * the key (after its expiry, if any). JSON output carries values only, so the
+ * flag must simply not disturb parsing. */
+static void test_r2j_key_noevict_v17_data(void **state) {
+    UNUSED(state);
+    RdbxToJsonConf r2jConf = DEF_CONF(RDB_LEVEL_DATA);
+    testRdbToJsonCommon(DUMP_FOLDER("key_noevict_v17.rdb"), DUMP_FOLDER("key_noevict_v17.json"), &r2jConf);
+}
+
 /* Listpacks saved by Redis 8.8 - 8.10 (RDB v14/v15) hold a one-byte-shorter
  * "compact" backlen for entries of encoded length 16383 (and 2097151,
  * 268435455). Each key below carries one such entry (a 16378-byte string).
@@ -864,6 +873,7 @@ int group_rdb_to_json(void) {
         cmocka_unit_test(test_r2j_set_lp_raw),
         cmocka_unit_test(test_r2j_set_ex_data),
         cmocka_unit_test(test_r2j_set_lp_ex_data),
+        cmocka_unit_test(test_r2j_key_noevict_v17_data),
         cmocka_unit_test(test_r2j_compact_backlen_v14_data),
         cmocka_unit_test(test_r2j_compact_backlen_tmpl_v15_data),
 

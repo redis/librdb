@@ -456,8 +456,25 @@ static RdbRes toRespEndKey(RdbParser *p, void *userData) {
         IOV_STRING(&iov[2], ctx->keyCtx.key, ctx->keyCtx.keyLen);
         IOV_LEN_AND_VAL(iov+3, ctx->keyCtx.info.expiretime, expireLenStr, expireStr);
         res = writevWrap(ctx, iov, 5, &startCmd, 1);
+        if (res != RDB_OK) goto done;
     }
 
+    /* Key blessed NO-EVICT (RDB v17). Neither RESTORE nor the DUMP payload carry
+     * the flag, so it is replayed as a command in both modes. Targets before
+     * 8.12 don't know BLESS; the key is loaded without the flag. */
+    if (ctx->keyCtx.info.noEvict && ctx->targetRedisVerVal >= VER_VAL(8, 12)) {
+        struct iovec iov[4];
+        RdbxRespWriterStartCmd startCmd = {"BLESS", ctx->keyCtx.key, 0};
+        char keyLenStr[32];
+
+        IOV_CONST(&iov[0], "*4\r\n$5\r\nBLESS\r\n$3\r\nSET");
+        IOV_LENGTH(&iov[1], ctx->keyCtx.keyLen, keyLenStr);
+        IOV_STRING(&iov[2], ctx->keyCtx.key, ctx->keyCtx.keyLen);
+        IOV_CONST(&iov[3], "\r\n$8\r\nNO-EVICT\r\n");
+        res = writevWrap(ctx, iov, 4, &startCmd, 1);
+    }
+
+done:
     RDB_bulkCopyFree(p, ctx->keyCtx.key);
     ctx->keyCtx.key = NULL;
 

@@ -89,6 +89,14 @@ static void test_rdb_cli_filter_db(void **state) {
         "y\nz\n");
 }
 
+/* print format %b: 1 for a key blessed NO-EVICT (RDB v17), else 0 */
+static void test_rdb_cli_print_noevict(void **state) {
+    UNUSED(state);
+    assert_string_equal(
+        runSystemCmd(" $RDB_CLI_CMD ./test/dumps/key_noevict_v17.rdb print -k \"%%k,%%b\" | sort"),
+        "h_noevict,1\ns_noevict,1\ns_noevict_ttl,1\ns_plain,0\n");
+}
+
 static void test_rdb_cli_filter_key(void **state) {
     UNUSED(state);
     /* -k/--key (found string2 but not mylist1 or lzf_compressed) */
@@ -265,6 +273,7 @@ int group_test_rdb_cli(void) {
             cmocka_unit_test(test_rdb_cli_json),
             cmocka_unit_test_setup(test_rdb_cli_resp_to_redis, setupTest),
             cmocka_unit_test_setup(test_rdb_cli_filter_db, setupTest),
+            cmocka_unit_test_setup(test_rdb_cli_print_noevict, setupTest),
             cmocka_unit_test_setup(test_rdb_cli_filter_key, setupTest),
             cmocka_unit_test_setup(test_rdb_cli_filter_invalid_input, setupTest),
             cmocka_unit_test_setup(test_rdb_cli_filter_type, setupTest),
