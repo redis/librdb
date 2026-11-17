@@ -31,7 +31,9 @@ origin version.
   `lpEncodeBacklenBytes()` from Redis 8.12 (redis/redis#16099), fenced by
   `librdb: begin/end backport` comments. Two lines differ from upstream, both
   marked: the vendored `lpCurrentEncodedSizeBytes()` takes a pointer, and the
-  source listpack is not freed because the parser owns it.
+  source listpack is not freed because the parser owns it. The rewritten copy it
+  returns comes from libc `malloc` (`lp_malloc`), not from the parser's
+  `RdbMemAlloc`; the parser copies it into its bulk pool and frees it at once.
 
 ## Updating
 

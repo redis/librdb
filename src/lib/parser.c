@@ -1065,7 +1065,12 @@ static inline int rdbMayHoldCompactBacklen(RdbParser *p) {
  * The rewrite itself is Redis' own lpUpgradeCompactBacklen() (8.12), which
  * returns a malloc'ed copy only when there is something to rewrite. That copy
  * is moved into the bulk pool: an extra memcpy on a rare path, in return for
- * keeping the bundled listpack code identical to upstream. */
+ * keeping the bundled listpack code identical to upstream.
+ *
+ * Note: the transient copy comes from libc malloc (lp_malloc), not from the
+ * application's RdbMemAlloc callbacks, and is released with lpFree() before
+ * returning. It is the only allocation in the parser that bypasses the
+ * configured allocator; accepted so the deps code stays verbatim. */
 RdbStatus rdbUpgradeListpack(RdbParser *p, BulkInfo **binfo) {
     if (likely(!rdbMayHoldCompactBacklen(p))) return RDB_STATUS_OK;
 
