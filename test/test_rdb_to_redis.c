@@ -432,6 +432,10 @@ static void test_rdb_to_redis_key_noevict_v17(void **state) {
  * encodings on the destination, so set order is ignored. */
 static void test_rdb_to_redis_compact_backlen_v14(void **state) {
     UNUSED(state);
+    /* the fixture holds a hash with field expiry (HPEXPIREAT): targets before
+     * 7.4 reject the command, as in test_rdb_to_redis_hash_with_expire */
+    if ((serverMajorVer<7) || ((serverMajorVer==7) && (serverMinorVer<4)))
+        skip();
     test_rdb_to_redis_common(DUMP_FOLDER("compact_backlen_v14.rdb"), 1, "$4\r\nHSET", NULL);
 }
 

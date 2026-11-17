@@ -93,7 +93,7 @@ static void test_rdb_cli_filter_db(void **state) {
 static void test_rdb_cli_print_noevict(void **state) {
     UNUSED(state);
     assert_string_equal(
-        runSystemCmd(" $RDB_CLI_CMD ./test/dumps/key_noevict_v17.rdb print -k \"%%k,%%b\" | sort"),
+        runSystemCmd(" $RDB_CLI_CMD ./test/dumps/key_noevict_v17.rdb print -k \"%%k,%%b\" | LC_ALL=C sort"),
         "h_noevict,1\ns_noevict,1\ns_noevict_ttl,1\ns_plain,0\n");
 }
 
