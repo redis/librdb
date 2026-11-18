@@ -29,9 +29,10 @@ origin version.
   declaration, `lpStringToInt64()` moved to `util.c`.
 - **Backports from newer Redis**: `lpUpgradeCompactBacklen()` and its helper
   `lpEncodeBacklenBytes()` from Redis 8.12 (redis/redis#16099), fenced by
-  `librdb: begin/end backport` comments. Two lines differ from upstream, both
-  marked: the vendored `lpCurrentEncodedSizeBytes()` takes a pointer, and the
-  source listpack is not freed because the parser owns it. The rewritten copy it
+  `librdb: begin/end backport` comments. Three lines differ from upstream, all
+  marked: the vendored `lpCurrentEncodedSizeBytes()` takes a pointer, the
+  source listpack is not freed because the parser owns it, and NULL is returned
+  when the allocation fails (upstream's `zmalloc` aborts instead). The rewritten copy it
   returns comes from libc `malloc` (`lp_malloc`), not from the parser's
   `RdbMemAlloc`; the parser copies it into its bulk pool and frees it at once.
 

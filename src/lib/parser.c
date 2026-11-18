@@ -1080,6 +1080,11 @@ RdbStatus rdbUpgradeListpack(RdbParser *p, BulkInfo **binfo) {
     size_t newsize = (*binfo)->len;
     unsigned char *rewritten = lpUpgradeCompactBacklen(lp, &newsize);
     if (likely(rewritten == lp)) return RDB_STATUS_OK;
+    if (unlikely(rewritten == NULL)) {
+        RDB_reportError(p, RDB_ERR_FAIL_ALLOC,
+            "rdbUpgradeListpack(): Failed to allocate %zu bytes to rewrite listpack", newsize);
+        return RDB_STATUS_ERROR;
+    }
 
     BulkInfo *upgraded;
     RdbStatus res = allocFromCache(p, newsize, RQ_ALLOC_APP_BULK, NULL, &upgraded);
@@ -1106,6 +1111,11 @@ int rdbLpValidateIntegrity(RdbParser *p, unsigned char *lp, size_t size, int dee
     size_t newsize = size;
     unsigned char *rewritten = lpUpgradeCompactBacklen(lp, &newsize);
     if (likely(rewritten == lp)) return lpValidateIntegrity(lp, size, deep, cb, cbArg);
+    if (unlikely(rewritten == NULL)) {
+        RDB_reportError(p, RDB_ERR_FAIL_ALLOC,
+            "rdbLpValidateIntegrity(): Failed to allocate memory to validate listpack");
+        return 0;
+    }
 
     int ret = lpValidateIntegrity(rewritten, newsize, deep, cb, cbArg);
     lpFree(rewritten);

@@ -1262,9 +1262,10 @@ int lpValidateIntegrity(unsigned char *lp, size_t size, int deep,
 }
 
 /* librdb: begin backport from Redis 8.12 (redis/redis#16099, commit da925a2ca).
- * Verbatim except for two marked lines: the vendored lpCurrentEncodedSizeBytes()
- * takes a pointer, and the source listpack is not freed (it is a parser bulk,
- * owned by the caller, not lp_malloc'ed). */
+ * Verbatim except for three marked lines: the vendored lpCurrentEncodedSizeBytes()
+ * takes a pointer, the source listpack is not freed (it is a parser bulk,
+ * owned by the caller, not lp_malloc'ed), and NULL is returned if the
+ * allocation fails (lp_malloc is libc malloc here, upstream's zmalloc aborts). */
 
 /* Smallest listpack that can hold an entry of encoded length 16383:
  * header + entry + compact backlen + EOF. */
@@ -1316,6 +1317,7 @@ unsigned char *lpUpgradeCompactBacklen(unsigned char *lp, size_t *size) {
     /* Second pass: copy, widening the compact backlens. */
     size_t newbytes = bytes + compact;
     unsigned char *dst = lp_malloc(newbytes);
+    if (dst == NULL) return NULL; /* librdb: lp_malloc is libc malloc, upstream's zmalloc aborts */
     unsigned char *d = dst + LP_HDR_SIZE;
     memcpy(dst, lp, LP_HDR_SIZE);
     for (p = lp + LP_HDR_SIZE; p < end; ) {
