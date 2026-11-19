@@ -42,7 +42,13 @@
 #define RDB_TYPE_HASH_TMPL_LP_REF   30        /* Hash template (v15): with template ref (RDB save): [tid][lp_blob] */
 #define RDB_TYPE_HASH_TMPL_ARRAY    31        /* Hash template (v15): self-contained (DUMP): [fields_fmt][fields][v0]...[vN-1] */
 #define RDB_TYPE_HASH_TMPL_ARRAY_REF 32       /* Hash template (v15): with template ref (RDB save): [tid][v0]...[vN-1] */
-#define RDB_TYPE_MAX                33
+#define RDB_TYPE_BITMAP             33        /* Compressed (roaring) bitmap (v16): [byte_len][portable blob] */
+#define RDB_TYPE_SET_LISTPACK_EX    34        /* Set LP with member expirations (v17). Attach min TTL at start */
+#define RDB_TYPE_SET_METADATA       35        /* Set with member expirations (v17). Attach min TTL at start */
+#define RDB_TYPE_MAX                36
+
+/* Maximum expire-time of a hash field or set member (Redis EB_EXPIRE_TIME_MAX) */
+#define RDB_EXPIRE_TIME_MAX         ((uint64_t)0x0000FFFFFFFFFFFF)
 
 
 /* Highest hash-template id the registry accepts (v15). The saver assigns
@@ -52,6 +58,7 @@
 #define RDB_HASH_TMPL_MAX_ID  (1<<23) /* 8M entries */
 
 /* Special RDB opcodes (saved/loaded with rdbSaveType/rdbLoadType). */
+#define RDB_OPCODE_KEY_NOEVICT 241  /* Per-key attribute: BLESS NO-EVICT. No payload; presence flags the key (v17). */
 #define RDB_OPCODE_HASH_TEMPLATE 242 /* One hash template record (v15). */
 #define RDB_OPCODE_KEY_META   243   /* Key metadata (module metadata classes). */
 #define RDB_OPCODE_SLOT_INFO  244   /* Individual slot info, such as slot id and size (cluster mode only). */

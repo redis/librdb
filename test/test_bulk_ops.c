@@ -119,6 +119,11 @@ static const char *bulkOpsDumps[] = {
         DUMP_FOLDER("hash_template_v15.rdb"),       /* template hash, values in a listpack */
         DUMP_FOLDER("hash_template_array_v15.rdb"), /* template hash, values as raw strings */
         DUMP_FOLDER("hash_template_self_lp_v15.rdb"), /* self-contained template hash */
+        /* RDB v14/v15 listpacks rewritten by the parser (compact boundary backlen
+         * of Redis 8.8 - 8.10): the rewritten listpack is a new app bulk */
+        DUMP_FOLDER("compact_backlen_v14.rdb"),
+        DUMP_FOLDER("compact_backlen_tmpl_v15.rdb"),
+        DUMP_FOLDER("compact_backlen_tmpl_self_v15.rdb"),
 };
 #define NUM_BULK_OPS_DUMPS (sizeof(bulkOpsDumps) / sizeof(bulkOpsDumps[0]))
 

@@ -54,6 +54,7 @@ struct ParsingElementInfo peInfo[PE_MAX] = {
         [PE_EXPIRETIMEMSEC]   = {elementExpireTimeMsec, "elementExpireTimeMsec", "Parsing expire-time-msec"},
         [PE_FREQ]             = {elementFreq, "elementFreq", "Parsing LFU frequency"},
         [PE_IDLE]             = {elementIdle, "elementIdle", "Parsing LRU idle time"},
+        [PE_KEY_NOEVICT]      = {elementKeyNoEvict, "elementKeyNoEvict", "Parsing key NO-EVICT attribute"},
 
         [PE_NEW_KEY]          = {elementNewKey, "elementNewKey", "Parsing new key-value"},
         [PE_END_KEY]          = {elementEndKey, "elementEndKey", "Parsing end key"},
@@ -76,8 +77,10 @@ struct ParsingElementInfo peInfo[PE_MAX] = {
         [PE_HASH_ZM]          = {elementHashZM, "elementHashZM", "Parsing hash Zipmap"},
         /* set */
         [PE_SET]              = {elementSet, "elementSet", "Parsing set"},
+        [PE_SET_META]         = {elementSet, "elementSetMeta", "Parsing set with expiry on members"},
         [PE_SET_IS]           = {elementSetIS, "elementSetIS", "Parsing set Intset"},
         [PE_SET_LP]           = {elementSetLP, "elementSetLP", "Parsing set Listpack"},
+        [PE_SET_LP_EX]        = {elementSetLPEx, "elementSetLPEx", "Parsing set ListpackEx (with expiry)"},
         /* zset */
         [PE_ZSET]             = {elementZset, "elementZset", "Parsing zset"},
         [PE_ZSET_2]           = {elementZset, "elementZset", "Parsing zset_2"},
@@ -118,8 +121,10 @@ struct ParsingElementInfo peInfo[PE_MAX] = {
         [PE_RAW_HASH_ZM]      = {elementRawHashZM, "elementRawHashZM", "Parsing raw hash Zipmap"},
         /* set */
         [PE_RAW_SET]          = {elementRawSet, "elementRawSet", "Parsing raw set"},
+        [PE_RAW_SET_META]     = {elementRawSet, "elementRawSetMeta", "Parsing raw set with expiry"},
         [PE_RAW_SET_IS]       = {elementRawSetIS, "elementRawSetIS", "Parsing raw set Intset"},
         [PE_RAW_SET_LP]       = {elementRawSetLP, "elementRawSetLP", "Parsing raw set Listpack"},
+        [PE_RAW_SET_LP_EX]    = {elementRawSetLPEx, "elementRawSetLPEx", "Parsing raw set ListpackEx"},
         /* zset */
         [PE_RAW_ZSET]         = {elementRawZset, "elementRawZset", "Parsing raw zset"},
         [PE_RAW_ZSET_2]       = {elementRawZset, "elementRawZset", "Parsing raw zset_2"},
@@ -282,6 +287,7 @@ _LIBRDB_API RdbParser *RDB_createParserRdb(RdbMemAlloc *memAlloc) {
     p->elmCtx.key.info.expiretime = -1;
     p->elmCtx.key.info.lruIdle = -1;
     p->elmCtx.key.info.lfuFreq = -1;
+    p->elmCtx.key.info.noEvict = 0;
     p->elmCtx.key.numItemsHint = -1;
 
     p->currOpcode = UINT32_MAX;
@@ -633,6 +639,8 @@ _LIBRDB_API int RDB_handleByLevel(RdbParser *p, RdbDataType type, RdbHandlersLev
             p->handleTypeObjByLevel[RDB_TYPE_SET] = lvl;
             p->handleTypeObjByLevel[RDB_TYPE_SET_INTSET] = lvl;
             p->handleTypeObjByLevel[RDB_TYPE_SET_LISTPACK] = lvl;
+            p->handleTypeObjByLevel[RDB_TYPE_SET_LISTPACK_EX] = lvl;
+            p->handleTypeObjByLevel[RDB_TYPE_SET_METADATA] = lvl;
             break;
         case RDB_DATA_TYPE_ZSET:
             p->handleTypeObjByLevel[RDB_TYPE_ZSET] = lvl;
@@ -703,6 +711,8 @@ static inline RdbDataType getDataType(int opcode) {
         case RDB_TYPE_SET:
         case RDB_TYPE_SET_INTSET:
         case RDB_TYPE_SET_LISTPACK:
+        case RDB_TYPE_SET_LISTPACK_EX:
+        case RDB_TYPE_SET_METADATA:
             return RDB_DATA_TYPE_SET;
 
         case RDB_TYPE_ZSET:
@@ -1034,6 +1044,84 @@ RdbStatus allocFromCache(RdbParser *p,
     return RDB_STATUS_OK;
 }
 
+/*** Listpacks of RDB v14/15 (Redis 8.8 - 8.10) ***/
+
+/* RDB versions that may hold the compact boundary backlen written by
+ * Redis 8.8 - 8.10 (redis/redis#15151). See lpUpgradeCompactBacklen(). */
+#define RDB_VERSION_COMPACT_BACKLEN_MIN 14
+#define RDB_VERSION_COMPACT_BACKLEN_MAX 15
+
+static inline int rdbMayHoldCompactBacklen(RdbParser *p) {
+    return (p->rdbversion >= RDB_VERSION_COMPACT_BACKLEN_MIN &&
+            p->rdbversion <= RDB_VERSION_COMPACT_BACKLEN_MAX);
+}
+
+/* A listpack just loaded from an RDB of version 14 or 15 may carry compact
+ * backlens (Redis 8.8 - 8.10). If so, replace *binfo by a new app-bulk holding
+ * the listpack rewritten in the historical width, the only one the bundled
+ * listpack code (and every Redis other than 8.8 - 8.10) reads. Must run before
+ * the integrity check and before anything else reads the listpack. The source
+ * bulk stays valid until the pool is flushed, so a caller that must forward the
+ * source bytes verbatim can keep a pointer to it.
+ *
+ * The rewrite itself is Redis' own lpUpgradeCompactBacklen() (8.12), which
+ * returns a malloc'ed copy only when there is something to rewrite. That copy
+ * is moved into the bulk pool: an extra memcpy on a rare path, in return for
+ * keeping the bundled listpack code identical to upstream.
+ *
+ * Note: the transient copy comes from libc malloc (lp_malloc), not from the
+ * application's RdbMemAlloc callbacks, and is released with lpFree() before
+ * returning. It is the only allocation in the parser that bypasses the
+ * configured allocator; accepted so the deps code stays verbatim. */
+RdbStatus rdbUpgradeListpack(RdbParser *p, BulkInfo **binfo) {
+    if (likely(!rdbMayHoldCompactBacklen(p))) return RDB_STATUS_OK;
+
+    unsigned char *lp = (unsigned char *) (*binfo)->ref;
+    size_t newsize = (*binfo)->len;
+    unsigned char *rewritten = lpUpgradeCompactBacklen(lp, &newsize);
+    if (likely(rewritten == lp)) return RDB_STATUS_OK;
+    if (unlikely(rewritten == NULL)) {
+        RDB_reportError(p, RDB_ERR_FAIL_ALLOC,
+            "rdbUpgradeListpack(): Failed to allocate %zu bytes to rewrite listpack", newsize);
+        return RDB_STATUS_ERROR;
+    }
+
+    BulkInfo *upgraded;
+    RdbStatus res = allocFromCache(p, newsize, RQ_ALLOC_APP_BULK, NULL, &upgraded);
+    if (res != RDB_STATUS_OK) {
+        lpFree(rewritten);
+        return res;
+    }
+    memcpy(upgraded->ref, rewritten, newsize);
+    lpFree(rewritten);
+    RDB_log(p, RDB_LOG_DBG, "Rewrote %zu compact listpack backlen(s) (RDB v%d)",
+            newsize - (*binfo)->len, p->rdbversion);
+    *binfo = upgraded;
+    return RDB_STATUS_OK;
+}
+
+/* lpValidateIntegrity() for a listpack that is forwarded verbatim (RAW level,
+ * RESTORE payload): if it carries compact backlens (see rdbUpgradeListpack())
+ * validate an upgraded temporary copy instead. The destination reads the
+ * forwarded bytes by the RDB version carried in the RESTORE payload footer. */
+int rdbLpValidateIntegrity(RdbParser *p, unsigned char *lp, size_t size, int deep,
+                           listpackValidateEntryCB cb, void *cbArg) {
+    if (likely(!rdbMayHoldCompactBacklen(p))) return lpValidateIntegrity(lp, size, deep, cb, cbArg);
+
+    size_t newsize = size;
+    unsigned char *rewritten = lpUpgradeCompactBacklen(lp, &newsize);
+    if (likely(rewritten == lp)) return lpValidateIntegrity(lp, size, deep, cb, cbArg);
+    if (unlikely(rewritten == NULL)) {
+        RDB_reportError(p, RDB_ERR_FAIL_ALLOC,
+            "rdbLpValidateIntegrity(): Failed to allocate memory to validate listpack");
+        return 0;
+    }
+
+    int ret = lpValidateIntegrity(rewritten, newsize, deep, cb, cbArg);
+    lpFree(rewritten);
+    return ret;
+}
+
 static inline RdbStatus unpackList(RdbParser *p, unsigned char *lp) {
     unsigned char *eptr, *item;
     unsigned int itemLen = 0;
@@ -1209,6 +1297,8 @@ static RdbStatus hashZiplist(RdbParser *p, BulkInfo *ziplistBulk) {
 
 static RdbStatus hashListPack(RdbParser *p, BulkInfo *lpBulk, int withExpiry) {
     size_t items = 0;
+
+    IF_NOT_OK_RETURN(rdbUpgradeListpack(p, &lpBulk));
 
     if (unlikely(0 == lpValidateIntegrity(lpBulk->ref, lpBulk->len, p->deepIntegCheck, counterCallback, &items))) {
         RDB_reportError(p, RDB_ERR_HASH_LP_INTEG_CHECK,
@@ -1563,6 +1653,7 @@ RdbStatus elementNewKey(RdbParser *p) {
     p->elmCtx.key.info.expiretime = -1;
     p->elmCtx.key.info.lruIdle = -1;
     p->elmCtx.key.info.lfuFreq = -1;
+    p->elmCtx.key.info.noEvict = 0;
     p->elmCtx.key.numItemsHint = -1;
     /* Read value */
     return nextParsingElement(p, p->elmCtx.key.parsingElemType);
@@ -1624,6 +1715,7 @@ RdbStatus elementNextRdbType(RdbParser *p) {
         case RDB_OPCODE_RESIZEDB:           return nextParsingElement(p, PE_RESIZE_DB);
         case RDB_OPCODE_FREQ:               return nextParsingElement(p, PE_FREQ);
         case RDB_OPCODE_IDLE:               return nextParsingElement(p, PE_IDLE);
+        case RDB_OPCODE_KEY_NOEVICT:        return nextParsingElement(p, PE_KEY_NOEVICT);
         case RDB_OPCODE_KEY_META:           return nextParsingElement(p, PE_RAW_KEY_META);
 
         /* Redis Enterprise only */
@@ -1650,6 +1742,8 @@ RdbStatus elementNextRdbType(RdbParser *p) {
         case RDB_TYPE_SET:                  return nextParsingElementKeyValue(p, PE_RAW_SET, PE_SET);
         case RDB_TYPE_SET_LISTPACK:         return nextParsingElementKeyValue(p, PE_RAW_SET_LP, PE_SET_LP);
         case RDB_TYPE_SET_INTSET:           return nextParsingElementKeyValue(p, PE_RAW_SET_IS, PE_SET_IS);
+        case RDB_TYPE_SET_METADATA:         return nextParsingElementKeyValue(p, PE_RAW_SET_META, PE_SET_META);
+        case RDB_TYPE_SET_LISTPACK_EX:      return nextParsingElementKeyValue(p, PE_RAW_SET_LP_EX, PE_SET_LP_EX);
         /* zset */
         case RDB_TYPE_ZSET:                 return nextParsingElementKeyValue(p, PE_RAW_ZSET, PE_ZSET);
         case RDB_TYPE_ZSET_2:               return nextParsingElementKeyValue(p, PE_RAW_ZSET, PE_ZSET);
@@ -1699,6 +1793,12 @@ RdbStatus elementNextRdbType(RdbParser *p) {
                             "Pre-release function format not supported.");
             return RDB_STATUS_ERROR;
 
+        case RDB_TYPE_BITMAP:
+            RDB_reportError(p, RDB_ERR_NOT_SUPPORTED_RDB_ENCODING_TYPE,
+                            "RDB type %d (roaring bitmap, Redis 8.12 with 'bitmap-default-roaring yes') "
+                            "is not supported yet", p->currOpcode);
+            return RDB_STATUS_ERROR;
+
         default:
             RDB_reportError(p, RDB_ERR_UNKNOWN_RDB_ENCODING_TYPE, "Unknown RDB encoding type: %d", p->currOpcode);
             return RDB_STATUS_ERROR;
@@ -1729,6 +1829,13 @@ RdbStatus elementIdle(RdbParser *p) {
     IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &lruIdle, NULL, NULL));
     /*** ENTER SAFE STATE ***/
     p->elmCtx.key.info.lruIdle = lruIdle;
+    return nextParsingElement(p, PE_NEXT_RDB_TYPE);
+}
+
+/* RDB_OPCODE_KEY_NOEVICT (Redis 8.12, RDB v17): the next key is blessed
+ * NO-EVICT. The opcode has no payload; its presence flags the key. */
+RdbStatus elementKeyNoEvict(RdbParser *p) {
+    p->elmCtx.key.info.noEvict = 1;
     return nextParsingElement(p, PE_NEXT_RDB_TYPE);
 }
 
@@ -1865,9 +1972,9 @@ RdbStatus elementQuickList(RdbParser *p) {
 
                 } else {
 
-                    unsigned char *lp = (unsigned char *) binfoNode->ref;
-
                     if (p->currOpcode == RDB_TYPE_LIST_QUICKLIST_2) {
+                        IF_NOT_OK_RETURN(rdbUpgradeListpack(p, &binfoNode));
+                        unsigned char *lp = (unsigned char *) binfoNode->ref;
                         if (!lpValidateIntegrity(lp, binfoNode->len, p->deepIntegCheck, NULL, NULL)) {
                             RDB_reportError(p, RDB_ERR_QUICK_LIST_INTEG_CHECK,
                                             "elementQuickList(2): Quicklist integrity check failed");
@@ -2048,9 +2155,21 @@ RdbStatus elementSet(RdbParser *p) {
     } ;
     switch (ctx->state) {
         case ST_SET_HEADER:
+            /* RDB_TYPE_SET_METADATA (v17): earliest member expiry precedes the count.
+             * Each member's TTL is then saved relative to it (see ST_SET_NEXT_ITEM). */
+            if (p->currOpcode == RDB_TYPE_SET_METADATA)
+                IF_NOT_OK_RETURN(rdbLoadMillisecTime(p, &ctx->set.sexpireMinMsec));
+
             IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, (uint64_t *) &(ctx->key.numItemsHint), NULL, NULL));
 
             /*** ENTER SAFE STATE ***/
+
+            if (p->currOpcode == RDB_TYPE_SET_METADATA &&
+                (uint64_t) ctx->set.sexpireMinMsec > RDB_EXPIRE_TIME_MAX) {
+                RDB_reportError(p, RDB_ERR_SET_EXPIRE_INTEG_CHECK,
+                                "elementSet(): min expiry out of range");
+                return RDB_STATUS_ERROR;
+            }
 
             ctx->set.left = ctx->key.numItemsHint;
 
@@ -2059,6 +2178,25 @@ RdbStatus elementSet(RdbParser *p) {
         case ST_SET_NEXT_ITEM:
             while(ctx->set.left) {
                 BulkInfo *binfoItem;
+                int64_t expireAt = -1;
+
+                /* With member expirations (PE_SET_META), each member is preceded by
+                 * its TTL: 0 means none, otherwise (expiry - minExpire + 1). */
+                if (p->parsingElement == PE_SET_META) {
+                    uint64_t val;
+                    IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &val, NULL, NULL));
+                    if (val != 0) {
+                        /* Same bounds as Redis. Also keeps the sum from overflowing */
+                        if (val > RDB_EXPIRE_TIME_MAX ||
+                            val + ctx->set.sexpireMinMsec - 1 > RDB_EXPIRE_TIME_MAX) {
+                            RDB_reportError(p, RDB_ERR_SET_EXPIRE_INTEG_CHECK,
+                                            "elementSet(): member expiry out of range");
+                            return RDB_STATUS_ERROR;
+                        }
+                        expireAt = (int64_t) val + ctx->set.sexpireMinMsec - 1;
+                    }
+                }
+
                 IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC_APP_BULK, NULL, &binfoItem));
 
                 /*** ENTER SAFE STATE ***/
@@ -2067,9 +2205,9 @@ RdbStatus elementSet(RdbParser *p) {
 
                 registerAppBulkForNextCb(p, binfoItem);
                 if (p->elmCtx.key.handleByLevel == RDB_LEVEL_STRUCT)
-                    CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_STRUCT, rdbStruct.handleSetPlain, binfoItem->ref);
+                    CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_STRUCT, rdbStruct.handleSetPlain, binfoItem->ref, expireAt);
                 else
-                    CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_DATA, rdbData.handleSetMember, binfoItem->ref);
+                    CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_DATA, rdbData.handleSetMember, binfoItem->ref, expireAt);
 
                 updateElementState(p, ST_SET_NEXT_ITEM, 0);
             }
@@ -2109,7 +2247,7 @@ RdbStatus elementSetIS(RdbParser *p) {
             bulkInt->len = ll2string(bulkInt->ref, buflen, intele);
 
             registerAppBulkForNextCb(p, bulkInt);
-            CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_DATA, rdbData.handleSetMember, bulkInt->ref);
+            CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_DATA, rdbData.handleSetMember, bulkInt->ref, (int64_t) -1);
         }
     }
 
@@ -2125,6 +2263,8 @@ RdbStatus elementSetLP(RdbParser *p) {
     IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC_APP_BULK, NULL, &listpackBulk));
 
     /*** ENTER SAFE STATE ***/
+
+    IF_NOT_OK_RETURN(rdbUpgradeListpack(p, &listpackBulk));
 
     /* Doesn't check for duplication */
     if (!lpValidateIntegrity(listpackBulk->ref, listpackBulk->len, p->deepIntegCheck, NULL, 0)) {
@@ -2151,10 +2291,86 @@ RdbStatus elementSetLP(RdbParser *p) {
                              restoreEmbeddedBulk(p, &embBulk), /*finalize*/
                              RDB_LEVEL_DATA,
                              rdbData.handleSetMember,
-                             embBulk.binfo.ref);
+                             embBulk.binfo.ref,
+                             (int64_t) -1);
 
             iterator = lpNext(listpackBulk->ref, iterator);
         }
+    }
+    return nextParsingElement(p, PE_END_KEY);
+}
+
+/* RDB_TYPE_SET_LISTPACK_EX (v17): [minExpire:8 bytes][listpack]. The listpack
+ * holds (member, ttl) pairs ordered by ttl; ttl is an absolute unix time in
+ * msec stored as an integer, 0 for a member without expiry (placed last). */
+RdbStatus elementSetLPEx(RdbParser *p) {
+    BulkInfo *listpackBulk, *binfoExpire;
+    size_t items;
+
+    /* digest min expiration time. No need to pass it to handlers as each
+     * member reports its own expiration time anyway */
+    IF_NOT_OK_RETURN(rdbLoad(p, 8, RQ_ALLOC, NULL, &binfoExpire));
+
+    IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC_APP_BULK, NULL, &listpackBulk));
+
+    /*** ENTER SAFE STATE ***/
+
+    /* Doesn't check for duplication */
+    if (!lpValidateIntegrity(listpackBulk->ref, listpackBulk->len, p->deepIntegCheck, NULL, 0)) {
+        RDB_reportError(p, RDB_ERR_SET_LP_INTEG_CHECK, "elementSetLPEx(): LISTPACK integrity check failed");
+        return RDB_STATUS_ERROR;
+    }
+
+    /* [member][ttl] pairs */
+    items = lpLength(listpackBulk->ref);
+    if (unlikely((items % 2) != 0)) {
+        RDB_reportError(p, RDB_ERR_SET_LP_INTEG_CHECK,
+                        "elementSetLPEx(): listpack has unexpected number of items.");
+        return RDB_STATUS_ERROR;
+    }
+
+    p->elmCtx.key.numItemsHint = items / 2;
+
+    if (p->elmCtx.key.handleByLevel == RDB_LEVEL_STRUCT) {
+        registerAppBulkForNextCb(p, listpackBulk);
+        CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_STRUCT, rdbStruct.handleSetLPEx, listpackBulk->ref);
+        return nextParsingElement(p, PE_END_KEY);
+    }
+
+    unsigned char *iterator = lpFirst(listpackBulk->ref);
+    while (iterator) {
+        EmbeddedBulk embBulk;
+        unsigned char *member;
+        unsigned int memberLen;
+        long long memberVal;
+        int64_t expiryVal = -1;
+
+        member = lpGetValue(iterator, &memberLen, &memberVal);
+        iterator = lpNext(listpackBulk->ref, iterator);
+
+        if (lpGet(iterator, &expiryVal, NULL) != NULL) {
+            RDB_reportError(p, RDB_ERR_SET_LP_INTEG_CHECK,
+                            "elementSetLPEx(): integrity check failed. Expiry is a string instead of value.");
+            return RDB_STATUS_ERROR;
+        }
+        if (expiryVal < 0 || (uint64_t) expiryVal > RDB_EXPIRE_TIME_MAX) {
+            RDB_reportError(p, RDB_ERR_SET_EXPIRE_INTEG_CHECK,
+                            "elementSetLPEx(): member expiry out of range");
+            return RDB_STATUS_ERROR;
+        }
+        if (expiryVal == 0) expiryVal = -1; /* If expiry not set */
+        iterator = lpNext(listpackBulk->ref, iterator);
+
+        if (!allocEmbeddedBulk(p, member, memberLen, memberVal, &embBulk))
+            return RDB_STATUS_ERROR;
+
+        registerAppBulkForNextCb(p, &embBulk.binfo);
+        CALL_HANDLERS_CB(p,
+                         restoreEmbeddedBulk(p, &embBulk), /*finalize*/
+                         RDB_LEVEL_DATA,
+                         rdbData.handleSetMember,
+                         embBulk.binfo.ref,
+                         (int64_t) expiryVal);
     }
     return nextParsingElement(p, PE_END_KEY);
 }
@@ -2231,6 +2447,8 @@ RdbStatus elementZsetLP(RdbParser *p) {
     IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC_APP_BULK, NULL, &listpackBulk));
 
     /*** ENTER SAFE STATE ***/
+
+    IF_NOT_OK_RETURN(rdbUpgradeListpack(p, &listpackBulk));
 
     /* Doesn't check for duplication */
     if (!lpValidateIntegrity(listpackBulk->ref, listpackBulk->len, p->deepIntegCheck, NULL, 0)) {
@@ -2489,6 +2707,8 @@ RdbStatus elementStreamLP(RdbParser *p) {
                     IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC_APP_BULK, NULL, &binfoListPack));
 
                     /*** ENTER SAFE STATE ***/
+
+                    IF_NOT_OK_RETURN(rdbUpgradeListpack(p, &binfoListPack));
 
                     if (unlikely(!lpValidateIntegrity(binfoListPack->ref, binfoListPack->len,
                                                       p->deepIntegCheck, NULL, 0)))
@@ -3290,6 +3510,8 @@ RdbStatus elementHashTmplLpRef(RdbParser *p) {
 
     /*** ENTER SAFE STATE ***/
 
+    IF_NOT_OK_RETURN(rdbUpgradeListpack(p, &lpBulk));
+
     unsigned char *lp = (unsigned char *) lpBulk->ref;
     if (!lpValidateIntegrity(lp, lpBulk->len, p->deepIntegCheck, NULL, NULL)) {
         RDB_reportError(p, RDB_ERR_HASH_TMPL_INVLD,
@@ -3359,6 +3581,7 @@ RdbStatus elementHashTmplSelfContained(RdbParser *p) {
 
                 /*** ENTER SAFE STATE ***/
 
+                IF_NOT_OK_RETURN(rdbUpgradeListpack(p, &blobBulk));
                 IF_NOT_OK_RETURN(hashTemplateParseFieldsLp(p, blobBulk->ref,
                                                            blobBulk->len, &h->selfTmpl));
             } else if (fmt == 1) {
@@ -3436,6 +3659,8 @@ RdbStatus elementHashTmplSelfContained(RdbParser *p) {
             IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC_APP_BULK, NULL, &lpBulk));
 
             /*** ENTER SAFE STATE ***/
+
+            IF_NOT_OK_RETURN(rdbUpgradeListpack(p, &lpBulk));
 
             unsigned char *lp = (unsigned char *) lpBulk->ref;
             HashTemplate *t = h->tmpl;

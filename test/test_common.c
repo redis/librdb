@@ -299,6 +299,7 @@ char *sendRedisCmd(const char *cmd, int expRetType, char *expRsp) {
     if (expRetType != -1) assert_int_equal(reply->type, expRetType);
 
     size_t written = serializeRedisReply(reply, rspbuf, sizeof(rspbuf)-1);
+    rspbuf[written] = '\0'; /* an empty array or nil writes nothing; drop the previous reply */
 
     /* Check if the response contains the expected substring */
     if (expRsp) {

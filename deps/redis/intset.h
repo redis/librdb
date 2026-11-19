@@ -43,6 +43,7 @@ intset *intsetAdd(intset *is, int64_t value, uint8_t *success);
 intset *intsetRemove(intset *is, int64_t value, int *success);
 uint8_t intsetFind(intset *is, int64_t value);
 int64_t intsetRandom(intset *is);
+/* librdb: additions */
 int64_t intsetMax(intset *is);
 int64_t intsetMin(intset *is);
 uint8_t intsetGet(intset *is, uint32_t pos, int64_t *value);
@@ -51,6 +52,7 @@ size_t intsetBlobLen(intset *is);
 int intsetValidateIntegrity(const unsigned char *is, size_t size, int deep);
 
 
+/* librdb: plain libc allocator instead of zmalloc */
 #define is_malloc(sz) malloc(sz)
 #define is_realloc(ptr,sz) realloc(ptr,sz)
 #define is_free free

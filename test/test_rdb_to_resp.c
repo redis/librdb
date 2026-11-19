@@ -222,6 +222,67 @@ static void test_r2r_set_lp(void **state) {
     runWithAndWithoutRestore("set_is_v11.rdb");
 }
 
+/* set with expiry on members (RDB v17). Supported since 8.12 */
+static void test_r2r_set_ex(void **state) {
+    UNUSED(state);
+    runWithAndWithoutRestore("set_with_sexpire_v17.rdb");
+}
+
+/* set-listpack with expiry on members (RDB v17). Supported since 8.12 */
+static void test_r2r_set_lp_ex(void **state) {
+    UNUSED(state);
+    runWithAndWithoutRestore("set_lp_with_sexpire_v17.rdb");
+}
+
+/* RDB v17 keys blessed NO-EVICT (Redis 8.12): replayed as `BLESS SET <key>
+ * NO-EVICT` right after the key, in command mode and after RESTORE alike
+ * (RESTORE has no such option and the DUMP payload doesn't carry the flag).
+ * Targets before 8.12 don't know BLESS and get none. */
+static void test_r2r_key_noevict_v17(void **state) {
+    UNUSED(state);
+    RdbxToRespConf r2rConf;
+    char *bless = "$5\r\nBLESS\r\n$3\r\nSET\r\n$9\r\ns_noevict\r\n$8\r\nNO-EVICT\r\n";
+    memset(&r2rConf, 0, sizeof(r2rConf));
+
+    for (int restore = 0; restore <= 1; ++restore) {
+        r2rConf.supportRestore = restore;
+        r2rConf.dstRedisVersion = "8.12";
+        testRdbToRespCommon("key_noevict_v17.rdb", &r2rConf, bless, strlen(bless), M_SUBSTR, 1);
+        testRdbToRespCommon("key_noevict_v17.rdb", &r2rConf, "RESTORE", 7, M_SUBSTR, restore);
+        r2rConf.dstRedisVersion = "8.10";
+        testRdbToRespCommon("key_noevict_v17.rdb", &r2rConf, "BLESS", 5, M_SUBSTR, 0);
+    }
+}
+
+/* RDB v14 listpacks with the compact boundary backlen of Redis 8.8 - 8.10: the
+ * parser must both replay them as commands and forward them verbatim via RESTORE
+ * (the payload footer carries the source RDB version, so the destination reads
+ * them by that version). */
+static void test_r2r_compact_backlen_v14(void **state) {
+    UNUSED(state);
+    runWithAndWithoutRestore("compact_backlen_v14.rdb");
+}
+
+/* Member TTLs become SPEXPIREAT against a 8.12+ target and are dropped
+ * (SADD only) against an older one that doesn't know the command. */
+static void test_r2r_set_ex_target_version(void **state) {
+    UNUSED(state);
+    RdbxToRespConf r2rConf;
+    const char *spexpireat = "$10\r\nSPEXPIREAT\r\n";
+    const char *files[] = {"set_with_sexpire_v17.rdb", "set_lp_with_sexpire_v17.rdb"};
+
+    for (unsigned i = 0; i < sizeof(files)/sizeof(files[0]); ++i) {
+        memset(&r2rConf, 0, sizeof(r2rConf));
+        r2rConf.supportRestore = 0;
+
+        r2rConf.dstRedisVersion = "8.10";
+        testRdbToRespCommon(files[i], &r2rConf, (char *) spexpireat, strlen(spexpireat), M_SUBSTR, 0);
+
+        r2rConf.dstRedisVersion = "8.12";
+        testRdbToRespCommon(files[i], &r2rConf, (char *) spexpireat, strlen(spexpireat), M_SUBSTR, 1);
+    }
+}
+
 static void test_r2r_plain_zset(void **state) {
     UNUSED(state);
     runWithAndWithoutRestore("plain_zset_v6.rdb");
@@ -446,6 +507,14 @@ static void test_r2r_hash_template_self_lp_v15(void **state) {
     checkTemplateResp("hash_template_self_lp_v15.rdb");
 }
 
+/* v15 templates whose listpacks (values, and field names) hold the compact
+ * boundary backlen of Redis 8.10 */
+static void test_r2r_hash_template_compact_backlen_v15(void **state) {
+    UNUSED(state);
+    checkTemplateResp("compact_backlen_tmpl_v15.rdb");
+    checkTemplateResp("compact_backlen_tmpl_self_v15.rdb");
+}
+
 /*************************** group_rdb_to_resp *******************************/
 int group_rdb_to_resp(void) {
     const struct CMUnitTest tests[] = {
@@ -473,6 +542,11 @@ int group_rdb_to_resp(void) {
             cmocka_unit_test(test_r2r_plain_set),
             cmocka_unit_test(test_r2r_set_is),
             cmocka_unit_test(test_r2r_set_lp),
+            cmocka_unit_test(test_r2r_set_ex),
+            cmocka_unit_test(test_r2r_set_lp_ex),
+            cmocka_unit_test(test_r2r_key_noevict_v17),
+            cmocka_unit_test(test_r2r_compact_backlen_v14),
+            cmocka_unit_test(test_r2r_set_ex_target_version),
             /* zset */
             cmocka_unit_test(test_r2r_plain_zset),
             cmocka_unit_test(test_r2r_plain_zset_2),
@@ -499,6 +573,7 @@ int group_rdb_to_resp(void) {
             cmocka_unit_test(test_r2r_hash_template_array_ref_v15),
             cmocka_unit_test(test_r2r_hash_template_self_array_v15),
             cmocka_unit_test(test_r2r_hash_template_self_lp_v15),
+            cmocka_unit_test(test_r2r_hash_template_compact_backlen_v15),
             /* misc */
             cmocka_unit_test(test_r2r_misc_with_stream),
             cmocka_unit_test(test_r2r_multiple_lists_and_strings),

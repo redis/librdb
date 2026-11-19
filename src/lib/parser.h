@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include "defines.h"
 #include "../../api/librdb-api.h"
+#include "../../deps/redis/listpack.h"
 
 
 /* Max error message length. Chain one or more recorded error messages. */
@@ -130,6 +131,7 @@ typedef enum ParsingElementType {
     PE_EXPIRETIMEMSEC,
     PE_FREQ,
     PE_IDLE,
+    PE_KEY_NOEVICT,
     __PE_SLOT_NUM,
     __PE_RAM_LRU,  /* Redis Enterprise specific */
 
@@ -148,8 +150,10 @@ typedef enum ParsingElementType {
     PE_HASH_LP_EX,
     PE_HASH_ZM,
     PE_SET,
+    PE_SET_META,           /* RDB_TYPE_SET_METADATA (v17): plain set with member expiry */
     PE_SET_IS,
     PE_SET_LP,
+    PE_SET_LP_EX,          /* RDB_TYPE_SET_LISTPACK_EX (v17): listpack set with member expiry */
     PE_ZSET,
     PE_ZSET_2,
     PE_ZSET_ZL,
@@ -178,8 +182,10 @@ typedef enum ParsingElementType {
     PE_RAW_HASH_LP_EX,
     PE_RAW_HASH_ZM,
     PE_RAW_SET,
+    PE_RAW_SET_META,
     PE_RAW_SET_IS,
     PE_RAW_SET_LP,
+    PE_RAW_SET_LP_EX,
     PE_RAW_ZSET,
     PE_RAW_ZSET_2,
     PE_RAW_ZSET_ZL,
@@ -219,6 +225,7 @@ typedef struct {
 
 typedef struct {
     uint64_t left;
+    int64_t sexpireMinMsec; /* RDB_TYPE_SET_METADATA: min expiry, member TTLs are relative to it */
 } ElementSetCtx;
 
 typedef struct {
@@ -566,6 +573,11 @@ RdbStatus rdbLoadLen(RdbParser *p, int *isencoded, uint64_t *lenptr, unsigned ch
 RdbStatus rdbLoadInteger(RdbParser *p, int enctype, AllocTypeRq type, char *refBuf, BulkInfo **out);
 RdbStatus rdbLoadString(RdbParser *p, AllocTypeRq type, char *refBuf, BulkInfo **out);
 RdbStatus rdbLoadLzfString(RdbParser *p, AllocTypeRq type, char *refBuf, BulkInfo **out);
+
+/*** Listpacks of RDB v14/15 (Redis 8.8 - 8.10, compact boundary backlen) ***/
+RdbStatus rdbUpgradeListpack(RdbParser *p, BulkInfo **binfo);
+int rdbLpValidateIntegrity(RdbParser *p, unsigned char *lp, size_t size, int deep,
+                           listpackValidateEntryCB cb, void *cbArg);
 static inline RdbStatus rdbLoad(RdbParser *p, size_t len, AllocTypeRq type, char *refBuf, BulkInfo **out) {
     return p->readRdbFunc(p, len, type, refBuf, out);
 }
@@ -599,6 +611,7 @@ RdbStatus elementExpireTime(RdbParser *p);
 RdbStatus elementExpireTimeMsec(RdbParser *p);
 RdbStatus elementFreq(RdbParser *p);
 RdbStatus elementIdle(RdbParser *p);
+RdbStatus elementKeyNoEvict(RdbParser *p);
 RdbStatus __elementSlotNum(RdbParser *p);
 RdbStatus __elementRamLru(RdbParser *p);
 
@@ -615,6 +628,7 @@ RdbStatus elementHashZM(RdbParser *p);
 RdbStatus elementSet(RdbParser *p);
 RdbStatus elementSetIS(RdbParser *p);
 RdbStatus elementSetLP(RdbParser *p);
+RdbStatus elementSetLPEx(RdbParser *p);
 RdbStatus elementZset(RdbParser *p);
 RdbStatus elementZsetZL(RdbParser *p);
 RdbStatus elementZsetLP(RdbParser *p);
@@ -641,6 +655,7 @@ RdbStatus elementRawHashZM(RdbParser *p);
 RdbStatus elementRawSet(RdbParser *p);
 RdbStatus elementRawSetIS(RdbParser *p);
 RdbStatus elementRawSetLP(RdbParser *p);
+RdbStatus elementRawSetLPEx(RdbParser *p);
 RdbStatus elementRawZset(RdbParser *p);
 RdbStatus elementRawZsetLP(RdbParser *p);
 RdbStatus elementRawZsetZL(RdbParser *p);

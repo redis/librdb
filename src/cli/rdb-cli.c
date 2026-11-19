@@ -125,7 +125,7 @@ static void printUsage(int shortUsage) {
     printf("FORMAT_OPTIONS ('print'):\n");
     printf("\t-a, --aux-val <FMT>           %%f=Auxiliary-Field, %%v=Auxiliary-Value (Default: \"\") \n");
     printf("\t-k, --key <FMT>               %%d=Db %%k=Key %%v=Value %%t=Type %%e=Expiry %%r=LRU %%f=LFU\n");
-    printf("\t                              %%i=Items %%m=NumMeta (Default: \"%%d,%%k,%%v,%%t,%%e,%%i\")\n");
+    printf("\t                              %%i=Items %%m=NumMeta %%b=NoEvict (Default: \"%%d,%%k,%%v,%%t,%%e,%%i\")\n");
     printf("\t-o, --output <FILE>           Specify the output file. If not specified, output to stdout\n\n");
 
     printf("FORMAT_OPTIONS ('json'):\n");

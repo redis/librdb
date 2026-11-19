@@ -1699,7 +1699,7 @@ int raxPrev(raxIterator *it) {
     return 1;
 }
 
-// mask this specific unused function just because it needs yet another lib (math.h)
+// librdb: mask this specific unused function just because it needs yet another lib (math.h)
 #if 0
 /* Perform a random walk starting in the current position of the iterator.
  * Return 0 if the tree is empty or on out of memory. Otherwise 1 is returned

@@ -266,8 +266,8 @@ RdbStatus elementRawQuickList(RdbParser *p) {
 
             if (listCtx->container != QUICKLIST_NODE_CONTAINER_PLAIN) {
                 if (p->currOpcode == RDB_TYPE_LIST_QUICKLIST_2)
-                    ret = lpValidateIntegrity(encodedNode, len, p->deepIntegCheck,
-                                              NULL, NULL);
+                    ret = rdbLpValidateIntegrity(p, encodedNode, len, p->deepIntegCheck,
+                                                 NULL, NULL);
                 else
                     ret = ziplistValidateIntegrity(encodedNode, len, p->deepIntegCheck, NULL, NULL);
 
@@ -563,9 +563,15 @@ RdbStatus elementRawSetLP(RdbParser *p) {
     return singleStringTypeHandling(p, listpackValidateIntegrityCb, 0, "elementRawSetLP");
 }
 
+/* RDB_TYPE_SET_LISTPACK_EX (v17): 8 bytes min-expire header, then the listpack */
+RdbStatus elementRawSetLPEx(RdbParser *p) {
+    return singleStringTypeHandling(p, listpackValidateIntegrityCb, 8, "elementRawSetLPEx");
+}
+
 RdbStatus elementRawSet(RdbParser *p) {
     enum RAW_SET_STATES {
         ST_RAW_SET_HEADER=0,             /* Retrieve number of items */
+        ST_RAW_SET_NEXT_ITEM_READ_EXPIRE,/* Read member expiry (if PE_RAW_SET_META) */
         ST_RAW_SET_NEXT_ITEM_CALL_STR,   /* Process next item. Call PE_RAW_STRING as sub-element */
         ST_RAW_SET_NEXT_ITEM_STR_RETURN, /* integ check of the returned string from PE_RAW_STRING */
         /* If more items, goto state #1, else next PE is END_KEY */
@@ -577,19 +583,42 @@ RdbStatus elementRawSet(RdbParser *p) {
     switch (p->elmCtx.state) {
 
         case ST_RAW_SET_HEADER: {
-            int headerLen = 0;
+            int offset = 0, headerLen = 0;
+            BulkInfo *binfo;
 
-            aggMakeRoom(p, 10); /* worse case 9 bytes for len */
+            aggMakeRoom(p, 8 /*optional*/ + 10); /* worse case 9 bytes for len */
+
+            if (p->currOpcode == RDB_TYPE_SET_METADATA) {
+                /* Load min expiration time (RDB_TYPE_SET_METADATA, v17) */
+                IF_NOT_OK_RETURN(rdbLoad(p, 8, RQ_ALLOC_REF, rawCtx->at, &binfo));
+                offset = headerLen = 8;
+            }
 
             IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &setCtx->numItems,
-                                        (unsigned char *) rawCtx->at, &headerLen));
+                                        (unsigned char *) rawCtx->at + offset, &headerLen));
 
             /*** ENTER SAFE STATE ***/
 
             IF_NOT_OK_RETURN(cbHandleBegin(p, DATA_SIZE_UNKNOWN_AHEAD));
             IF_NOT_OK_RETURN(aggUpdateWritten(p, headerLen));
+
+            if (setCtx->numItems == 0)
+                return nextParsingElement(p, PE_RAW_END_KEY); /* empty-key */
         }
-        updateElementState(p, ST_RAW_SET_NEXT_ITEM_CALL_STR, 0); /* fall-thru */
+        updateElementState(p, ST_RAW_SET_NEXT_ITEM_READ_EXPIRE, 0); /* fall-thru */
+
+        case ST_RAW_SET_NEXT_ITEM_READ_EXPIRE:
+            if (p->parsingElement == PE_RAW_SET_META) {
+                uint64_t expireAt;
+                int processedBytes = 0;
+                aggMakeRoom(p, 10);
+                IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &expireAt,
+                                            (unsigned char *) rawCtx->at,
+                                            &processedBytes));
+                /*** ENTER SAFE STATE ***/
+                IF_NOT_OK_RETURN(aggUpdateWritten(p, processedBytes));
+            }
+            updateElementState(p, ST_RAW_SET_NEXT_ITEM_CALL_STR, 0); /* fall-thru */
 
         case ST_RAW_SET_NEXT_ITEM_CALL_STR:
             return subElementCall(p, PE_RAW_STRING, ST_RAW_SET_NEXT_ITEM_STR_RETURN);
@@ -606,7 +635,7 @@ RdbStatus elementRawSet(RdbParser *p) {
             if (--setCtx->numItems == 0)
                 return nextParsingElement(p, PE_RAW_END_KEY); /* done */
 
-            return updateElementState(p, ST_RAW_SET_NEXT_ITEM_CALL_STR, 1);
+            return updateElementState(p, ST_RAW_SET_NEXT_ITEM_READ_EXPIRE, 1);
         }
 
         default:
@@ -894,7 +923,7 @@ RdbStatus elementRawStreamLP(RdbParser *p) {
                 unsigned char *lpUnused;
                 /*** ENTER SAFE STATE (no rdb read)***/
                 subElementCallEnd(p, (char **) &lpUnused, &lpSize);
-                if (!lpValidateIntegrity(lpUnused, lpSize, p->deepIntegCheck, NULL, 0)) {
+                if (!rdbLpValidateIntegrity(p, lpUnused, lpSize, p->deepIntegCheck, NULL, 0)) {
                     RDB_reportError(p, RDB_ERR_STREAM_LP_INTEG_CHECK,
                                     "elementRawStreamLP(): LISTPACK integ check failed");
                     return RDB_STATUS_ERROR;
@@ -1521,10 +1550,15 @@ RdbStatus elementRawHashTmplArrayRef(RdbParser *p) {
  * after the field section - the LP encoding (and its memory cost) is preserved
  * on the destination. The whole blob loads in one shot, so a single pass. */
 RdbStatus elementRawHashTmplLpRef(RdbParser *p) {
-    BulkInfo *lpBulk;
+    BulkInfo *lpBulk, *srcBulk;
     IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC_APP_BULK, NULL, &lpBulk));
 
     /*** ENTER SAFE STATE ***/
+
+    /* Validate and read an upgraded copy if needed (RDB v14/15 compact backlen)
+     * but forward the source bytes verbatim, as any other RAW listpack. */
+    srcBulk = lpBulk;
+    IF_NOT_OK_RETURN(rdbUpgradeListpack(p, &lpBulk));
 
     unsigned char *lp = (unsigned char *) lpBulk->ref;
     if (!lpValidateIntegrity(lp, lpBulk->len, p->deepIntegCheck, NULL, NULL)) {
@@ -1554,7 +1588,7 @@ RdbStatus elementRawHashTmplLpRef(RdbParser *p) {
 
     IF_NOT_OK_RETURN(aggWriteTmplHeader(p, t, RDB_TYPE_HASH_TMPL_LP));
     /* Emit the values listpack (id entry + values) verbatim. */
-    IF_NOT_OK_RETURN(aggWriteRawString(p, lp, lpBulk->len));
+    IF_NOT_OK_RETURN(aggWriteRawString(p, srcBulk->ref, srcBulk->len));
 
     return nextParsingElement(p, PE_RAW_END_KEY);
 }
@@ -1606,10 +1640,14 @@ RdbStatus elementRawHashTmplSelfContained(RdbParser *p) {
             /* FIELDS_LP: one listpack blob of field names. Read it so we can
              * validate it and count the fields (needed for the ARRAY value
              * section). */
-            BulkInfo *blobBulk;
+            BulkInfo *blobBulk, *srcBulk;
             IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC_APP_BULK, NULL, &blobBulk));
 
             /*** ENTER SAFE STATE ***/
+
+            /* Validate/read an upgraded copy if needed, forward source verbatim */
+            srcBulk = blobBulk;
+            IF_NOT_OK_RETURN(rdbUpgradeListpack(p, &blobBulk));
 
             unsigned char *blob = (unsigned char *) blobBulk->ref;
             if (blobBulk->len == 0 ||
@@ -1622,7 +1660,7 @@ RdbStatus elementRawHashTmplSelfContained(RdbParser *p) {
 
             IF_NOT_OK_RETURN(cbHandleBegin(p, DATA_SIZE_UNKNOWN_AHEAD));
             IF_NOT_OK_RETURN(aggUpdateWritten(p, hdrLen));  /* fields_fmt byte */
-            IF_NOT_OK_RETURN(aggWriteRawString(p, blob, blobBulk->len));
+            IF_NOT_OK_RETURN(aggWriteRawString(p, srcBulk->ref, srcBulk->len));
             h->numFields = lpLength(blob);
             h->visitingField = 0;
             return updateElementState(p,
@@ -1660,10 +1698,14 @@ RdbStatus elementRawHashTmplSelfContained(RdbParser *p) {
         }
 
         case ST_VALUES_LP: {
-            BulkInfo *lpBulk;
+            BulkInfo *lpBulk, *srcBulk;
             IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC_APP_BULK, NULL, &lpBulk));
 
             /*** ENTER SAFE STATE ***/
+
+            /* Validate/read an upgraded copy if needed, forward source verbatim */
+            srcBulk = lpBulk;
+            IF_NOT_OK_RETURN(rdbUpgradeListpack(p, &lpBulk));
 
             unsigned char *lp = (unsigned char *) lpBulk->ref;
             if (!lpValidateIntegrity(lp, lpBulk->len, p->deepIntegCheck, NULL, NULL)) {
@@ -1677,7 +1719,7 @@ RdbStatus elementRawHashTmplSelfContained(RdbParser *p) {
                                 lpLength(lp), (unsigned long long) (h->numFields + 1));
                 return RDB_STATUS_ERROR;
             }
-            IF_NOT_OK_RETURN(aggWriteRawString(p, lp, lpBulk->len));
+            IF_NOT_OK_RETURN(aggWriteRawString(p, srcBulk->ref, srcBulk->len));
             return nextParsingElement(p, PE_RAW_END_KEY);
         }
 
@@ -1762,8 +1804,7 @@ static int ziplistValidateIntegrityCb(unsigned char* str, size_t size, RdbParser
 }
 
 static int listpackValidateIntegrityCb(unsigned char* str, size_t size, RdbParser *p) {
-    UNUSED(p);
-    return lpValidateIntegrity(str, size, 1 /*p->deepIntegCheck*/, NULL, NULL);
+    return rdbLpValidateIntegrity(p, str, size, 1 /*p->deepIntegCheck*/, NULL, NULL);
 }
 
 static int zipmapValidateIntegrityCb(unsigned char* str, size_t size, RdbParser *p) {

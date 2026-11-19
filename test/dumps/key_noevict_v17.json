@@ -1,0 +1,11 @@
+ "__aux__": {
+"redis-ver":"255.255.255",
+       "redis-bits":"64",
+       "ctime":"1794922303",
+       "used-mem":"993736",
+       "aof-base":"0"
+},
+    "s_plain":"v3",
+    "s_noevict_ttl":"v2",
+    "s_noevict":"v1",
+    "h_noevict":{"f1":"a","f2":"b"}

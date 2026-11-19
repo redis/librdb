@@ -77,7 +77,7 @@
 
 #include <stdio.h>
 #include <string.h>
-//#include "zmalloc.h"
+//#include "zmalloc.h" /* librdb: plain libc allocator instead of zmalloc */
 #include "stdlib.h"
 #include "endianconv.h"
 

@@ -1,3 +1,67 @@
+## [Unreleased]
+
+### Breaking Changes
+- **Set callbacks carry member expiry**: `handleSetMember` (DATA level) and
+  `handleSetPlain` (STRUCT level) take a trailing `int64_t expireAt` (-1 when the
+  member has no TTL), mirroring `handleHashField`/`handleHashPlain`. New STRUCT
+  callback `handleSetLPEx` for the listpack-with-expiry encoding. Positional
+  initializers of `RdbHandlersStructCallbacks` must account for the new slot
+  after `handleSetLP`.
+
+### New Features
+- **RDB v17 Support (Redis 8.12), part 1 - set member expiration**: accept format
+  version 17 and parse the two new set encodings, `RDB_TYPE_SET_METADATA`
+  (hashtable, min-expiry header + per-member relative TTL) and
+  `RDB_TYPE_SET_LISTPACK_EX` (min-expiry header + listpack of `[member][ttl]`
+  pairs). Member TTLs surface through the set callbacks' new `expireAt`.
+  - RESP/redis targets: `SADD` followed by `SPEXPIREAT <key> <ms> MEMBERS 1 <member>`
+    against Redis 8.12+. Older targets don't know the command, so the member is
+    loaded without its TTL. `--support-restore` passes the payload through as-is
+    when the destination is 8.12+.
+  - `rdbversion` 17 fixtures under `test/dumps/` (`set_with_sexpire_v17.rdb`,
+    `set_lp_with_sexpire_v17.rdb`).
+- **RDB v17 Support (Redis 8.12), part 2 - keys blessed NO-EVICT**: parse
+  `RDB_OPCODE_KEY_NOEVICT` (241, no payload), written before a key that was
+  blessed with `BLESS SET <key> NO-EVICT`. The flag surfaces as the new field
+  `RdbKeyInfo.noEvict` (appended to the struct, passed to `handleNewKey`) and as
+  `%b` in `rdb-cli print`.
+  - RESP/redis targets 8.12+: `BLESS SET <key> NO-EVICT` is emitted after the
+    key, in command mode and after `RESTORE` alike (RESTORE has no such option
+    and the DUMP payload doesn't carry the flag). Older targets load the key
+    without it.
+  - Expired keys: if the RDB holds a blessed key whose TTL has already passed,
+    the target deletes it as soon as it is loaded, and the `BLESS` that follows
+    gets `ERR no such key`. The loader ignores that reply instead of stopping.
+  - Fixtures `key_noevict_v17.rdb`, `key_noevict_expired_v17.rdb`.
+- **RDB v17 limitations**:
+  - `RDB_TYPE_BITMAP` (33, roaring bitmap, written only with
+    `bitmap-default-roaring yes`) is not parsed yet. Such a file fails with
+    `RDB_ERR_NOT_SUPPORTED_RDB_ENCODING_TYPE`. Support follows separately.
+  - `delKeyBeforeWrite` (`--del-before-write`): Redis keeps the NO-EVICT flag
+    of an existing key across `SET` and `RESTORE ... REPLACE`. A key that
+    overwrites a blessed key on the target this way stays blessed, even if it
+    is not blessed in the RDB.
+  - Set member TTLs out of range (above 2^48-1, as Redis enforces) are
+    reported as corruption with the new `RDB_ERR_SET_EXPIRE_INTEG_CHECK`.
+
+### Bug Fixes
+- **Listpacks saved by Redis 8.8 - 8.10 (RDB v14/v15)**: those versions wrote
+  the backlen of listpack entries whose encoded length is exactly 16383, 2097151
+  or 268435455 one byte shorter than every other Redis version (redis/redis#15151,
+  reverted in 8.12 by redis/redis#16099). Such entries (e.g. a 16378-byte hash
+  value, set/zset member, list element or stream field value) failed the parser's
+  listpack integrity check. The parser now rewrites these listpacks in the
+  historical width on load, as Redis 8.12 does, for every listpack-backed
+  encoding (hash, hash with HFE, set, zset, quicklist, stream, hash templates).
+  The rewrite is Redis 8.12's own `lpUpgradeCompactBacklen()`, backported into
+  the bundled `deps/redis/listpack.c` (now documented in `deps/redis/README.md`).
+  STRUCT-level callbacks (`handleHashLP`, `handleSetLP`, ...) receive the
+  rewritten listpack. `--support-restore` still forwards the source bytes
+  verbatim: the RESTORE payload footer carries the source RDB version, by which
+  the destination reads them (8.8 - 8.10 natively, 8.12+ rewriting them itself).
+  Fixtures: `compact_backlen_v14.rdb`, `compact_backlen_tmpl_v15.rdb`,
+  `compact_backlen_tmpl_self_v15.rdb`.
+
 ## [2.4.0] - 2026-10-05
 
 ### New Features

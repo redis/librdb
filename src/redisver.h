@@ -24,6 +24,7 @@ typedef struct {
 } RedisToRdbVersion;
 
 static const RedisToRdbVersion redisToRdbVersion[] = {
+        {"8.12", VER_VAL(8,12), 17},
         {"8.9", VER_VAL(8,9), 15}, // + 8.9.x pre-rel, 8.10
         {"8.8", VER_VAL(8,8), 14},
         {"8.6", VER_VAL(8,6), 13},

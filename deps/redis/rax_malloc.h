@@ -37,7 +37,7 @@
 
 #ifndef RAX_ALLOC_H
 #define RAX_ALLOC_H
-//#include "zmalloc.h"
+//#include "zmalloc.h" /* librdb: plain libc allocator instead of zmalloc */
 #include <stdlib.h>
 #define rax_malloc malloc
 #define rax_realloc realloc

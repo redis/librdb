@@ -290,6 +290,49 @@ static void test_r2j_set_lp_struct(void **state) {
     testRdbToJsonCommon(DUMP_FOLDER("set_lp_v11.rdb"), DUMP_FOLDER("set_lp_v11_struct.json"), &r2jConf);
 }
 
+/* set with expiry on members (RDB v17, RDB_TYPE_SET_METADATA) */
+static void test_r2j_set_ex_data(void **state) {
+    UNUSED(state);
+    RdbxToJsonConf r2jConf = DEF_CONF(RDB_LEVEL_DATA);
+    testRdbToJsonCommon(DUMP_FOLDER("set_with_sexpire_v17.rdb"), DUMP_FOLDER("set_ex_v17_data.json"), &r2jConf);
+}
+
+/* set-listpack with expiry on members (RDB v17, RDB_TYPE_SET_LISTPACK_EX) */
+static void test_r2j_set_lp_ex_data(void **state) {
+    UNUSED(state);
+    RdbxToJsonConf r2jConf = DEF_CONF(RDB_LEVEL_DATA);
+    testRdbToJsonCommon(DUMP_FOLDER("set_lp_with_sexpire_v17.rdb"), DUMP_FOLDER("set_lp_ex_v17_data.json"), &r2jConf);
+}
+
+/* RDB v17 keys blessed NO-EVICT (Redis 8.12): RDB_OPCODE_KEY_NOEVICT precedes
+ * the key (after its expiry, if any). JSON output carries values only, so the
+ * flag must simply not disturb parsing. */
+static void test_r2j_key_noevict_v17_data(void **state) {
+    UNUSED(state);
+    RdbxToJsonConf r2jConf = DEF_CONF(RDB_LEVEL_DATA);
+    testRdbToJsonCommon(DUMP_FOLDER("key_noevict_v17.rdb"), DUMP_FOLDER("key_noevict_v17.json"), &r2jConf);
+}
+
+/* Listpacks saved by Redis 8.8 - 8.10 (RDB v14/v15) hold a one-byte-shorter
+ * "compact" backlen for entries of encoded length 16383 (and 2097151,
+ * 268435455). Each key below carries one such entry (a 16378-byte string).
+ * The parser rewrites them in the historical width before reading. */
+static void test_r2j_compact_backlen_v14_data(void **state) {
+    UNUSED(state);
+    RdbxToJsonConf r2jConf = DEF_CONF(RDB_LEVEL_DATA);
+    /* hash LP, hash LP with HFE, set LP, zset LP, quicklist2 node, stream */
+    testRdbToJsonCommon(DUMP_FOLDER("compact_backlen_v14.rdb"), DUMP_FOLDER("compact_backlen_v14.json"), &r2jConf);
+}
+
+static void test_r2j_compact_backlen_tmpl_v15_data(void **state) {
+    UNUSED(state);
+    RdbxToJsonConf r2jConf = DEF_CONF(RDB_LEVEL_DATA);
+    /* _LP_REF values listpack, and a template whose FIELDS_LP has a boundary entry */
+    testRdbToJsonCommon(DUMP_FOLDER("compact_backlen_tmpl_v15.rdb"), DUMP_FOLDER("compact_backlen_tmpl_v15.json"), &r2jConf);
+    /* same two keys as self-contained (DUMP) payloads: inline FIELDS_LP + values listpack */
+    testRdbToJsonCommon(DUMP_FOLDER("compact_backlen_tmpl_self_v15.rdb"), DUMP_FOLDER("compact_backlen_tmpl_self_v15.json"), &r2jConf);
+}
+
 static void test_r2j_set_lp_raw(void **state) {
     UNUSED(state);
     RdbxToJsonConf r2jConf = DEF_CONF(RDB_LEVEL_STRUCT);
@@ -828,6 +871,11 @@ int group_rdb_to_json(void) {
         cmocka_unit_test(test_r2j_set_lp_data),
         cmocka_unit_test(test_r2j_set_lp_struct),
         cmocka_unit_test(test_r2j_set_lp_raw),
+        cmocka_unit_test(test_r2j_set_ex_data),
+        cmocka_unit_test(test_r2j_set_lp_ex_data),
+        cmocka_unit_test(test_r2j_key_noevict_v17_data),
+        cmocka_unit_test(test_r2j_compact_backlen_v14_data),
+        cmocka_unit_test(test_r2j_compact_backlen_tmpl_v15_data),
 
         /* zset */
         cmocka_unit_test(test_r2j_plain_zset_data),
