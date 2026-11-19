@@ -41,8 +41,6 @@
     of an existing key across `SET` and `RESTORE ... REPLACE`. A key that
     overwrites a blessed key on the target this way stays blessed, even if it
     is not blessed in the RDB.
-  - The JSON output shows neither set member TTLs nor the NO-EVICT flag, as it
-    already omits hash field TTLs.
   - Set member TTLs out of range (above 2^48-1, as Redis enforces) are
     reported as corruption with the new `RDB_ERR_SET_EXPIRE_INTEG_CHECK`.
 
