@@ -673,6 +673,79 @@ static void testTemplateCorrupt(const char *rdbfilename, RdbRes expErr) {
     RDB_deleteParser(p);
 }
 
+/*** Roaring bitmap (RDB v16+, RDB_TYPE_BITMAP) ***/
+
+/* Three bitmaps saved by Redis 8.12: 'bm_small' (a single array container,
+ * with TTL), 'bm_mixed' (an array, a run and a bitset container, with a
+ * container-wide gap in between and trailing zero bytes) and 'bm_zero' (no bit
+ * set). At data level each is reported as the string bitmap it stands for, in
+ * chunks. */
+static void test_r2j_bitmap_roaring_data(void **state) {
+    UNUSED(state);
+    RdbxToJsonConf r2jConf = DEF_CONF(RDB_LEVEL_DATA);
+    testRdbToJsonCommon(DUMP_FOLDER("bitmap_roaring_v17.rdb"), DUMP_FOLDER("bitmap_roaring_v17_data.json"), &r2jConf);
+}
+
+/* At struct level the serialized Roaring bitmap is passed as is */
+static void test_r2j_bitmap_roaring_struct(void **state) {
+    UNUSED(state);
+    RdbxToJsonConf r2jConf = DEF_CONF(RDB_LEVEL_STRUCT);
+    testRdbToJsonCommon(DUMP_FOLDER("bitmap_roaring_v17.rdb"), DUMP_FOLDER("bitmap_roaring_v17_struct.json"), &r2jConf);
+}
+
+static void test_r2j_bitmap_roaring_raw(void **state) {
+    UNUSED(state);
+    RdbxToJsonConf r2jConf = DEF_CONF(RDB_LEVEL_RAW);
+    testRdbToJsonCommon(DUMP_FOLDER("bitmap_roaring_v17.rdb"), DUMP_FOLDER("bitmap_roaring_v17_raw.json"), &r2jConf);
+}
+
+/* Hand-crafted serialization, covering what a save of the above doesn't: a
+ * 32-bit bitmap with run containers and an offsets section (4+ containers),
+ * runs that touch the first and the last bit of a container, and a second
+ * bucket (high 32 bits). The expected json was derived from the set bits. */
+static void test_r2j_bitmap_roaring_edge(void **state) {
+    UNUSED(state);
+    RdbxToJsonConf r2jConf = DEF_CONF(RDB_LEVEL_DATA);
+    r2jConf.includeAuxField = 0;
+    testRdbToJsonCommon(DUMP_FOLDER("bitmap_roaring_edge_v16.rdb"), DUMP_FOLDER("bitmap_roaring_edge_v16.json"), &r2jConf);
+}
+
+/* Malformed bitmap payloads (hand-crafted) are rejected at any level */
+static void test_r2j_bitmap_roaring_corrupt(void **state) {
+    UNUSED(state);
+    const char *fixtures[] = {
+        "bitmap_roaring_corrupt_beyond_len_v16.rdb",   /* a bit is set beyond the byte length */
+        "bitmap_roaring_corrupt_huge_len_v16.rdb",     /* byte length exceeds the max of Redis */
+        "bitmap_roaring_corrupt_truncated_v16.rdb",    /* payload is one byte short */
+        "bitmap_roaring_corrupt_trailing_v16.rdb",     /* payload has one byte too many */
+        "bitmap_roaring_corrupt_cookie_v16.rdb",       /* unknown cookie */
+        "bitmap_roaring_corrupt_unsorted_v16.rdb",     /* array container not sorted */
+        "bitmap_roaring_corrupt_dup_key_v16.rdb",      /* two containers of the same key */
+        "bitmap_roaring_corrupt_bucket_order_v16.rdb", /* buckets not in increasing order */
+        "bitmap_roaring_corrupt_run_overlap_v16.rdb",  /* overlapping runs */
+        "bitmap_roaring_corrupt_run_overflow_v16.rdb", /* run goes beyond its container */
+        "bitmap_roaring_corrupt_bitset_card_v16.rdb",  /* bitset cardinality mismatch */
+    };
+
+    for (unsigned i = 0 ; i < sizeof(fixtures)/sizeof(fixtures[0]) ; ++i) {
+        for (int lvl = RDB_LEVEL_RAW ; lvl <= RDB_LEVEL_DATA ; ++lvl) {
+            char rdbfile[1024];
+            RdbStatus status;
+            snprintf(rdbfile, sizeof(rdbfile), "./test/dumps/%s", fixtures[i]);
+            RdbParser *p = RDB_createParserRdb(NULL);
+            RDB_setLogLevel(p, RDB_LOG_ERR);
+            RDB_setLogger(p, dummyLogger);
+            assert_non_null(RDBX_createReaderFile(p, rdbfile));
+            RdbxToJsonConf conf = DEF_CONF(lvl);
+            assert_non_null(RDBX_createHandlersToJson(p, TMP_FOLDER("bitmap_corrupt.json"), &conf));
+            while ((status = RDB_parse(p)) == RDB_STATUS_WAIT_MORE_DATA);
+            assert_int_equal(status, RDB_STATUS_ERROR);
+            assert_int_equal(RDB_getErrorCode(p), RDB_ERR_BITMAP_INTEG_CHECK);
+            RDB_deleteParser(p);
+        }
+    }
+}
+
 static void test_r2j_hash_template_arrayref_min_v15(void **state) {
     UNUSED(state);
     testTemplateCorrupt("hash_template_arrayref_min_v15.rdb", RDB_OK);
@@ -876,6 +949,13 @@ int group_rdb_to_json(void) {
         cmocka_unit_test(test_r2j_key_noevict_v17_data),
         cmocka_unit_test(test_r2j_compact_backlen_v14_data),
         cmocka_unit_test(test_r2j_compact_backlen_tmpl_v15_data),
+
+        /* roaring bitmap */
+        cmocka_unit_test(test_r2j_bitmap_roaring_data),
+        cmocka_unit_test(test_r2j_bitmap_roaring_struct),
+        cmocka_unit_test(test_r2j_bitmap_roaring_raw),
+        cmocka_unit_test(test_r2j_bitmap_roaring_edge),
+        cmocka_unit_test(test_r2j_bitmap_roaring_corrupt),
 
         /* zset */
         cmocka_unit_test(test_r2j_plain_zset_data),

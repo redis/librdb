@@ -1,5 +1,6 @@
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <unistd.h>
 #include <time.h>
 #include <arpa/inet.h>
@@ -466,6 +467,56 @@ static void test_rdb_to_redis_compact_backlen_tmpl_v15(void **state) {
     for (unsigned i = 0 ; i < sizeof(fixtures)/sizeof(fixtures[0]) ; ++i)
         for (int isRestore = 0 ; isRestore <= maxMode ; ++isRestore)
             test_rdb_to_redis_common_mode(fixtures[i], 0, "$4\r\nHSET", NULL, isRestore);
+}
+
+/* Roaring bitmaps (RDB v16+): array, run and bitset containers, a gap between
+ * them, trailing zero bytes, a bitmap without any bit set and one with TTL.
+ *
+ * A target that knows the type (8.12+) gets them with RESTORE in both modes,
+ * and saves them back just the same. An older target gets plain strings, built
+ * by SETRANGE commands, so there the outcome is verified by commands. */
+static void test_rdb_to_redis_bitmap_roaring(void **state) {
+    UNUSED(state);
+    const char *rdbfile = DUMP_FOLDER("bitmap_roaring_v17.rdb");
+
+    if ((serverMajorVer > 8) || ((serverMajorVer == 8) && (serverMinorVer >= 12))) {
+        for (int isRestore = 0 ; isRestore <= 1 ; ++isRestore) {
+            test_rdb_to_redis_common_mode(rdbfile, 0, "$7\r\nRESTORE", NULL, isRestore);
+            sendRedisCmd("TYPE bm_mixed", REDIS_REPLY_STATUS, "bitmap");
+            sendRedisCmd("BITCOUNT bm_mixed", REDIS_REPLY_INTEGER, "8984");
+            sendRedisCmd("PEXPIRETIME bm_small", REDIS_REPLY_INTEGER, "4102444800000");
+        }
+        return;
+    }
+
+    sendRedisCmd("FLUSHALL", REDIS_REPLY_STATUS, NULL);
+    rdb_to_tcp(rdbfile, 1, 0, TMP_FOLDER("cmd.resp"));
+    assert_file_payload(TMP_FOLDER("cmd.resp"), "$8\r\nSETRANGE", 12, M_SUBSTR, 1);
+
+    sendRedisCmd("TYPE bm_mixed", REDIS_REPLY_STATUS, "string");
+    sendRedisCmd("STRLEN bm_mixed", REDIS_REPLY_INTEGER, "32894");
+    sendRedisCmd("BITCOUNT bm_mixed", REDIS_REPLY_INTEGER, "8984");
+    sendRedisCmd("BITCOUNT bm_mixed 0 8191", REDIS_REPLY_INTEGER, "4");      /* array container */
+    sendRedisCmd("BITCOUNT bm_mixed 8192 16383", REDIS_REPLY_INTEGER, "2980"); /* run container */
+    sendRedisCmd("BITCOUNT bm_mixed 16384 24575", REDIS_REPLY_INTEGER, "0");   /* gap */
+    sendRedisCmd("BITCOUNT bm_mixed 24576 32767", REDIS_REPLY_INTEGER, "6000"); /* bitset container */
+    sendRedisCmd("GETBIT bm_mixed 4000", REDIS_REPLY_INTEGER, "1");
+    sendRedisCmd("GETBIT bm_mixed 65555", REDIS_REPLY_INTEGER, "0");
+    sendRedisCmd("GETBIT bm_mixed 65556", REDIS_REPLY_INTEGER, "1");
+    sendRedisCmd("GETBIT bm_mixed 68535", REDIS_REPLY_INTEGER, "1");
+    sendRedisCmd("GETBIT bm_mixed 68536", REDIS_REPLY_INTEGER, "0");
+    sendRedisCmd("GETBIT bm_mixed 196613", REDIS_REPLY_INTEGER, "1");
+    sendRedisCmd("GETBIT bm_mixed 196614", REDIS_REPLY_INTEGER, "0");
+
+    sendRedisCmd("STRLEN bm_small", REDIS_REPLY_INTEGER, "13");
+    sendRedisCmd("BITCOUNT bm_small", REDIS_REPLY_INTEGER, "3");
+    sendRedisCmd("GETBIT bm_small 7", REDIS_REPLY_INTEGER, "1");
+    sendRedisCmd("GETBIT bm_small 100", REDIS_REPLY_INTEGER, "1");
+    sendRedisCmd("GETBIT bm_small 101", REDIS_REPLY_INTEGER, "1");
+    assert_true(atoll(sendRedisCmd("PTTL bm_small", REDIS_REPLY_INTEGER, NULL)) > 0);
+
+    sendRedisCmd("STRLEN bm_zero", REDIS_REPLY_INTEGER, "11");
+    sendRedisCmd("BITCOUNT bm_zero", REDIS_REPLY_INTEGER, "0");
 }
 
 static void test_rdb_to_redis_plain_zset(void **state) {
@@ -1185,6 +1236,8 @@ int group_rdb_to_redis(void) {
             cmocka_unit_test_setup(test_rdb_to_redis_key_noevict_expired_v17, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_compact_backlen_v14, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_compact_backlen_tmpl_v15, setupTest),
+            /* roaring bitmap */
+            cmocka_unit_test_setup(test_rdb_to_redis_bitmap_roaring, setupTest),
             /* zset */
             cmocka_unit_test_setup(test_rdb_to_redis_plain_zset, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_plain_zset_2, setupTest),

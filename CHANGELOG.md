@@ -7,6 +7,10 @@
   callback `handleSetLPEx` for the listpack-with-expiry encoding. Positional
   initializers of `RdbHandlersStructCallbacks` must account for the new slot
   after `handleSetLP`.
+- **Bitmap callbacks appended**: `handleBitmapRoaring` at the end of
+  `RdbHandlersStructCallbacks`, `handleBitmapMetadata` and `handleBitmapChunk`
+  at the end of `RdbHandlersDataCallbacks`, and `maxBitmapSize` at the end of
+  `RdbxToRespConf`. Applications must be recompiled.
 
 ### New Features
 - **RDB v17 Support (Redis 8.12), part 1 - set member expiration**: accept format
@@ -34,15 +38,40 @@
     gets `ERR no such key`. The loader ignores that reply instead of stopping.
   - Fixtures `key_noevict_v17.rdb`, `key_noevict_expired_v17.rdb`.
 - **RDB v17 limitations**:
-  - `RDB_TYPE_BITMAP` (33, roaring bitmap, written only with
-    `bitmap-default-roaring yes`) is not parsed yet. Such a file fails with
-    `RDB_ERR_NOT_SUPPORTED_RDB_ENCODING_TYPE`. Support follows separately.
   - `delKeyBeforeWrite` (`--del-before-write`): Redis keeps the NO-EVICT flag
     of an existing key across `SET` and `RESTORE ... REPLACE`. A key that
     overwrites a blessed key on the target this way stays blessed, even if it
     is not blessed in the RDB.
   - Set member TTLs out of range (above 2^48-1, as Redis enforces) are
     reported as corruption with the new `RDB_ERR_SET_EXPIRE_INTEG_CHECK`.
+
+- **RDB v17 Support (Redis 8.12), part 3 - Roaring bitmaps**: parse
+  `RDB_TYPE_BITMAP` (33, added by RDB v16), the native compressed bitmap type:
+  `[logical byte length][string: 64-bit Roaring bitmap, portable serialization]`.
+  The serialization is read and validated by a small built-in reader
+  (`src/lib/roaring.c`), with the checks Redis applies on load. No dependency on
+  CRoaring was added.
+  - New data type `RDB_DATA_TYPE_BITMAP` (`rdb-cli --type bitmap`, printed as
+    `bitmap`) and error code `RDB_ERR_BITMAP_INTEG_CHECK`.
+  - DATA level: new callbacks `handleBitmapMetadata(byteLen, numChunks)` and
+    `handleBitmapChunk(offset, chunk)`. The bitmap is reported as the plain
+    string bitmap it stands for, one chunk per Roaring container (up to 8192
+    bytes, zero bytes trimmed off both ends), so the full string is never
+    built. Bytes that no chunk covers are zero.
+  - STRUCT level: new callback `handleBitmapRoaring(byteLen, roaring)` gets the
+    serialized bitmap as is.
+  - JSON: `{"byte_len":"<n>","chunks":[{"offset":"<n>","data":"<bytes>"},...]}`.
+  - RESP/redis targets 8.12+: always `RESTORE`, also without `--support-restore`,
+    since no command creates a Roaring bitmap (same as done for modules).
+  - RESP/redis targets before 8.12: the type is unknown there, so the bitmap is
+    converted to a plain string, one `SETRANGE` per chunk. The target ends up
+    allocating the full logical length, which for a sparse bitmap can be far
+    more than what it takes in the RDB. Parsing fails with
+    `RDBX_ERR_RESP_BITMAP_TOO_LARGE` on a bitmap longer than
+    `RdbxToRespConf.maxBitmapSize`, 512MB by default.
+  - Fixtures `bitmap_roaring_v17.rdb`, `bitmap_roaring_sparse_v17.rdb` (saved by
+    Redis), and hand-crafted `bitmap_roaring_edge_v16.rdb`,
+    `bitmap_roaring_empty_v16.rdb`, `bitmap_roaring_corrupt_*_v16.rdb`.
 
 ### Bug Fixes
 - **Listpacks saved by Redis 8.8 - 8.10 (RDB v14/v15)**: those versions wrote

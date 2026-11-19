@@ -1500,6 +1500,54 @@ RdbStatus elementRawArray(RdbParser *p) {
 
 /*** hash templates (v15): raw -> self-contained RESTORE ***/
 
+/* RDB_TYPE_BITMAP at raw level: [byte_len][string: serialized Roaring bitmap].
+ * Passed through as is, after an integrity check. */
+RdbStatus elementRawBitmap(RdbParser *p) {
+    enum RAW_BITMAP_STATES {
+        ST_RAW_BITMAP_HEADER = 0,   /* read byte_len, then call PE_RAW_STRING as sub-element */
+        ST_RAW_BITMAP_STR_RETURN,   /* integ check of the returned string from PE_RAW_STRING */
+    };
+
+    ElementRawBitmapCtx *bmCtx = &p->elmCtx.rawBitmap;
+
+    switch (p->elmCtx.state) {
+
+        case ST_RAW_BITMAP_HEADER: {
+            uint64_t byteLen;
+            int headerLen = 0;
+
+            IF_NOT_OK_RETURN(aggMakeRoom(p, 16)); /* worst case, 9 bytes length prefix */
+            IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &byteLen, (unsigned char *) p->rawCtx.at, &headerLen));
+
+            /*** ENTER SAFE STATE ***/
+
+            /* take care string won't propagate for having integrity check */
+            IF_NOT_OK_RETURN(cbHandleBegin(p, DATA_SIZE_UNKNOWN_AHEAD));
+            IF_NOT_OK_RETURN(aggUpdateWritten(p, headerLen));
+
+            bmCtx->byteLen = byteLen;
+            return subElementCall(p, PE_RAW_STRING, ST_RAW_BITMAP_STR_RETURN);
+        }
+
+        case ST_RAW_BITMAP_STR_RETURN: {
+            size_t len;
+            unsigned char *roaring;
+
+            /*** ENTER SAFE STATE (no rdb read) ***/
+
+            subElementCallEnd(p, (char **) &roaring, &len);
+            IF_NOT_OK_RETURN(bitmapValidateIntegrity(p, roaring, len, bmCtx->byteLen, NULL));
+
+            return nextParsingElement(p, PE_RAW_END_KEY); /* done */
+        }
+
+        default:
+            RDB_reportError(p, RDB_ERR_BITMAP_INVALID_STATE,
+                            "elementRawBitmap(): invalid parsing element state: %d", p->elmCtx.state);
+            return RDB_STATUS_ERROR;
+    }
+}
+
 /* RDB_TYPE_HASH_TMPL_ARRAY_REF at raw level: [id][value_1]...[value_N] ->
  * self-contained RDB_TYPE_HASH_TMPL_ARRAY payload for RESTORE. */
 RdbStatus elementRawHashTmplArrayRef(RdbParser *p) {

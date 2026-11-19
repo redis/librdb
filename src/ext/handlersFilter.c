@@ -171,7 +171,23 @@ static RdbRes filterArrayElement(RdbParser *p, void *userData, uint64_t idx, Rdb
     return ((RdbxFilter *) userData)->cbReturnValue;
 }
 
+static RdbRes filterBitmapMetadata(RdbParser *p, void *userData, uint64_t byteLen, uint64_t numChunks) {
+    UNUSED(p, byteLen, numChunks);
+    return ((RdbxFilter *) userData)->cbReturnValue;
+}
+
+static RdbRes filterBitmapChunk(RdbParser *p, void *userData, uint64_t offset, RdbBulk chunk) {
+    UNUSED(p, offset, chunk);
+    return ((RdbxFilter *) userData)->cbReturnValue;
+}
+
 /*** Handling struct ***/
+
+static RdbRes filterBitmapRoaring(RdbParser *p, void *userData, uint64_t byteLen, RdbBulk roaring) {
+    UNUSED(p, byteLen, roaring);
+    return ((RdbxFilter *) userData)->cbReturnValue;
+}
+
 
 static RdbRes filterListLP(RdbParser *p, void *userData, RdbBulk listpack) {
     UNUSED(p, listpack);
@@ -325,6 +341,10 @@ static void defaultFilterDataCb(RdbHandlersDataCallbacks *dataCb) {
         /*array (sparse-array, v14+):*/
         filterArrayMetadata,                /*handleArrayMetadata*/
         filterArrayElement,                 /*handleArrayElement*/
+
+        /*roaring bitmap (v16+):*/
+        filterBitmapMetadata,               /*handleBitmapMetadata*/
+        filterBitmapChunk,                  /*handleBitmapChunk*/
     };
     *dataCb = defDataCb;
 }
@@ -358,6 +378,7 @@ static void defaultFilterStructCb(RdbHandlersStructCallbacks *structCb) {
         filterFunction,                     /*handleFunction*/
         filterModule,                       /*handleModule*/
         filterStreamLP,                     /*handleStreamLP*/
+        filterBitmapRoaring,                /*handleBitmapRoaring*/
     };
     *structCb = defStructCb;
 }
