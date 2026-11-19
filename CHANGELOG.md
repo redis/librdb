@@ -29,7 +29,22 @@
     key, in command mode and after `RESTORE` alike (RESTORE has no such option
     and the DUMP payload doesn't carry the flag). Older targets load the key
     without it.
-  - Fixture `key_noevict_v17.rdb`.
+  - Expired keys: if the RDB holds a blessed key whose TTL has already passed,
+    the target deletes it as soon as it is loaded, and the `BLESS` that follows
+    gets `ERR no such key`. The loader ignores that reply instead of stopping.
+  - Fixtures `key_noevict_v17.rdb`, `key_noevict_expired_v17.rdb`.
+- **RDB v17 limitations**:
+  - `RDB_TYPE_BITMAP` (33, roaring bitmap, written only with
+    `bitmap-default-roaring yes`) is not parsed yet. Such a file fails with
+    `RDB_ERR_NOT_SUPPORTED_RDB_ENCODING_TYPE`. Support follows separately.
+  - `delKeyBeforeWrite` (`--del-before-write`): Redis keeps the NO-EVICT flag
+    of an existing key across `SET` and `RESTORE ... REPLACE`. A key that
+    overwrites a blessed key on the target this way stays blessed, even if it
+    is not blessed in the RDB.
+  - The JSON output shows neither set member TTLs nor the NO-EVICT flag, as it
+    already omits hash field TTLs.
+  - Set member TTLs out of range (above 2^48-1, as Redis enforces) are
+    reported as corruption with the new `RDB_ERR_SET_EXPIRE_INTEG_CHECK`.
 
 ### Bug Fixes
 - **Listpacks saved by Redis 8.8 - 8.10 (RDB v14/v15)**: those versions wrote

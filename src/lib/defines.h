@@ -47,6 +47,9 @@
 #define RDB_TYPE_SET_METADATA       35        /* Set with member expirations (v17). Attach min TTL at start */
 #define RDB_TYPE_MAX                36
 
+/* Maximum expire-time of a hash field or set member (Redis EB_EXPIRE_TIME_MAX) */
+#define RDB_EXPIRE_TIME_MAX         ((uint64_t)0x0000FFFFFFFFFFFF)
+
 
 /* Highest hash-template id the registry accepts (v15). The saver assigns
  * dense ids from 0, one per distinct field-set, so this is far above any real

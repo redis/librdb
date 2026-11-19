@@ -424,6 +424,23 @@ static void test_rdb_to_redis_key_noevict_v17(void **state) {
     }
 }
 
+/* Blessed keys whose TTL (or whose only member's TTL) passed since the dump:
+ * the key is gone by the time BLESS reaches it. The "no such key" reply must
+ * not fail the load. */
+static void test_rdb_to_redis_key_noevict_expired_v17(void **state) {
+    UNUSED(state);
+    if ((serverMajorVer < 8) || ((serverMajorVer == 8) && (serverMinorVer < 12)))
+        skip();
+    for (int isRestore = 0; isRestore <= 1; ++isRestore) {
+        sendRedisCmd("FLUSHALL", REDIS_REPLY_STATUS, NULL);
+        rdb_to_tcp(DUMP_FOLDER("key_noevict_expired_v17.rdb"), 1, isRestore, NULL);
+        /* (via RESTORE the set lingers until its expired member is reclaimed) */
+        sendRedisCmd("EXISTS s_noevict_expired", REDIS_REPLY_INTEGER, "0");
+        sendRedisCmd("SISMEMBER set_noevict_expired m1", REDIS_REPLY_INTEGER, "0");
+        sendRedisCmd("GET s_plain", REDIS_REPLY_STRING, "v3");
+    }
+}
+
 /* Listpacks saved by Redis 8.8 - 8.10 (RDB v14) with the compact boundary
  * backlen: one 16378-byte entry per encoding (hash LP, hash LP with HFE, set LP,
  * zset LP, quicklist2 node, stream). Replayed as commands (parser rewrites the
@@ -1165,6 +1182,7 @@ int group_rdb_to_redis(void) {
             cmocka_unit_test_setup(test_rdb_to_redis_set_ex, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_set_lp_ex, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_key_noevict_v17, setupTest),
+            cmocka_unit_test_setup(test_rdb_to_redis_key_noevict_expired_v17, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_compact_backlen_v14, setupTest),
             cmocka_unit_test_setup(test_rdb_to_redis_compact_backlen_tmpl_v15, setupTest),
             /* zset */

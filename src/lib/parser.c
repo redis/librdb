@@ -1793,6 +1793,12 @@ RdbStatus elementNextRdbType(RdbParser *p) {
                             "Pre-release function format not supported.");
             return RDB_STATUS_ERROR;
 
+        case RDB_TYPE_BITMAP:
+            RDB_reportError(p, RDB_ERR_NOT_SUPPORTED_RDB_ENCODING_TYPE,
+                            "RDB type %d (roaring bitmap, Redis 8.12 with 'bitmap-default-roaring yes') "
+                            "is not supported yet", p->currOpcode);
+            return RDB_STATUS_ERROR;
+
         default:
             RDB_reportError(p, RDB_ERR_UNKNOWN_RDB_ENCODING_TYPE, "Unknown RDB encoding type: %d", p->currOpcode);
             return RDB_STATUS_ERROR;
@@ -2158,6 +2164,13 @@ RdbStatus elementSet(RdbParser *p) {
 
             /*** ENTER SAFE STATE ***/
 
+            if (p->currOpcode == RDB_TYPE_SET_METADATA &&
+                (uint64_t) ctx->set.sexpireMinMsec > RDB_EXPIRE_TIME_MAX) {
+                RDB_reportError(p, RDB_ERR_SET_EXPIRE_INTEG_CHECK,
+                                "elementSet(): min expiry out of range");
+                return RDB_STATUS_ERROR;
+            }
+
             ctx->set.left = ctx->key.numItemsHint;
 
             updateElementState(p, ST_SET_NEXT_ITEM, 0); /* fall-thru */
@@ -2172,8 +2185,16 @@ RdbStatus elementSet(RdbParser *p) {
                 if (p->parsingElement == PE_SET_META) {
                     uint64_t val;
                     IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &val, NULL, NULL));
-                    if (val != 0)
+                    if (val != 0) {
+                        /* Same bounds as Redis. Also keeps the sum from overflowing */
+                        if (val > RDB_EXPIRE_TIME_MAX ||
+                            val + ctx->set.sexpireMinMsec - 1 > RDB_EXPIRE_TIME_MAX) {
+                            RDB_reportError(p, RDB_ERR_SET_EXPIRE_INTEG_CHECK,
+                                            "elementSet(): member expiry out of range");
+                            return RDB_STATUS_ERROR;
+                        }
                         expireAt = (int64_t) val + ctx->set.sexpireMinMsec - 1;
+                    }
                 }
 
                 IF_NOT_OK_RETURN(rdbLoadString(p, RQ_ALLOC_APP_BULK, NULL, &binfoItem));
@@ -2294,8 +2315,6 @@ RdbStatus elementSetLPEx(RdbParser *p) {
 
     /*** ENTER SAFE STATE ***/
 
-    IF_NOT_OK_RETURN(rdbUpgradeListpack(p, &listpackBulk));
-
     /* Doesn't check for duplication */
     if (!lpValidateIntegrity(listpackBulk->ref, listpackBulk->len, p->deepIntegCheck, NULL, 0)) {
         RDB_reportError(p, RDB_ERR_SET_LP_INTEG_CHECK, "elementSetLPEx(): LISTPACK integrity check failed");
@@ -2332,6 +2351,11 @@ RdbStatus elementSetLPEx(RdbParser *p) {
         if (lpGet(iterator, &expiryVal, NULL) != NULL) {
             RDB_reportError(p, RDB_ERR_SET_LP_INTEG_CHECK,
                             "elementSetLPEx(): integrity check failed. Expiry is a string instead of value.");
+            return RDB_STATUS_ERROR;
+        }
+        if (expiryVal < 0 || (uint64_t) expiryVal > RDB_EXPIRE_TIME_MAX) {
+            RDB_reportError(p, RDB_ERR_SET_EXPIRE_INTEG_CHECK,
+                            "elementSetLPEx(): member expiry out of range");
             return RDB_STATUS_ERROR;
         }
         if (expiryVal == 0) expiryVal = -1; /* If expiry not set */

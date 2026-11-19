@@ -100,6 +100,7 @@ typedef enum RdbRes {
     RDB_ERR_ARRAY_INVALID_STATE,
     RDB_ERR_HASH_TMPL_INVLD,      /* Malformed hash-template record or REF payload (v15) */
     RDB_ERR_HASH_TMPL_UNKNOWN_ID,   /* REF-encoded hash references an unknown template id (v15) */
+    RDB_ERR_SET_EXPIRE_INTEG_CHECK, /* Set member expiry out of range (v17) */
 
     /*** api-ext error codes (see file: rp-ext-api.h) ***/
     _RDB_ERR_EXTENSION_FIRST = 0x1000,
