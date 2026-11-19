@@ -136,6 +136,14 @@ static void test_rdb_cli_filter_type(void **state) {
     assert_string_equal(
         runSystemCmd(" $RDB_CLI_CMD ./test/dumps/multiple_lists_strings.rdb -T str print -k \"%%k\" | sort"),
         "mylist1\nmylist2\nmylist3\n");
+
+    /* roaring bitmap (RDB v16+) is a type of its own. %%i counts its chunks */
+    assert_string_equal(
+        runSystemCmd(" $RDB_CLI_CMD ./test/dumps/bitmap_roaring_v17.rdb -t bitmap print -k \"%%k,%%t,%%i\" | LC_ALL=C sort"),
+        "bm_mixed,bitmap,3\nbm_small,bitmap,1\nbm_zero,bitmap,0\n");
+
+    assert_string_equal(
+        runSystemCmd(" $RDB_CLI_CMD ./test/dumps/bitmap_roaring_v17.rdb -T bitmap print -k \"%%k\""), "");
 }
 
 static void test_rdb_cli_filter_expire(void **state) {

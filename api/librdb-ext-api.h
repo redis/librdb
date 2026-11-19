@@ -41,6 +41,7 @@ typedef enum {
     /* resp writer/loader */
     RDBX_ERR_RESP_WRITE,
     RDBX_ERR_RESP_INVALID_TARGET_VERSION,
+    RDBX_ERR_RESP_BITMAP_TOO_LARGE,
     RDBX_ERR_RESP_READ,
     RDBX_ERR_RESP2REDIS_CREATE_SOCKET,
     RDBX_ERR_RESP2REDIS_CONF_SOCKET,
@@ -200,6 +201,16 @@ typedef struct RdbxToRespConf {
      * then its aux-value is being SCRIPT LOAD (Compatible with Redis Ent. RDB 
      * files that can store scripts in the auxiliary section). */
      int scriptsInAux;
+
+    /* maxBitmapSize - A Roaring bitmap (RDB v16+) is restored as is on a target
+     * that knows the type (Redis 8.12+). An older target can only hold it as a
+     * plain string, so there the bitmap gets decoded into SETRANGE commands and
+     * the target allocates its full logical length, which for a sparse bitmap
+     * can be far more than what it takes in the RDB. Parsing fails on a bitmap
+     * whose logical length, in bytes, exceeds this value. 0 stands for the
+     * default of 512MB, the longest string Redis accepts by default
+     * (proto-max-bulk-len). */
+     size_t maxBitmapSize;
 
 } RdbxToRespConf;
 

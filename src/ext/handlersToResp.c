@@ -14,6 +14,7 @@
 #define _RDB_TYPE_MODULE_2 7
 #define _RDB_TYPE_STRING 0
 #define _RDB_TYPE_STREAM_LISTPACKS_2 19
+#define _RDB_TYPE_BITMAP 33
 #define _REDISMODULE_AUX_BEFORE_RDB (1<<0)
 
 #define KEY_CMD_ID_DBG  "_RDB_CLI_CMD_ID_"
@@ -29,6 +30,10 @@
  * use inline storage (vcache), avoiding heap allocation. Common for INT/FLOAT tags
  * (pre-stringified by the parser via ll2string / d2string, typically < 21 bytes). */
 #define ARMSET_SSO_SIZE 16
+
+/* Default of conf.maxBitmapSize. The longest string Redis accepts by default
+ * (proto-max-bulk-len). */
+#define BITMAP_MAX_SIZE_DEFAULT (512ULL * 1024 * 1024)
 
 typedef enum DelKeyBeforeWrite {
     DEL_KEY_BEFORE_NONE,
@@ -125,6 +130,12 @@ struct RdbxToResp {
             } val;
         } batch[ARMSET_BATCH_MAX];
     } arrayCtx;
+
+    /* v16 Roaring bitmap (RDB_TYPE_BITMAP), when decoded into a string bitmap */
+    struct {
+        uint64_t byteLen;    /* logical length of the bitmap */
+        uint64_t chunksLeft; /* countdown: chunks remaining to process */
+    } bitmapCtx;
 };
 
 static RdbRes flushNackBatch(RdbxToResp *ctx);
@@ -241,6 +252,13 @@ static RdbRes resolveSupportRestore(RdbParser *p, RdbxToResp *ctx) {
 
     /* Enforce RESTORE for modules. librdb cannot really parse high-level module object */
     RDB_handleByLevel(p, RDB_DATA_TYPE_MODULE, RDB_LEVEL_RAW);
+
+    /* Roaring bitmap (RDB v16+). No command creates one, so a target that knows
+     * the type gets it with RESTORE, same as modules, even if RESTORE is not
+     * supported for the rest of the types. An older target can only hold it as
+     * a plain string, so there it is decoded into SETRANGE commands. */
+    RDB_handleByLevel(p, RDB_DATA_TYPE_BITMAP,
+                      (ctx->targetRedisVerVal >= VER_VAL(8, 12)) ? RDB_LEVEL_RAW : RDB_LEVEL_DATA);
 
     /* To simplify implementation avoid FUNCTION RESTORE command. Always use
      * FUNCTION LOAD command instead (Expected that there won't be many functions
@@ -1265,6 +1283,85 @@ static RdbRes emitArseekIfNeeded(RdbxToResp *ctx) {
     return writevWrap(ctx, iov, 6, &startCmd, 1);
 }
 
+/*** v16 Roaring bitmap (RDB_TYPE_BITMAP) ***/
+
+/* Emit SETRANGE <key> <offset> <val> */
+static RdbRes writeSetRange(RdbxToResp *ctx, uint64_t offset, const char *val, size_t valLen) {
+    char keyLenStr[32], offsetLenStr[32], offsetStr[32], valLenStr[32];
+    struct iovec iov[8];
+
+    RdbxRespWriterStartCmd startCmd = {"SETRANGE", ctx->keyCtx.key, 0};
+
+    IOV_CONST(&iov[0], "*4\r\n$8\r\nSETRANGE");
+    IOV_LENGTH(&iov[1], ctx->keyCtx.keyLen, keyLenStr);
+    IOV_STRING(&iov[2], ctx->keyCtx.key, ctx->keyCtx.keyLen);
+    int offsetLen = snprintf(offsetStr, sizeof(offsetStr), "%" PRIu64, offset);
+    IOV_LENGTH(&iov[3], offsetLen, offsetLenStr);
+    IOV_STRING(&iov[4], offsetStr, offsetLen);
+    IOV_LENGTH(&iov[5], valLen, valLenStr);
+    IOV_STRING(&iov[6], val, valLen);
+    IOV_CONST(&iov[7], "\r\n");
+    return writevWrap(ctx, iov, 8, &startCmd, 1);
+}
+
+/* Bring the string to its logical length. Trailing zero bytes hold no set bit,
+ * so no chunk covers them, yet they are observable through bitmap commands. */
+static RdbRes writeBitmapZeroTail(RdbxToResp *ctx) {
+    if (ctx->bitmapCtx.byteLen == 0) {
+        /* SETRANGE of an empty value doesn't create the key */
+        char keyLenStr[32];
+        struct iovec iov[4];
+        RdbxRespWriterStartCmd startCmd = {"SET", ctx->keyCtx.key, 0};
+        IOV_CONST(&iov[0], "*3\r\n$3\r\nSET");
+        IOV_LENGTH(&iov[1], ctx->keyCtx.keyLen, keyLenStr);
+        IOV_STRING(&iov[2], ctx->keyCtx.key, ctx->keyCtx.keyLen);
+        IOV_CONST(&iov[3], "\r\n$0\r\n\r\n");
+        return writevWrap(ctx, iov, 4, &startCmd, 1);
+    }
+    return writeSetRange(ctx, ctx->bitmapCtx.byteLen - 1, "\0", 1);
+}
+
+/* Reached only if the target is older than 8.12 (see resolveSupportRestore()).
+ * It doesn't know Roaring bitmaps, so the bitmap is written as a plain string,
+ * one SETRANGE per chunk. Neither side builds the full string in one piece,
+ * but the target ends up holding all of its logical length, which for a sparse
+ * bitmap can be far more than what it takes in the RDB. Hence the size limit. */
+static RdbRes toRespBitmapMetadata(RdbParser *p, void *userData, uint64_t byteLen, uint64_t numChunks) {
+    RdbxToResp *ctx = userData;
+    uint64_t maxSize = ctx->conf.maxBitmapSize ? ctx->conf.maxBitmapSize : BITMAP_MAX_SIZE_DEFAULT;
+
+    if (byteLen > maxSize) {
+        RDB_reportError(p, (RdbRes) RDBX_ERR_RESP_BITMAP_TOO_LARGE,
+                        "Cannot load bitmap key into target Redis version older than 8.12. It can only "
+                        "be converted to a plain string of %" PRIu64 " bytes, which exceeds the configured "
+                        "max bitmap size (%" PRIu64 " bytes)", byteLen, maxSize);
+        return (RdbRes) RDBX_ERR_RESP_BITMAP_TOO_LARGE;
+    }
+
+    ctx->bitmapCtx.byteLen = byteLen;
+    ctx->bitmapCtx.chunksLeft = numChunks;
+
+    /* No bit is set. All there is to write is zeros */
+    if (numChunks == 0)
+        return writeBitmapZeroTail(ctx);
+
+    return RDB_OK;
+}
+
+static RdbRes toRespBitmapChunk(RdbParser *p, void *userData, uint64_t offset, RdbBulk chunk) {
+    RdbxToResp *ctx = userData;
+    size_t chunkLen = RDB_bulkLen(p, chunk);
+
+    IF_NOT_OK_RETURN(writeSetRange(ctx, offset, chunk, chunkLen));
+
+    /* Chunks arrive in ascending order. If the last one ends before the logical
+     * length, then pad the string with zeros up to it. */
+    if (--ctx->bitmapCtx.chunksLeft == 0 && offset + chunkLen < ctx->bitmapCtx.byteLen)
+        return writeBitmapZeroTail(ctx);
+
+    return RDB_OK;
+}
+
 /*** Handling raw (RESTORE) ***/
 /* Callback on start of serializing module aux data (alternative to toRespRestoreBegin).
  * Following this call, one or more calls will be made to toRespRestoreFrag() to
@@ -1356,11 +1453,14 @@ static RdbRes toRespRestoreFragEnd(RdbParser *p, void *userData) {
 
     /* Add RDB version 2 bytes. If it is module  */
 
-    if (ctx->restoreCtx.isModuleAux || unlikely(ctx->keyCtx.info.opcode == _RDB_TYPE_MODULE_2)) {
+    if (ctx->restoreCtx.isModuleAux ||
+        unlikely(ctx->keyCtx.info.opcode == _RDB_TYPE_MODULE_2) ||
+        unlikely(ctx->keyCtx.info.opcode == _RDB_TYPE_BITMAP)) {
         /* Module object cannot forwarded to destination as a set of Redis commands.
          * (Function resolveSupportRestore() enforced the parser to use RESTORE in case
          * of modules) In order to avoid failure on downgrade when using RESTORE
-         * command, we are using the target rdb version for it */
+         * command, we are using the target rdb version for it. Same goes for a
+         * Roaring bitmap, which is RESTOREd to any target that knows the type. */
         int rdbVer = (ctx->srcRdbVer > ctx->dstRdbVer) ? ctx->dstRdbVer : ctx->srcRdbVer;
         cmd[0] = rdbVer & 0xff;
         cmd[1] = (rdbVer >> 8) & 0xff;
@@ -1463,6 +1563,9 @@ _LIBRDB_API RdbxToResp *RDBX_createHandlersToResp(RdbParser *p, RdbxToRespConf *
         
             toRespArrayMetadata,               /*(v14+) handleArrayMetadata*/
             toRespArrayElement,                /*(v14+) handleArrayElement*/
+
+            toRespBitmapMetadata,              /*(v16+) handleBitmapMetadata*/
+            toRespBitmapChunk,                 /*(v16+) handleBitmapChunk*/
     };
     RDB_createHandlersData(p, &dataCb, ctx, deleteRdbToRespCtx);
 

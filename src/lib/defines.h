@@ -51,6 +51,10 @@
 #define RDB_EXPIRE_TIME_MAX         ((uint64_t)0x0000FFFFFFFFFFFF)
 
 
+/* Highest logical length, in bytes, of a Roaring bitmap (v16). Mirrors
+ * BITROAR_MAX_BYTES of Redis, which keeps bit offsets within int64_t. */
+#define RDB_BITMAP_MAX_BYTES ((uint64_t) (INT64_MAX >> 3))
+
 /* Highest hash-template id the registry accepts (v15). The saver assigns
  * dense ids from 0, one per distinct field-set, so this is far above any real
  * save. It bounds the id-indexed registry against a crafted sparse id. Note

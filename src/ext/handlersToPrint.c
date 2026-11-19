@@ -159,6 +159,9 @@ static void printKeyFmt(RdbxToPrint *ctx, RdbBulk string) {
                         case RDB_DATA_TYPE_ARRAY:
                             fprintf(ctx->outfile, "array");
                             break;
+                        case RDB_DATA_TYPE_BITMAP:
+                            fprintf(ctx->outfile, "bitmap");
+                            break;
                         default:
                             fprintf(ctx->outfile, "unknown");
                     }
@@ -312,6 +315,13 @@ static RdbRes toPrintArrayElement(RdbParser *p, void *userData, uint64_t idx, Rd
     return RDB_OK;
 }
 
+static RdbRes toPrintBitmapChunk(RdbParser *p, void *userData, uint64_t offset, RdbBulk chunk) {
+    UNUSED(p, offset, chunk);
+    RdbxToPrint *ctx = userData;
+    ctx->keyCtx.items++;
+    return RDB_OK;
+}
+
 /*** API ***/
 
 RdbxToPrint *RDBX_createHandlersToPrint(RdbParser *p,
@@ -354,6 +364,10 @@ RdbxToPrint *RDBX_createHandlersToPrint(RdbParser *p,
             /*array (v14+):*/
             NULL, /*handleArrayMetadata*/
             toPrintArrayElement,  /*handleArrayElement*/
+
+            /*roaring bitmap (v16+):*/
+            NULL, /*handleBitmapMetadata*/
+            toPrintBitmapChunk,   /*handleBitmapChunk*/
     };
 
     if (auxFmt)

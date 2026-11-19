@@ -47,7 +47,8 @@ To run CLI extension of this library and let it parse RDB file to json:
           { "id":"1695649068110-0", "values":{"message":"Message2"} },
           { "id":"1695893015933-0", "values":{"field1":"value1", "field2":"value2", "field3":"value3"} }
       ]},
-      "my_array":{"elements":[{"idx":"0","val":"first"},{"idx":"100","val":"second"}]}
+      "my_array":{"elements":[{"idx":"0","val":"first"},{"idx":"100","val":"second"}]},
+      "my_bitmap":{"byte_len":"13","chunks":[{"offset":"0","data":"\u0001\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u0000\u000c"}]}
     }]
 
 To generate formatted print:
@@ -214,8 +215,8 @@ destruction, or when newer block replacing old one.
             -s, --show-progress <MBytes>  Show progress to STDOUT after every <MBytes> processed
             -k, --key <REGEX>             Include only keys that match REGEX
             -K  --no-key <REGEX>          Exclude all keys that match REGEX
-            -t, --type <TYPE>             Include only selected TYPE {str|list|set|zset|hash|array|stream|module|func}
-            -T, --no-type <TYPE>          Exclude TYPE {str|list|set|zset|hash|array|stream|module|func}
+            -t, --type <TYPE>             Include only selected TYPE {str|list|set|zset|hash|array|bitmap|stream|module|func}
+            -T, --no-type <TYPE>          Exclude TYPE {str|list|set|zset|hash|array|bitmap|stream|module|func}
             -d, --dbnum <DBNUM>           Include only selected db number
             -D, --no-dbnum <DBNUM>        Exclude DB number
             -e, --expired                 Include only expired keys

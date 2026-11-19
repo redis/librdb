@@ -54,6 +54,7 @@ typedef enum JContId {
                 JC_HASH,        /* hash value: object of field:value */
                 JC_ZSET,        /* zset value: object of member:score */
                 JC_ARRAY,       /* (v14+) elements array + wrapper object */
+                JC_BITMAP,      /* (v16+) chunks array + wrapper object */
                 JC_STREAM,      /* stream object */
                     JC_ENTRIES,     /* "entries" array */
                         JC_ENTRY,       /* one entry */
@@ -94,6 +95,7 @@ static const JContSpec jSpecs[] = {
     [JC_HASH]      = { 4,    JC_KEY,       "{",                             ",",          "}"      },
     [JC_ZSET]      = { 4,    JC_KEY,       "{",                             ",",          "}"      },
     [JC_ARRAY]     = { 4,    JC_KEY,       "{",                             ",",          "]}"     },
+    [JC_BITMAP]    = { 4,    JC_KEY,       "{",                             ",",          "]}"     },
     [JC_STREAM]    = { 4,    JC_KEY,       "{",                             ",",          "}"      },
     [JC_ENTRIES]   = { 5,    JC_STREAM,    "\n      \"entries\":[",         ",",          "]"      },
     [JC_GROUPS]    = { 5,    JC_STREAM,    "\n      \"groups\": [\n",       ",\n",        "]"      },
@@ -837,7 +839,47 @@ static RdbRes toJsonArrayElement(RdbParser *p, void *userData, uint64_t idx, Rdb
     return RDB_OK;
 }
 
+/* Roaring bitmap (v16+), as the string bitmap it stands for: its length in
+ * bytes, and the chunks of consecutive bytes that hold all of its set bits.
+ * Any byte that no chunk covers is zero. */
+static RdbRes toJsonBitmapMetadata(RdbParser *p, void *userData, uint64_t byteLen, uint64_t numChunks) {
+    UNUSED(numChunks);
+    RdbxToJson *ctx = userData;
+
+    /* One combined frame for chunks array + wrapper object, same as JC_ARRAY */
+    if (unlikely(!jOpenUnder(ctx, JC_BITMAP)))
+        return invalidState(p, ctx, __func__);
+    fprintf(ctx->outfile, "\"byte_len\":\"%" PRIu64 "\",\"chunks\":[", byteLen);
+
+    return RDB_OK;
+}
+
+static RdbRes toJsonBitmapChunk(RdbParser *p, void *userData, uint64_t offset, RdbBulk chunk) {
+    RdbxToJson *ctx = userData;
+
+    if (jTop(ctx) != JC_BITMAP)
+        return invalidState(p, ctx, __func__);
+
+    jNewItem(ctx, JC_BITMAP);
+    fprintf(ctx->outfile, "{\"offset\":\"%" PRIu64 "\",\"data\":", offset);
+    outputQuotedEscaping(ctx, chunk, RDB_bulkLen(p, chunk));
+    fprintf(ctx->outfile, "}");
+
+    return RDB_OK;
+}
+
 /*** Handling struct ***/
+
+static RdbRes toJsonBitmapRoaring(RdbParser *p, void *userData, uint64_t byteLen, RdbBulk roaring) {
+    RdbxToJson *ctx = userData;
+
+    fprintf(ctx->outfile, "{\"byte_len\":\"%" PRIu64 "\",\"roaring\":", byteLen);
+    outputQuotedEscaping(ctx, roaring, RDB_bulkLen(p, roaring));
+    fprintf(ctx->outfile, "}");
+
+    return RDB_OK;
+}
+
 
 static RdbRes toJsonStruct(RdbParser *p, void *userData, RdbBulk value) {
     RdbxToJson *ctx = userData;
@@ -921,6 +963,10 @@ RdbxToJson *RDBX_createHandlersToJson(RdbParser *p, const char *filename, RdbxTo
                 /*array (v14+):*/
                 toJsonArrayMetadata, /* handleArrayMetadata */
                 toJsonArrayElement,  /* handleArrayElement */
+
+                /*roaring bitmap (v16+):*/
+                toJsonBitmapMetadata, /* handleBitmapMetadata */
+                toJsonBitmapChunk,    /* handleBitmapChunk */
         };
 
         if (ctx->conf.includeAuxField)
@@ -986,6 +1032,8 @@ RdbxToJson *RDBX_createHandlersToJson(RdbParser *p, const char *filename, RdbxTo
                 toJsonModule,
                 /*stream*/
                 toJsonStreamLP,
+                /*roaring bitmap (v16+)*/
+                toJsonBitmapRoaring,
         };
 
         if (ctx->conf.includeAuxField)
