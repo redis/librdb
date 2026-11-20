@@ -29,7 +29,10 @@
 #define PIPELINE_DEPTH_DEF          200   /* Default Number of pending cmds before waiting for response(s) */
 #define PIPELINE_DEPTH_MAX          1000  /* limit the max value allowed to configure for pipeline depth */
 
-#define NUM_RECORDED_CMDS           400   /* Number of commands to backlog, in a cyclic array */
+/* Number of commands to backlog, in a cyclic array. Must hold every command that
+ * can be in flight (pipelineDepth <= PIPELINE_DEPTH_MAX), otherwise newer entries
+ * overwrite ones still awaiting a reply and errors get attributed to wrong cmd. */
+#define NUM_RECORDED_CMDS           PIPELINE_DEPTH_MAX
 #define RECORDED_KEY_MAX_LEN        40    /* Maximum payload size from any command to record into cyclic array */
 
 #define REPLY_BUFF_SIZE             1024  /* reply buffer size */
