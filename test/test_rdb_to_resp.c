@@ -486,10 +486,12 @@ static RdbStatus bitmapToResp(const char *rdbfilename, RdbxToRespConf *conf,
 }
 
 /* A target older than 8.12 doesn't know Roaring bitmaps, so each one is written
- * as a plain string: a SETRANGE per chunk, and a last one of a single zero
- * byte if the string ends with zeros. 'bm_zero' has no chunks at all, and
- * 'bm_small' carries a TTL. Asking for RESTORE doesn't change that, since the
- * target cannot read the source RDB version. */
+ * as a plain string: a DEL, since a string replaces the key rather than merges
+ * into it, a SETRANGE of a single zero byte at the end of the string, which
+ * brings it to its full length at once, and then a SETRANGE per chunk.
+ * 'bm_zero' has no chunks at all, and 'bm_small' carries a TTL. Asking for
+ * RESTORE doesn't change that, since the target cannot read the source RDB
+ * version. */
 static void test_r2r_bitmap_roaring_target_810(void **state) {
     UNUSED(state);
     size_t expLen, respLen;
@@ -526,10 +528,35 @@ static void test_r2r_bitmap_roaring_target_812(void **state) {
                         delThenRestore, sizeof(delThenRestore) - 1, M_PREFIX, 1);
 }
 
+/* The payload of RESTORE ends with a footer of RDB version (2 bytes, little
+ * endian) and CRC64 (8 bytes). The bitmap is taken from the source as is, so
+ * the footer carries the RDB version of the source if it is older than the one
+ * of the target. Each of the fixtures holds a single key without TTL, so the
+ * footer is followed only by the CRLF that ends the command. */
+static void test_r2r_bitmap_roaring_restore_footer(void **state) {
+    UNUSED(state);
+    struct { const char *rdbfile; unsigned char rdbVer; } tests[] = {
+        { "bitmap_roaring_edge_v16.rdb", 16 },
+        { "bitmap_roaring_sparse_v17.rdb", 17 },
+    };
+
+    for (unsigned i = 0 ; i < sizeof(tests)/sizeof(tests[0]) ; ++i) {
+        char *resp;
+        size_t respLen;
+        RdbxToRespConf r2rConf = { .dstRedisVersion = "8.12" };
+        assert_int_equal(bitmapToResp(tests[i].rdbfile, &r2rConf, &resp, &respLen, NULL), RDB_STATUS_OK);
+        assert_true(respLen > 12);
+        assert_memory_equal(resp + respLen - 2, "\r\n", 2);
+        assert_int_equal((unsigned char) resp[respLen - 12], tests[i].rdbVer);
+        assert_int_equal((unsigned char) resp[respLen - 11], 0);
+        free(resp);
+    }
+}
+
 /* 'bm_sparse' has only two bits set, bit 5 and bit 3 of the byte at offset 1GB,
  * so as a plain string it takes 1GB + 1 bytes. That exceeds the default limit
  * (512MB), and by that fails the parsing before writing anything of the key.
- * With a higher limit it takes two SETRANGE commands. */
+ * With a higher limit it takes a SETRANGE that sets the length and one per chunk. */
 static void test_r2r_bitmap_roaring_max_size(void **state) {
     UNUSED(state);
     RdbRes err;
@@ -549,23 +576,57 @@ static void test_r2r_bitmap_roaring_max_size(void **state) {
 
     r2rConf.maxBitmapSize = 1024 * 1024 * 1024 + 1;
     char expResp[] =
+        "*2\r\n$3\r\nDEL\r\n$9\r\nbm_sparse\r\n"
+        "*4\r\n$8\r\nSETRANGE\r\n$9\r\nbm_sparse\r\n$10\r\n1073741824\r\n$1\r\n\x00\r\n"
         "*4\r\n$8\r\nSETRANGE\r\n$9\r\nbm_sparse\r\n$1\r\n0\r\n$1\r\n\x04\r\n"
         "*4\r\n$8\r\nSETRANGE\r\n$9\r\nbm_sparse\r\n$10\r\n1073741824\r\n$1\r\n\x10\r\n";
-    testRdbToRespCommon("bitmap_roaring_sparse_v17.rdb", &r2rConf,
-                        expResp, sizeof(expResp) - 1, M_ENTIRE, 1);
+    assert_int_equal(bitmapToResp("bitmap_roaring_sparse_v17.rdb", &r2rConf, &resp, &respLen, NULL), RDB_STATUS_OK);
+    assert_int_equal(respLen, sizeof(expResp) - 1);
+    assert_memory_equal(resp, expResp, respLen);
+    free(resp);
 
     /* The limit is not relevant to a target that gets the bitmap with RESTORE */
     RdbxToRespConf r2rConf812 = { .dstRedisVersion = "8.12", .maxBitmapSize = 1 };
     assert_int_equal(bitmapToResp("bitmap_roaring_sparse_v17.rdb", &r2rConf812, NULL, NULL, NULL), RDB_STATUS_OK);
 }
 
+/* A source that is not newer than the target lets del-key-before-write be
+ * folded into RESTORE-REPLACE. The bitmap doesn't go through RESTORE on a
+ * target older than 8.12, so it has to delete the key by itself, exactly once
+ * whichever way del-key-before-write is applied. The fixture is hand-crafted:
+ * 'bm' of a single byte with bit 0 set, in an RDB that declares version 12. */
+static void test_r2r_bitmap_roaring_del_key_before_write(void **state) {
+    UNUSED(state);
+    char expResp[] =
+        "*2\r\n$3\r\nDEL\r\n$2\r\nbm\r\n"
+        "*4\r\n$8\r\nSETRANGE\r\n$2\r\nbm\r\n$1\r\n0\r\n$1\r\n\x00\r\n"
+        "*4\r\n$8\r\nSETRANGE\r\n$2\r\nbm\r\n$1\r\n0\r\n$1\r\n\x80\r\n";
+    char *resp;
+    size_t respLen;
+
+    for (int supportRestore = 0 ; supportRestore <= 1 ; ++supportRestore) {
+        for (int delKeyBeforeWrite = 0 ; delKeyBeforeWrite <= 1 ; ++delKeyBeforeWrite) {
+            RdbxToRespConf r2rConf = { .dstRedisVersion = "8.10", .supportRestore = supportRestore,
+                                       .delKeyBeforeWrite = delKeyBeforeWrite };
+            assert_int_equal(bitmapToResp("bitmap_roaring_old_rdb_v12.rdb", &r2rConf, &resp, &respLen, NULL), RDB_STATUS_OK);
+            assert_int_equal(respLen, sizeof(expResp) - 1);
+            assert_memory_equal(resp, expResp, respLen);
+            free(resp);
+        }
+    }
+}
+
 /* A bitmap of zero length has nothing to SETRANGE. It is created by SET. */
 static void test_r2r_bitmap_roaring_empty(void **state) {
     UNUSED(state);
     char expResp[] = "*3\r\n$3\r\nSET\r\n$8\r\nbm_empty\r\n$0\r\n\r\n";
-    RdbxToRespConf r2rConf = { .dstRedisVersion = "8.10" };
-    testRdbToRespCommon("bitmap_roaring_empty_v16.rdb", &r2rConf,
-                        expResp, sizeof(expResp) - 1, M_ENTIRE, 1);
+
+    /* SET replaces a key that already exists, so del-key-before-write adds nothing */
+    for (int delKeyBeforeWrite = 0 ; delKeyBeforeWrite <= 1 ; ++delKeyBeforeWrite) {
+        RdbxToRespConf r2rConf = { .dstRedisVersion = "8.10", .delKeyBeforeWrite = delKeyBeforeWrite };
+        testRdbToRespCommon("bitmap_roaring_empty_v16.rdb", &r2rConf,
+                            expResp, sizeof(expResp) - 1, M_ENTIRE, 1);
+    }
 }
 
 /* v14 ARSEEK boundary: stored insert_idx = UINT64_MAX - 1. arseekCommand sets
@@ -684,7 +745,9 @@ int group_rdb_to_resp(void) {
             /* roaring bitmap (RDB_TYPE_BITMAP, v16+) */
             cmocka_unit_test(test_r2r_bitmap_roaring_target_810),
             cmocka_unit_test(test_r2r_bitmap_roaring_target_812),
+            cmocka_unit_test(test_r2r_bitmap_roaring_restore_footer),
             cmocka_unit_test(test_r2r_bitmap_roaring_max_size),
+            cmocka_unit_test(test_r2r_bitmap_roaring_del_key_before_write),
             cmocka_unit_test(test_r2r_bitmap_roaring_empty),
             cmocka_unit_test(test_r2r_hash_template_lp_ref_v15),
             cmocka_unit_test(test_r2r_hash_template_array_ref_v15),

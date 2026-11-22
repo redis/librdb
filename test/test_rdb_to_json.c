@@ -725,6 +725,11 @@ static void test_r2j_bitmap_roaring_corrupt(void **state) {
         "bitmap_roaring_corrupt_run_overlap_v16.rdb",  /* overlapping runs */
         "bitmap_roaring_corrupt_run_overflow_v16.rdb", /* run goes beyond its container */
         "bitmap_roaring_corrupt_bitset_card_v16.rdb",  /* bitset cardinality mismatch */
+        "bitmap_roaring_corrupt_run_empty_v16.rdb",    /* run container of no runs */
+        "bitmap_roaring_corrupt_run_adjacent_v16.rdb", /* two runs that should have been one */
+        "bitmap_roaring_corrupt_bucket_count_v16.rdb", /* declares more buckets than it holds */
+        "bitmap_roaring_corrupt_num_containers_v16.rdb", /* 65537 containers in a bucket */
+        "bitmap_roaring_corrupt_int_encoded_v16.rdb",  /* payload is an integer-encoded string */
     };
 
     for (unsigned i = 0 ; i < sizeof(fixtures)/sizeof(fixtures[0]) ; ++i) {

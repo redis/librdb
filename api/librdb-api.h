@@ -102,7 +102,7 @@ typedef enum RdbRes {
     RDB_ERR_HASH_TMPL_UNKNOWN_ID,   /* REF-encoded hash references an unknown template id (v15) */
     RDB_ERR_SET_EXPIRE_INTEG_CHECK, /* Set member expiry out of range (v17) */
     RDB_ERR_BITMAP_INTEG_CHECK,   /* Malformed Roaring bitmap payload (v16) */
-    RDB_ERR_BITMAP_INVALID_STATE,
+    RDB_ERR_BITMAP_INVALID_STATE, /* Internal: unexpected state while parsing a bitmap (v16) */
 
     /*** api-ext error codes (see file: rp-ext-api.h) ***/
     _RDB_ERR_EXTENSION_FIRST = 0x1000,

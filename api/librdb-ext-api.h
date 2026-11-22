@@ -41,7 +41,6 @@ typedef enum {
     /* resp writer/loader */
     RDBX_ERR_RESP_WRITE,
     RDBX_ERR_RESP_INVALID_TARGET_VERSION,
-    RDBX_ERR_RESP_BITMAP_TOO_LARGE,
     RDBX_ERR_RESP_READ,
     RDBX_ERR_RESP2REDIS_CREATE_SOCKET,
     RDBX_ERR_RESP2REDIS_CONF_SOCKET,
@@ -61,7 +60,10 @@ typedef enum {
     RDBX_ERR_SSL_KEY_LOAD_FAILED,
     RDBX_ERR_SSL_CA_LOAD_FAILED,
     RDBX_ERR_SSL_HANDSHAKE_FAILED,
-    RDBX_ERR_SSL_CONNECTION_FAILED,    
+    RDBX_ERR_SSL_CONNECTION_FAILED,
+
+    /* rdb2resp: bitmap exceeds RdbxToRespConf.maxBitmapSize (target older than 8.12) */
+    RDBX_ERR_RESP_BITMAP_TOO_LARGE,
 } RdbxRes;
 
 /****************************************************************
@@ -210,7 +212,7 @@ typedef struct RdbxToRespConf {
      * whose logical length, in bytes, exceeds this value. 0 stands for the
      * default of 512MB, the longest string Redis accepts by default
      * (proto-max-bulk-len). */
-     size_t maxBitmapSize;
+     uint64_t maxBitmapSize;
 
 } RdbxToRespConf;
 

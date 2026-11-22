@@ -255,6 +255,8 @@ destruction, or when newer block replacing old one.
             -e, --enum-commands           Command enumeration and tracing by preceding each generated RESP command
                                           with debug command of type: `SET _RDB_CLI_CMD_ID_ <CMD-ID>`
                 --scripts-in-aux          For auxiliary field "lua", apply `SCRIPT LOAD <aux-val>` (For Redis Enterprise)
+                --max-bitmap-size <BYTES> A target older than 8.12 gets a Roaring bitmap as a plain string. Fail on
+                                          a bitmap whose length as a string exceeds this value (default: 512MB)
 
 
 <a name="Advanced"></a>

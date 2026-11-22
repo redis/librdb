@@ -130,12 +130,6 @@ struct RdbxToResp {
             } val;
         } batch[ARMSET_BATCH_MAX];
     } arrayCtx;
-
-    /* v16 Roaring bitmap (RDB_TYPE_BITMAP), when decoded into a string bitmap */
-    struct {
-        uint64_t byteLen;    /* logical length of the bitmap */
-        uint64_t chunksLeft; /* countdown: chunks remaining to process */
-    } bitmapCtx;
 };
 
 static RdbRes flushNackBatch(RdbxToResp *ctx);
@@ -428,6 +422,20 @@ static RdbRes toRespStartRdb(RdbParser *p, void *userData, int rdbVersion) {
     return resolveSupportRestore(p, ctx);
 }
 
+/* Emit DEL <key> */
+static RdbRes writeDelKey(RdbxToResp *ctx) {
+    struct iovec iov[4];
+    char keyLenStr[32];
+
+    RdbxRespWriterStartCmd startCmd = {"DEL", ctx->keyCtx.key, 0};
+
+    IOV_CONST(&iov[0], "*2\r\n$3\r\nDEL");
+    IOV_LENGTH(&iov[1], ctx->keyCtx.keyLen, keyLenStr);
+    IOV_STRING(&iov[2], ctx->keyCtx.key, ctx->keyCtx.keyLen);
+    IOV_CONST(&iov[3], "\r\n");
+    return writevWrap(ctx, iov, 4, &startCmd, 1);
+}
+
 static RdbRes toRespNewKey(RdbParser *p, void *userData, RdbBulk key, RdbKeyInfo *info) {
     UNUSED(info);
     RdbxToResp *ctx = userData;
@@ -439,19 +447,13 @@ static RdbRes toRespNewKey(RdbParser *p, void *userData, RdbBulk key, RdbKeyInfo
         return RDB_ERR_FAIL_ALLOC;
 
     /* apply del-key-before-write if configured, unless it is 'SET' command where
-     * the key is overridden if it already exists, without encountering any problems. */
-    if ((ctx->keyCtx.delBeforeWrite == DEL_KEY_BEFORE_BY_DEL_CMD) && (info->opcode != _RDB_TYPE_STRING)) {
-        struct iovec iov[4];
-        char keyLenStr[32];
-
-        RdbxRespWriterStartCmd startCmd = {"DEL", ctx->keyCtx.key, 0};
-
-        IOV_CONST(&iov[0], "*2\r\n$3\r\nDEL");
-        IOV_LENGTH(&iov[1], ctx->keyCtx.keyLen, keyLenStr);
-        IOV_STRING(&iov[2], ctx->keyCtx.key, ctx->keyCtx.keyLen);
-        IOV_CONST(&iov[3], "\r\n");
-        return writevWrap(ctx, iov, 4, &startCmd, 1);
-    }
+     * the key is overridden if it already exists, without encountering any problems.
+     * A bitmap that gets converted to a plain string deletes the key by itself,
+     * once its length is known (see toRespBitmapMetadata()). */
+    if ((ctx->keyCtx.delBeforeWrite == DEL_KEY_BEFORE_BY_DEL_CMD) &&
+        (info->opcode != _RDB_TYPE_STRING) &&
+        !(info->opcode == _RDB_TYPE_BITMAP && ctx->targetRedisVerVal < VER_VAL(8, 12)))
+        return writeDelKey(ctx);
     return RDB_OK;
 }
 
@@ -1304,10 +1306,13 @@ static RdbRes writeSetRange(RdbxToResp *ctx, uint64_t offset, const char *val, s
     return writevWrap(ctx, iov, 8, &startCmd, 1);
 }
 
-/* Bring the string to its logical length. Trailing zero bytes hold no set bit,
- * so no chunk covers them, yet they are observable through bitmap commands. */
-static RdbRes writeBitmapZeroTail(RdbxToResp *ctx) {
-    if (ctx->bitmapCtx.byteLen == 0) {
+/* Create the string at its logical length, all zeros, by writing its last byte.
+ * Doing it ahead of the chunks lets the target allocate the string once rather
+ * than grow it on every chunk that follows. It also covers the trailing zero
+ * bytes, which hold no set bit, so no chunk reaches them, yet they are
+ * observable through bitmap commands. */
+static RdbRes writeBitmapLength(RdbxToResp *ctx, uint64_t byteLen) {
+    if (byteLen == 0) {
         /* SETRANGE of an empty value doesn't create the key */
         char keyLenStr[32];
         struct iovec iov[4];
@@ -1318,15 +1323,17 @@ static RdbRes writeBitmapZeroTail(RdbxToResp *ctx) {
         IOV_CONST(&iov[3], "\r\n$0\r\n\r\n");
         return writevWrap(ctx, iov, 4, &startCmd, 1);
     }
-    return writeSetRange(ctx, ctx->bitmapCtx.byteLen - 1, "\0", 1);
+    return writeSetRange(ctx, byteLen - 1, "\0", 1);
 }
 
 /* Reached only if the target is older than 8.12 (see resolveSupportRestore()).
- * It doesn't know Roaring bitmaps, so the bitmap is written as a plain string,
- * one SETRANGE per chunk. Neither side builds the full string in one piece,
- * but the target ends up holding all of its logical length, which for a sparse
- * bitmap can be far more than what it takes in the RDB. Hence the size limit. */
+ * It doesn't know Roaring bitmaps, so the bitmap is written as a plain string:
+ * a SETRANGE that sets its length, then one SETRANGE per chunk. Neither side
+ * builds the full string in one piece, but the target ends up holding all of
+ * its logical length, which for a sparse bitmap can be far more than what it
+ * takes in the RDB. Hence the size limit. */
 static RdbRes toRespBitmapMetadata(RdbParser *p, void *userData, uint64_t byteLen, uint64_t numChunks) {
+    UNUSED(numChunks);
     RdbxToResp *ctx = userData;
     uint64_t maxSize = ctx->conf.maxBitmapSize ? ctx->conf.maxBitmapSize : BITMAP_MAX_SIZE_DEFAULT;
 
@@ -1338,28 +1345,22 @@ static RdbRes toRespBitmapMetadata(RdbParser *p, void *userData, uint64_t byteLe
         return (RdbRes) RDBX_ERR_RESP_BITMAP_TOO_LARGE;
     }
 
-    ctx->bitmapCtx.byteLen = byteLen;
-    ctx->bitmapCtx.chunksLeft = numChunks;
+    /* The bitmap becomes a plain string, and as such it must replace a key that
+     * already exists, same as SET does, whereas SETRANGE writes into it. So
+     * delete the key first, whether or not del-key-before-write is configured
+     * (toRespNewKey() leaves it to here). A bitmap of zero length is written by
+     * SET, which needs no DEL. */
+    if (byteLen != 0)
+        IF_NOT_OK_RETURN(writeDelKey(ctx));
 
-    /* No bit is set. All there is to write is zeros */
-    if (numChunks == 0)
-        return writeBitmapZeroTail(ctx);
-
-    return RDB_OK;
+    return writeBitmapLength(ctx, byteLen);
 }
 
 static RdbRes toRespBitmapChunk(RdbParser *p, void *userData, uint64_t offset, RdbBulk chunk) {
     RdbxToResp *ctx = userData;
-    size_t chunkLen = RDB_bulkLen(p, chunk);
 
-    IF_NOT_OK_RETURN(writeSetRange(ctx, offset, chunk, chunkLen));
-
-    /* Chunks arrive in ascending order. If the last one ends before the logical
-     * length, then pad the string with zeros up to it. */
-    if (--ctx->bitmapCtx.chunksLeft == 0 && offset + chunkLen < ctx->bitmapCtx.byteLen)
-        return writeBitmapZeroTail(ctx);
-
-    return RDB_OK;
+    /* The string is already at its full length (see writeBitmapLength()) */
+    return writeSetRange(ctx, offset, chunk, RDB_bulkLen(p, chunk));
 }
 
 /*** Handling raw (RESTORE) ***/
