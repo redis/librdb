@@ -160,6 +160,7 @@ char *substring(char *str, size_t len, char *substr) {
     return NULL;
 }
 
+/* Binary safe, except for M_SUBSTR which takes 'expData' as a C string */
 void assert_file_payload(const char *filename, char *expData, int expLen, MatchType matchType, int expMatch) {
     const char *matchTypeName, *errMsg;
     size_t filelen;
@@ -170,17 +171,17 @@ void assert_file_payload(const char *filename, char *expData, int expLen, MatchT
         case M_PREFIX:
             matchTypeName = "prefix";
             errMsg = "Error: Prefix of file is not as expected";
-            result = strncmp(filedata, expData, expLen);
+            result = (filelen < (size_t) expLen) || memcmp(filedata, expData, expLen);
             break;
         case M_ENTIRE:
             errMsg = "Error: File payload is not as expected";
             matchTypeName = "payload";
-            result = strncmp(filedata, expData, expLen);
+            result = (filelen != (size_t) expLen) || memcmp(filedata, expData, expLen);
             break;
         case M_SUFFIX:
             errMsg = "Error: Suffix of file is not as expected";
             matchTypeName = "suffix";
-            result = strncmp(filedata + filelen - expLen, expData, expLen);
+            result = (filelen < (size_t) expLen) || memcmp(filedata + filelen - expLen, expData, expLen);
             break;
         case M_SUBSTR:
             errMsg = "Error: File does not contains expected substring";

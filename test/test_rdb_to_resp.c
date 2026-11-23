@@ -26,6 +26,31 @@ RdbHandlersDataCallbacks filterSelectCmd = {.handleNewDb = dontPropHandleNewDb};
  * either by applying RESTORE or plain Redis RESP commands.
  */
 
+/* Parse rdb file from ./test/dumps into RESP file 'respfile' and return the
+ * status. If 'err' is given then a failure is expected: the error code is
+ * returned through it and the error is not logged. */
+static RdbStatus rdbToRespFile(const char *rdbfilename, RdbxToRespConf *conf,
+                               const char *respfile, RdbRes *err)
+{
+    char rdbfile[1024];
+    RdbStatus  status;
+    RdbxToResp *rdbToResp;
+
+    snprintf(rdbfile, sizeof(rdbfile), "./test/dumps/%s", rdbfilename);
+    RdbParser *p = RDB_createParserRdb(NULL);
+    RDB_setLogLevel(p, RDB_LOG_ERR);
+    if (err) RDB_setLogger(p, dummyLogger);
+    assert_non_null(RDBX_createReaderFile(p, rdbfile));
+    assert_non_null(rdbToResp = RDBX_createHandlersToResp(p, conf));
+    assert_non_null(RDBX_createRespToFileWriter(p, rdbToResp, respfile));
+    assert_non_null(RDB_createHandlersData(p, &filterSelectCmd, NULL, NULL));
+
+    while ((status = RDB_parse(p)) == RDB_STATUS_WAIT_MORE_DATA);
+    if (err) *err = RDB_getErrorCode(p);
+    RDB_deleteParser(p);
+    return status;
+}
+
 static void testRdbToRespCommon(const char *rdbfilename,
                                 RdbxToRespConf *conf,
                                 char *expResp,
@@ -34,27 +59,10 @@ static void testRdbToRespCommon(const char *rdbfilename,
                                 int expMatch)
 {
     static int outputs = 0;
-    static char rdbfile[1024];
     static char respfile[1024];
 
-    /* build file path of input (rdb) file and output (resp) file */
-    snprintf(rdbfile, sizeof(rdbfile), "./test/dumps/%s", rdbfilename);
     snprintf(respfile, sizeof(respfile), "./test/tmp/out%d_%s.resp", ++outputs, rdbfilename);
-    RdbStatus  status;
-    RdbxToResp *rdbToResp;
-    RdbxRespToFileWriter *writer;
-    RdbParser *p = RDB_createParserRdb(NULL);
-    RDB_setLogLevel(p, RDB_LOG_ERR);
-    assert_non_null(RDBX_createReaderFile(p, rdbfile));
-    assert_non_null(rdbToResp = RDBX_createHandlersToResp(p, conf));
-    assert_non_null(writer = RDBX_createRespToFileWriter(p, rdbToResp, respfile));
-    assert_non_null(RDB_createHandlersData(p, &filterSelectCmd, NULL, NULL));
-
-    while ((status = RDB_parse(p)) == RDB_STATUS_WAIT_MORE_DATA);
-    assert_int_equal( status, RDB_STATUS_OK);
-
-    /* verify number of commands counted */
-    RDB_deleteParser(p);
+    assert_int_equal(rdbToRespFile(rdbfilename, conf, respfile, NULL), RDB_STATUS_OK);
     assert_file_payload(respfile, expResp, expRespLen, matchType, expMatch);
 }
 
@@ -91,15 +99,15 @@ static void test_r2r_string_exact_match(void **state) {
     /* Avoid RESTORE command because corresponding RDB ver. of given Redis ver. < source RDB ver. */
     r2rConf.supportRestore = 1;
     r2rConf.dstRedisVersion = "7.0";   /* resolved to rdb version 10 */
-    testRdbToRespCommon("single_key.rdb", &r2rConf, (char *) expRespData, sizeof(expRespData), M_ENTIRE, 1);
+    testRdbToRespCommon("single_key.rdb", &r2rConf, (char *) expRespData, sizeof(expRespData) - 1, M_ENTIRE, 1);
 
     /* Configure not to use RESTORE command */
     r2rConf.supportRestore = 0;
-    testRdbToRespCommon("single_key.rdb", &r2rConf, (char *) expRespData, sizeof(expRespData), M_ENTIRE, 1);
+    testRdbToRespCommon("single_key.rdb", &r2rConf, (char *) expRespData, sizeof(expRespData) - 1, M_ENTIRE, 1);
 
     /* Default configuration avoid RESTORE */
     r2rConf.supportRestore = 0;
-    testRdbToRespCommon("single_key.rdb", NULL, (char *) expRespData, sizeof(expRespData), M_ENTIRE, 1);
+    testRdbToRespCommon("single_key.rdb", NULL, (char *) expRespData, sizeof(expRespData) - 1, M_ENTIRE, 1);
 }
 
 static void test_r2r_del_before_write_restore_replace(void **state) {
@@ -135,7 +143,7 @@ static void test_r2r_list_exact_match(void **state) {
     memset(&r2rConf, 0, sizeof(r2rConf));
     r2rConf.supportRestore = 1;
     r2rConf.dstRedisVersion = "7.0";
-    testRdbToRespCommon("quicklist2_v11.rdb", &r2rConf, expResp, sizeof(expResp), M_ENTIRE, 1);
+    testRdbToRespCommon("quicklist2_v11.rdb", &r2rConf, expResp, sizeof(expResp) - 1, M_ENTIRE, 1);
 }
 
 static void test_r2r_policy_lfu(void **state) {
@@ -458,33 +466,6 @@ static void test_r2r_array_v14_target_88_restore(void **state) {
 
 /*** Roaring bitmap (RDB v16+, RDB_TYPE_BITMAP) ***/
 
-/* Parse a bitmap fixture to RESP and return the status. The generated RESP is
- * binary (zero bytes), so on success hand it over for a memcmp rather than
- * going through assert_file_payload(), which stops at the first '\0'. */
-static RdbStatus bitmapToResp(const char *rdbfilename, RdbxToRespConf *conf,
-                              char **resp, size_t *respLen, RdbRes *err) {
-    char rdbfile[1024];
-    const char *respfile = "./test/tmp/bitmap.resp";
-    RdbStatus status;
-    RdbxToResp *rdbToResp;
-
-    snprintf(rdbfile, sizeof(rdbfile), "./test/dumps/%s", rdbfilename);
-    RdbParser *p = RDB_createParserRdb(NULL);
-    RDB_setLogLevel(p, RDB_LOG_ERR);
-    RDB_setLogger(p, dummyLogger);
-    assert_non_null(RDBX_createReaderFile(p, rdbfile));
-    assert_non_null(rdbToResp = RDBX_createHandlersToResp(p, conf));
-    assert_non_null(RDBX_createRespToFileWriter(p, rdbToResp, respfile));
-    assert_non_null(RDB_createHandlersData(p, &filterSelectCmd, NULL, NULL));
-
-    while ((status = RDB_parse(p)) == RDB_STATUS_WAIT_MORE_DATA);
-    if (err) *err = RDB_getErrorCode(p);
-    RDB_deleteParser(p);
-
-    if (resp) *resp = readFile(respfile, respLen, NULL);
-    return status;
-}
-
 /* A target older than 8.12 doesn't know Roaring bitmaps, so each one is written
  * as a plain string: a DEL, since a string replaces the key rather than merges
  * into it, a SETRANGE of a single zero byte at the end of the string, which
@@ -494,15 +475,12 @@ static RdbStatus bitmapToResp(const char *rdbfilename, RdbxToRespConf *conf,
  * version. */
 static void test_r2r_bitmap_roaring_target_810(void **state) {
     UNUSED(state);
-    size_t expLen, respLen;
-    char *resp, *exp = readFile(DUMP_FOLDER("bitmap_roaring_v17_target_ver_8.10.resp"), &expLen, NULL);
+    size_t expLen;
+    char *exp = readFile(DUMP_FOLDER("bitmap_roaring_v17_target_ver_8.10.resp"), &expLen, NULL);
 
     for (int supportRestore = 0 ; supportRestore <= 1 ; ++supportRestore) {
         RdbxToRespConf r2rConf = { .dstRedisVersion = "8.10", .supportRestore = supportRestore };
-        assert_int_equal(bitmapToResp("bitmap_roaring_v17.rdb", &r2rConf, &resp, &respLen, NULL), RDB_STATUS_OK);
-        assert_int_equal(respLen, expLen);
-        assert_memory_equal(resp, exp, expLen);
-        free(resp);
+        testRdbToRespCommon("bitmap_roaring_v17.rdb", &r2rConf, exp, (int) expLen, M_ENTIRE, 1);
     }
     free(exp);
 }
@@ -540,11 +518,14 @@ static void test_r2r_bitmap_roaring_restore_footer(void **state) {
         { "bitmap_roaring_sparse_v17.rdb", 17 },
     };
 
+    const char *respfile = TMP_FOLDER("bitmap_footer.resp");
+
     for (unsigned i = 0 ; i < sizeof(tests)/sizeof(tests[0]) ; ++i) {
         char *resp;
         size_t respLen;
         RdbxToRespConf r2rConf = { .dstRedisVersion = "8.12" };
-        assert_int_equal(bitmapToResp(tests[i].rdbfile, &r2rConf, &resp, &respLen, NULL), RDB_STATUS_OK);
+        assert_int_equal(rdbToRespFile(tests[i].rdbfile, &r2rConf, respfile, NULL), RDB_STATUS_OK);
+        resp = readFile(respfile, &respLen, NULL);
         assert_true(respLen > 12);
         assert_memory_equal(resp + respLen - 2, "\r\n", 2);
         assert_int_equal((unsigned char) resp[respLen - 12], tests[i].rdbVer);
@@ -562,16 +543,18 @@ static void test_r2r_bitmap_roaring_max_size(void **state) {
     RdbRes err;
     char *resp;
     size_t respLen;
+    const char *respfile = TMP_FOLDER("bitmap_max_size.resp");
 
     RdbxToRespConf r2rConf = { .dstRedisVersion = "8.10" };
-    assert_int_equal(bitmapToResp("bitmap_roaring_sparse_v17.rdb", &r2rConf, &resp, &respLen, &err), RDB_STATUS_ERROR);
+    assert_int_equal(rdbToRespFile("bitmap_roaring_sparse_v17.rdb", &r2rConf, respfile, &err), RDB_STATUS_ERROR);
     assert_int_equal(err, RDBX_ERR_RESP_BITMAP_TOO_LARGE);
+    resp = readFile(respfile, &respLen, NULL);
     assert_int_equal(respLen, 0);
     free(resp);
 
     /* one byte short of the bitmap */
     r2rConf.maxBitmapSize = 1024 * 1024 * 1024;
-    assert_int_equal(bitmapToResp("bitmap_roaring_sparse_v17.rdb", &r2rConf, NULL, NULL, &err), RDB_STATUS_ERROR);
+    assert_int_equal(rdbToRespFile("bitmap_roaring_sparse_v17.rdb", &r2rConf, respfile, &err), RDB_STATUS_ERROR);
     assert_int_equal(err, RDBX_ERR_RESP_BITMAP_TOO_LARGE);
 
     r2rConf.maxBitmapSize = 1024 * 1024 * 1024 + 1;
@@ -580,14 +563,11 @@ static void test_r2r_bitmap_roaring_max_size(void **state) {
         "*4\r\n$8\r\nSETRANGE\r\n$9\r\nbm_sparse\r\n$10\r\n1073741824\r\n$1\r\n\x00\r\n"
         "*4\r\n$8\r\nSETRANGE\r\n$9\r\nbm_sparse\r\n$1\r\n0\r\n$1\r\n\x04\r\n"
         "*4\r\n$8\r\nSETRANGE\r\n$9\r\nbm_sparse\r\n$10\r\n1073741824\r\n$1\r\n\x10\r\n";
-    assert_int_equal(bitmapToResp("bitmap_roaring_sparse_v17.rdb", &r2rConf, &resp, &respLen, NULL), RDB_STATUS_OK);
-    assert_int_equal(respLen, sizeof(expResp) - 1);
-    assert_memory_equal(resp, expResp, respLen);
-    free(resp);
+    testRdbToRespCommon("bitmap_roaring_sparse_v17.rdb", &r2rConf, expResp, sizeof(expResp) - 1, M_ENTIRE, 1);
 
     /* The limit is not relevant to a target that gets the bitmap with RESTORE */
     RdbxToRespConf r2rConf812 = { .dstRedisVersion = "8.12", .maxBitmapSize = 1 };
-    assert_int_equal(bitmapToResp("bitmap_roaring_sparse_v17.rdb", &r2rConf812, NULL, NULL, NULL), RDB_STATUS_OK);
+    testRdbToRespCommon("bitmap_roaring_sparse_v17.rdb", &r2rConf812, "RESTORE", 7, M_SUBSTR, 1);
 }
 
 /* A source that is not newer than the target lets del-key-before-write be
@@ -601,17 +581,13 @@ static void test_r2r_bitmap_roaring_del_key_before_write(void **state) {
         "*2\r\n$3\r\nDEL\r\n$2\r\nbm\r\n"
         "*4\r\n$8\r\nSETRANGE\r\n$2\r\nbm\r\n$1\r\n0\r\n$1\r\n\x00\r\n"
         "*4\r\n$8\r\nSETRANGE\r\n$2\r\nbm\r\n$1\r\n0\r\n$1\r\n\x80\r\n";
-    char *resp;
-    size_t respLen;
 
     for (int supportRestore = 0 ; supportRestore <= 1 ; ++supportRestore) {
         for (int delKeyBeforeWrite = 0 ; delKeyBeforeWrite <= 1 ; ++delKeyBeforeWrite) {
             RdbxToRespConf r2rConf = { .dstRedisVersion = "8.10", .supportRestore = supportRestore,
                                        .delKeyBeforeWrite = delKeyBeforeWrite };
-            assert_int_equal(bitmapToResp("bitmap_roaring_old_rdb_v12.rdb", &r2rConf, &resp, &respLen, NULL), RDB_STATUS_OK);
-            assert_int_equal(respLen, sizeof(expResp) - 1);
-            assert_memory_equal(resp, expResp, respLen);
-            free(resp);
+            testRdbToRespCommon("bitmap_roaring_old_rdb_v12.rdb", &r2rConf,
+                                expResp, sizeof(expResp) - 1, M_ENTIRE, 1);
         }
     }
 }
