@@ -323,8 +323,9 @@ typedef struct RdbHandlersStructCallbacks {
     RdbRes (*handleStreamLP)(RdbParser *p, void *userData, RdbBulk nodekey, RdbBulk streamLP);
 
     /* Callback to handle a Roaring bitmap value (RDB_TYPE_BITMAP, v16+). `byteLen` is the
-     * logical length of the bitmap in bytes, as a string bitmap. `roaring` is the bitmap
-     * in the 64-bit portable serialization format of Roaring (RoaringFormatSpec). */
+     * length in bytes of the equivalent plain string bitmap (what STRLEN returns), not
+     * the size of the serialized data. `roaring` is the bitmap in the 64-bit portable
+     * serialization format of Roaring (RoaringFormatSpec). */
     RdbRes (*handleBitmapRoaring)(RdbParser *p, void *userData, uint64_t byteLen, RdbBulk roaring);
 
 } RdbHandlersStructCallbacks;

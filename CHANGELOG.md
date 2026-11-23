@@ -11,6 +11,9 @@
   `RdbHandlersStructCallbacks`, `handleBitmapMetadata` and `handleBitmapChunk`
   at the end of `RdbHandlersDataCallbacks`, and `maxBitmapSize` at the end of
   `RdbxToRespConf`. Applications must be recompiled.
+- **SSL/TLS error codes renumbered**: `RDBX_ERR_SSL_*` now start at an explicit
+  base (`_RDB_ERR_EXTENSION_FIRST + 0x100`), so that codes added before them no
+  longer shift their values. All other error codes keep their values.
 
 ### New Features
 - **RDB v17 Support (Redis 8.12), part 1 - set member expiration**: accept format

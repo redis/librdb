@@ -52,18 +52,16 @@ typedef enum {
     RDBX_ERR_RESP2REDIS_MAX_RETRIES,
     RDBX_ERR_RESP2REDIS_SET_TIMEOUT,
     RDBX_ERR_RESP2REDIS_AUTH_FAILED,
+    RDBX_ERR_RESP_BITMAP_TOO_LARGE,  /* exceeds RdbxToRespConf.maxBitmapSize (target older than 8.12) */
 
-    /* SSL/TLS errors */
-    RDBX_ERR_SSL_INIT_FAILED,
+    /* SSL/TLS errors. Explicit base, so adding codes above won't shift these */
+    RDBX_ERR_SSL_INIT_FAILED = _RDB_ERR_EXTENSION_FIRST + 0x100,
     RDBX_ERR_SSL_CTX_CREATE_FAILED,
     RDBX_ERR_SSL_CERT_LOAD_FAILED,
     RDBX_ERR_SSL_KEY_LOAD_FAILED,
     RDBX_ERR_SSL_CA_LOAD_FAILED,
     RDBX_ERR_SSL_HANDSHAKE_FAILED,
     RDBX_ERR_SSL_CONNECTION_FAILED,
-
-    /* rdb2resp: bitmap exceeds RdbxToRespConf.maxBitmapSize (target older than 8.12) */
-    RDBX_ERR_RESP_BITMAP_TOO_LARGE,
 } RdbxRes;
 
 /****************************************************************
