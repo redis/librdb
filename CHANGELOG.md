@@ -61,6 +61,12 @@
     than `RdbxToRespConf.maxBitmapSize` (`--max-bitmap-size`), 512MB by default.
 
 ### Bug Fixes
+- **Redis loader error attribution with deep pipelines**: the ring that records
+  in-flight commands (key, command name, RESTORE size) held 400 entries while
+  `RDBX_setPipelineDepth()` allows up to 1000. With more than 400 commands in
+  flight, entries were overwritten, so an error reply could name the wrong key or
+  command, and the masking of `RESTOREMODAUX` / `BLESS` "no such key" errors could
+  apply to the wrong command. The ring is now sized by `PIPELINE_DEPTH_MAX`.
 - **Listpacks saved by Redis 8.8 - 8.10 (RDB v14/v15)**: those versions wrote
   the backlen of listpack entries whose encoded length is exactly 16383, 2097151
   or 268435455 one byte shorter than every other Redis version (redis/redis#15151,
