@@ -70,6 +70,16 @@ static void test_rdb_cli_json(void **state) {
     assert_json_equal(DUMP_FOLDER("multiple_lists_strings_no_aux.json"), "./test/tmp/out.json", 0);
 }
 
+/* 'bm_sparse' takes 1GB + 1 bytes as a plain string, which is what a target
+ * older than 8.12 gets. That is above the default limit of 512MB, so it takes
+ * --max-bitmap-size to convert it: a SETRANGE of the length and one per chunk. */
+static void test_rdb_cli_max_bitmap_size(void **state) {
+    UNUSED(state);
+    assert_string_equal(
+        runSystemCmd("$RDB_CLI_CMD ./test/dumps/bitmap_roaring_sparse_v17.rdb resp -t 8.10 --max-bitmap-size 1073741825 | grep -a -c SETRANGE"),
+        "3\n");
+}
+
 static void test_rdb_cli_resp_to_redis(void **state) {
     UNUSED(state);
     test_rdb_cli_resp_common(DUMP_FOLDER("multiple_lists_strings.rdb"));
@@ -136,6 +146,14 @@ static void test_rdb_cli_filter_type(void **state) {
     assert_string_equal(
         runSystemCmd(" $RDB_CLI_CMD ./test/dumps/multiple_lists_strings.rdb -T str print -k \"%%k\" | sort"),
         "mylist1\nmylist2\nmylist3\n");
+
+    /* roaring bitmap (RDB v16+) is a type of its own. %%i counts its chunks */
+    assert_string_equal(
+        runSystemCmd(" $RDB_CLI_CMD ./test/dumps/bitmap_roaring_v17.rdb -t bitmap print -k \"%%k,%%t,%%i\" | LC_ALL=C sort"),
+        "bm_mixed,bitmap,3\nbm_small,bitmap,1\nbm_zero,bitmap,0\n");
+
+    assert_string_equal(
+        runSystemCmd(" $RDB_CLI_CMD ./test/dumps/bitmap_roaring_v17.rdb -T bitmap print -k \"%%k\""), "");
 }
 
 static void test_rdb_cli_filter_expire(void **state) {
@@ -271,6 +289,7 @@ int group_test_rdb_cli(void) {
 
     const struct CMUnitTest tests[] = {
             cmocka_unit_test(test_rdb_cli_json),
+            cmocka_unit_test(test_rdb_cli_max_bitmap_size),
             cmocka_unit_test_setup(test_rdb_cli_resp_to_redis, setupTest),
             cmocka_unit_test_setup(test_rdb_cli_filter_db, setupTest),
             cmocka_unit_test_setup(test_rdb_cli_print_noevict, setupTest),

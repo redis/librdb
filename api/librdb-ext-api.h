@@ -52,15 +52,16 @@ typedef enum {
     RDBX_ERR_RESP2REDIS_MAX_RETRIES,
     RDBX_ERR_RESP2REDIS_SET_TIMEOUT,
     RDBX_ERR_RESP2REDIS_AUTH_FAILED,
+    RDBX_ERR_RESP_BITMAP_TOO_LARGE,  /* exceeds RdbxToRespConf.maxBitmapSize (target older than 8.12) */
 
-    /* SSL/TLS errors */
-    RDBX_ERR_SSL_INIT_FAILED,
+    /* SSL/TLS errors. Explicit base, so adding codes above won't shift these */
+    RDBX_ERR_SSL_INIT_FAILED = _RDB_ERR_EXTENSION_FIRST + 0x100,
     RDBX_ERR_SSL_CTX_CREATE_FAILED,
     RDBX_ERR_SSL_CERT_LOAD_FAILED,
     RDBX_ERR_SSL_KEY_LOAD_FAILED,
     RDBX_ERR_SSL_CA_LOAD_FAILED,
     RDBX_ERR_SSL_HANDSHAKE_FAILED,
-    RDBX_ERR_SSL_CONNECTION_FAILED,    
+    RDBX_ERR_SSL_CONNECTION_FAILED,
 } RdbxRes;
 
 /****************************************************************
@@ -200,6 +201,16 @@ typedef struct RdbxToRespConf {
      * then its aux-value is being SCRIPT LOAD (Compatible with Redis Ent. RDB 
      * files that can store scripts in the auxiliary section). */
      int scriptsInAux;
+
+    /* maxBitmapSize - A Roaring bitmap (RDB v16+) is restored as is on a target
+     * that knows the type (Redis 8.12+). An older target can only hold it as a
+     * plain string, so there the bitmap gets decoded into SETRANGE commands and
+     * the target allocates its full logical length, which for a sparse bitmap
+     * can be far more than what it takes in the RDB. Parsing fails on a bitmap
+     * whose logical length, in bytes, exceeds this value. 0 stands for the
+     * default of 512MB, the longest string Redis accepts by default
+     * (proto-max-bulk-len). */
+     uint64_t maxBitmapSize;
 
 } RdbxToRespConf;
 

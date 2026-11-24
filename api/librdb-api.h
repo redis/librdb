@@ -101,6 +101,8 @@ typedef enum RdbRes {
     RDB_ERR_HASH_TMPL_INVLD,      /* Malformed hash-template record or REF payload (v15) */
     RDB_ERR_HASH_TMPL_UNKNOWN_ID,   /* REF-encoded hash references an unknown template id (v15) */
     RDB_ERR_SET_EXPIRE_INTEG_CHECK, /* Set member expiry out of range (v17) */
+    RDB_ERR_BITMAP_INTEG_CHECK,   /* Malformed Roaring bitmap payload (v16) */
+    RDB_ERR_BITMAP_INVALID_STATE, /* Internal: unexpected state while parsing a bitmap (v16) */
 
     /*** api-ext error codes (see file: rp-ext-api.h) ***/
     _RDB_ERR_EXTENSION_FIRST = 0x1000,
@@ -320,6 +322,12 @@ typedef struct RdbHandlersStructCallbacks {
     /* Callback to handle a stream key with listpack value */
     RdbRes (*handleStreamLP)(RdbParser *p, void *userData, RdbBulk nodekey, RdbBulk streamLP);
 
+    /* Callback to handle a Roaring bitmap value (RDB_TYPE_BITMAP, v16+). `byteLen` is the
+     * length in bytes of the equivalent plain string bitmap (what STRLEN returns), not
+     * the size of the serialized data. `roaring` is the bitmap in the 64-bit portable
+     * serialization format of Roaring (RoaringFormatSpec). */
+    RdbRes (*handleBitmapRoaring)(RdbParser *p, void *userData, uint64_t byteLen, RdbBulk roaring);
+
 } RdbHandlersStructCallbacks;
 
 /****************************************************************
@@ -393,6 +401,24 @@ typedef struct RdbHandlersDataCallbacks {
     RdbRes (*handleArrayMetadata)(RdbParser *p, void *userData, uint64_t count, uint64_t insertIdx);
     /* Callback to handle a single array element */
     RdbRes (*handleArrayElement)(RdbParser *p, void *userData, uint64_t idx, RdbBulk value);
+
+    /****************************************************************
+     * Bitmap cb (RDB_TYPE_BITMAP, v16+) - invoked in this order per bitmap key:
+     *   handleBitmapMetadata(byteLen, numChunks)           [once]
+     *   handleBitmapChunk(offset, chunk)                   [repeated numChunks times, ascending offset]
+     *
+     * A Roaring bitmap is reported as the plain string bitmap it stands for,
+     * without ever building that string: `byteLen` is its length in bytes and
+     * each chunk carries the bytes of it that start at byte `offset`. There is
+     * one chunk per Roaring container, of at most 8192 bytes, trimmed so that
+     * its first and last bytes are not zero. Chunks don't overlap, and every
+     * byte that no chunk covers is zero - including up to `byteLen`, which
+     * may lie beyond the end of the last chunk.
+     ****************************************************************/
+    /* Callback to handle metadata for a bitmap */
+    RdbRes (*handleBitmapMetadata)(RdbParser *p, void *userData, uint64_t byteLen, uint64_t numChunks);
+    /* Callback to handle a chunk of consecutive bytes of a bitmap */
+    RdbRes (*handleBitmapChunk)(RdbParser *p, void *userData, uint64_t offset, RdbBulk chunk);
 
 } RdbHandlersDataCallbacks;
 
@@ -693,6 +719,7 @@ typedef enum RdbDataType {
     RDB_DATA_TYPE_STREAM,
     RDB_DATA_TYPE_FUNCTION,
     RDB_DATA_TYPE_ARRAY,   /* Sparse array (RDB v14+, RDB_TYPE_ARRAY) */
+    RDB_DATA_TYPE_BITMAP,  /* Roaring bitmap (RDB v16+, RDB_TYPE_BITMAP) */
     RDB_DATA_TYPE_MAX
 } RdbDataType;
 

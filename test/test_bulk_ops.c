@@ -112,6 +112,15 @@ RdbRes handle_hash_field(RdbParser *p, void *userData, RdbBulk field, RdbBulk va
     return RDB_OK;
 }
 
+static int numBitmapChunksCb; /* verify the bitmap callbacks were really reached */
+
+RdbRes handle_bitmap_chunk(RdbParser *p, void *userData, uint64_t offset, RdbBulk chunk) {
+    UNUSED(userData, offset);
+    ++numBitmapChunksCb;
+    testBulkOps(p, chunk, 0);
+    return RDB_OK;
+}
+
 /* Dumps to iterate. The hash-template dumps (v15) are included since they
  * pass field names and values to the callbacks as referenced bulks. */
 static const char *bulkOpsDumps[] = {
@@ -124,6 +133,8 @@ static const char *bulkOpsDumps[] = {
         DUMP_FOLDER("compact_backlen_v14.rdb"),
         DUMP_FOLDER("compact_backlen_tmpl_v15.rdb"),
         DUMP_FOLDER("compact_backlen_tmpl_self_v15.rdb"),
+        /* roaring bitmap (v16): chunks are referenced bulks into a scratch buffer */
+        DUMP_FOLDER("bitmap_roaring_v17.rdb"),
 };
 #define NUM_BULK_OPS_DUMPS (sizeof(bulkOpsDumps) / sizeof(bulkOpsDumps[0]))
 
@@ -204,6 +215,7 @@ static void test_data_handlers_callbacks_bulk_ops (void **state) {
                 .handleStringValue = handle_string_value,
                 .handleListItem = handle_list_element,
                 .handleHashField = handle_hash_field,
+                .handleBitmapChunk = handle_bitmap_chunk,
         };
 
         RdbParser *parser = RDB_createParserRdb(&mem);
@@ -216,6 +228,7 @@ static void test_data_handlers_callbacks_bulk_ops (void **state) {
       }
     }
     assert_true(numHashFieldsCb > 0);
+    assert_true(numBitmapChunksCb > 0);
 }
 
 /*************************** group_rdb_to_json *******************************/

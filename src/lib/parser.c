@@ -35,6 +35,7 @@
 #include "../../deps/redis/stream.h"
 #include "../../deps/redis/t_zset.h"
 #include "../../deps/redis/sha256.h"
+#include "roaring.h"
 
 #define DONE_FILL_BULK SIZE_MAX
 
@@ -95,6 +96,8 @@ struct ParsingElementInfo peInfo[PE_MAX] = {
         [PE_STREAM_LP]        = {elementStreamLP, "elementStreamLP", "Parsing stream Listpack"},
         /* array (sparse-array, v14+) */
         [PE_ARRAY]            = {elementArray, "elementArray", "Parsing sparse array"},
+        /* roaring bitmap (v16+) */
+        [PE_BITMAP]           = {elementBitmap, "elementBitmap", "Parsing roaring bitmap"},
         /* hash templates (v15+) */
         [PE_HASH_TEMPLATE]      = {elementHashTemplate, "elementHashTemplate", "Parsing hash template record"},
         [PE_HASH_TMPL_LP_REF]   = {elementHashTmplLpRef, "elementHashTmplLpRef", "Parsing template hash (listpack ref)"},
@@ -139,6 +142,8 @@ struct ParsingElementInfo peInfo[PE_MAX] = {
         [PE_RAW_KEY_META]     = {elementRawKeyMeta, "elementRawKeyMeta", "Parsing raw key metadata"},
         /* sparse array (RDB v14) */
         [PE_RAW_ARRAY]        = {elementRawArray, "elementRawArray", "Parsing raw sparse array"},
+        /* roaring bitmap (RDB v16) */
+        [PE_RAW_BITMAP]       = {elementRawBitmap, "elementRawBitmap", "Parsing raw roaring bitmap"},
         /* hash templates (v15+) */
         [PE_RAW_HASH_TMPL_LP_REF]   = {elementRawHashTmplLpRef, "elementRawHashTmplLpRef", "Raw template hash (listpack ref)"},
         [PE_RAW_HASH_TMPL_ARRAY_REF]= {elementRawHashTmplArrayRef, "elementRawHashTmplArrayRef", "Raw template hash (array ref)"},
@@ -679,6 +684,9 @@ _LIBRDB_API int RDB_handleByLevel(RdbParser *p, RdbDataType type, RdbHandlersLev
         case RDB_DATA_TYPE_ARRAY:
             p->handleTypeObjByLevel[RDB_TYPE_ARRAY] = lvl;
             break;
+        case RDB_DATA_TYPE_BITMAP:
+            p->handleTypeObjByLevel[RDB_TYPE_BITMAP] = lvl;
+            break;
         default:
             return 1;
     }
@@ -748,6 +756,9 @@ static inline RdbDataType getDataType(int opcode) {
 
         case RDB_TYPE_ARRAY:
             return RDB_DATA_TYPE_ARRAY;
+
+        case RDB_TYPE_BITMAP:
+            return RDB_DATA_TYPE_BITMAP;
         default:
             return RDB_DATA_TYPE_MAX;
     }
@@ -1759,6 +1770,8 @@ RdbStatus elementNextRdbType(RdbParser *p) {
         case RDB_TYPE_STREAM_LISTPACKS_5:   return nextParsingElementKeyValue(p, PE_RAW_STREAM_LP, PE_STREAM_LP); /*(v14+)*/
         /* array */    
         case RDB_TYPE_ARRAY:                return nextParsingElementKeyValue(p, PE_RAW_ARRAY, PE_ARRAY); /*(v14+)*/
+        /* roaring bitmap */
+        case RDB_TYPE_BITMAP:               return nextParsingElementKeyValue(p, PE_RAW_BITMAP, PE_BITMAP); /*(v16+)*/
 
         /* hash templates (v15+)- REF forms resolve their field names
          * from the template registry populated by RDB_OPCODE_HASH_TEMPLATE. 
@@ -1791,12 +1804,6 @@ RdbStatus elementNextRdbType(RdbParser *p) {
         case RDB_OPCODE_FUNCTION:
             RDB_reportError(p, RDB_ERR_PRERELEASE_FUNC_FORMAT_NOT_SUPPORTED,
                             "Pre-release function format not supported.");
-            return RDB_STATUS_ERROR;
-
-        case RDB_TYPE_BITMAP:
-            RDB_reportError(p, RDB_ERR_NOT_SUPPORTED_RDB_ENCODING_TYPE,
-                            "RDB type %d (roaring bitmap, Redis 8.12 with 'bitmap-default-roaring yes') "
-                            "is not supported yet", p->currOpcode);
             return RDB_STATUS_ERROR;
 
         default:
@@ -3143,6 +3150,101 @@ RdbStatus elementArray(RdbParser *p) {
                             "elementArray(): invalid parsing element state: %d", ctx->state);
             return RDB_STATUS_ERROR;
     }
+}
+
+/*** roaring bitmap (v16) ***/
+
+RdbStatus bitmapValidateIntegrity(RdbParser *p, const unsigned char *roaring, size_t len,
+                                  uint64_t byteLen, uint64_t *numContainers) {
+    RoaringReader reader;
+    uint64_t high48, count = 0;
+    uint32_t first, last;
+    int res;
+
+    if (byteLen > RDB_BITMAP_MAX_BYTES) {
+        RDB_reportError(p, RDB_ERR_BITMAP_INTEG_CHECK, "Bitmap byte length %llu too large",
+                        (unsigned long long) byteLen);
+        return RDB_STATUS_ERROR;
+    }
+
+    roaringReaderInit(&reader, roaring, len);
+    while ((res = roaringReaderNext(&reader, NULL, &high48, &first, &last)) == 1) {
+        /* Trailing zero bytes extend the logical length without holding any set
+         * bit, so it may lie beyond the last set bit, but never before it. */
+        if (high48 * ROARING_CHUNK_BYTES + last >= byteLen) {
+            RDB_reportError(p, RDB_ERR_BITMAP_INTEG_CHECK,
+                            "Bitmap has a bit set beyond its byte length (%llu)",
+                            (unsigned long long) byteLen);
+            return RDB_STATUS_ERROR;
+        }
+        count++;
+    }
+
+    if (res != 0) {
+        RDB_reportError(p, RDB_ERR_BITMAP_INTEG_CHECK, "Invalid Roaring bitmap payload");
+        return RDB_STATUS_ERROR;
+    }
+
+    if (numContainers) *numContainers = count;
+    return RDB_STATUS_OK;
+}
+
+/* RDB_TYPE_BITMAP: [byte_len][string: serialized 64-bit Roaring bitmap].
+ *
+ * At struct level the serialized bitmap is handed over as is. At data level it
+ * is reported as the string bitmap it stands for, one chunk per container, so
+ * the full (possibly huge and mostly zero) string never gets built. */
+RdbStatus elementBitmap(RdbParser *p) {
+    RdbHandlersLevel lvl = p->elmCtx.key.handleByLevel;
+    BulkInfo *roaringBulk, *scratch;
+    uint64_t byteLen, numChunks, high48;
+    uint32_t first, last;
+    RoaringReader reader;
+
+    IF_NOT_OK_RETURN(rdbLoadLen(p, NULL, &byteLen, NULL, NULL));
+    IF_NOT_OK_RETURN(rdbLoadString(p, (lvl == RDB_LEVEL_STRUCT) ? RQ_ALLOC_APP_BULK : RQ_ALLOC,
+                                   NULL, &roaringBulk));
+
+    /*** ENTER SAFE STATE ***/
+
+    /* Validate it all before reporting any of it */
+    IF_NOT_OK_RETURN(bitmapValidateIntegrity(p, roaringBulk->ref, roaringBulk->len, byteLen, &numChunks));
+
+    p->elmCtx.key.numItemsHint = numChunks;
+
+    if (lvl == RDB_LEVEL_STRUCT) {
+        registerAppBulkForNextCb(p, roaringBulk);
+        CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_STRUCT, rdbStruct.handleBitmapRoaring, byteLen, roaringBulk->ref);
+        return nextParsingElement(p, PE_END_KEY);
+    }
+
+    CALL_HANDLERS_CB(p, NOP, RDB_LEVEL_DATA, rdbData.handleBitmapMetadata, byteLen, numChunks);
+
+    /* Containers are materialized one at a time into a single scratch buffer */
+    IF_NOT_OK_RETURN(allocFromCache(p, ROARING_CHUNK_BYTES, RQ_ALLOC, NULL, &scratch));
+
+    roaringReaderInit(&reader, roaringBulk->ref, roaringBulk->len);
+    while (roaringReaderNext(&reader, scratch->ref, &high48, &first, &last) == 1) {
+        BulkInfo chunk;
+
+        /* Referenced rather than copied (unless the app has its own bulk
+         * allocator). The '\0' termination that it adds lands within scratch. */
+        bulkUnmanagedAlloc(p, last - first + 1, UNMNG_RQ_ALLOC_APP_BULK_REF,
+                           ((char *) scratch->ref) + first, &chunk);
+        if (chunk.ref == NULL) {
+            RDB_reportError(p, RDB_ERR_FAIL_ALLOC, "elementBitmap(): failed to allocate bitmap chunk");
+            return RDB_STATUS_ERROR;
+        }
+
+        registerAppBulkForNextCb(p, &chunk);
+        CALL_HANDLERS_CB(p,
+                         bulkUnmanagedFree(p, &chunk), /*finalize*/
+                         RDB_LEVEL_DATA,
+                         rdbData.handleBitmapChunk,
+                         high48 * ROARING_CHUNK_BYTES + first,
+                         chunk.ref);
+    }
+    return nextParsingElement(p, PE_END_KEY);
 }
 
 /*** hash templates (v15) ***/

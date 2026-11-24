@@ -163,6 +163,7 @@ typedef enum ParsingElementType {
     PE_MODULE_AUX,
     PE_STREAM_LP,
     PE_ARRAY,
+    PE_BITMAP,             /* RDB_TYPE_BITMAP (v16) */
     PE_HASH_TEMPLATE,      /* top-level RDB_OPCODE_HASH_TEMPLATE record (v15) */
     PE_HASH_TMPL_LP_REF,   /* RDB_TYPE_HASH_TMPL_LP_REF (v15) */
     PE_HASH_TMPL_ARRAY_REF,/* RDB_TYPE_HASH_TMPL_ARRAY_REF (v15) */
@@ -195,6 +196,7 @@ typedef enum ParsingElementType {
     PE_RAW_STREAM_LP,
     PE_RAW_KEY_META,
     PE_RAW_ARRAY,
+    PE_RAW_BITMAP,              /* RDB_TYPE_BITMAP (v16) */
     PE_RAW_HASH_TMPL_LP_REF,    /* RDB_TYPE_HASH_TMPL_LP_REF -> self-contained RESTORE (v15) */
     PE_RAW_HASH_TMPL_ARRAY_REF, /* RDB_TYPE_HASH_TMPL_ARRAY_REF -> self-contained RESTORE (v15) */
     PE_RAW_HASH_TMPL_SELF,      /* RDB_TYPE_HASH_TMPL_LP / _ARRAY, self-contained (v15) */
@@ -222,6 +224,10 @@ typedef struct {
     uint64_t count;        /* total elements */
     uint64_t elementsLeft; /* elements remaining to read */
 } ElementArrayCtx;
+
+typedef struct {
+    uint64_t byteLen;      /* logical length of the bitmap, in bytes */
+} ElementRawBitmapCtx;
 
 typedef struct {
     uint64_t left;
@@ -357,6 +363,7 @@ typedef struct ElementCtx {
     ElementRawModuleAux rawModAux;
     ElementRawStreamCtx rawStream;
     ElementRawArrayCtx rawArray;
+    ElementRawBitmapCtx rawBitmap;
 
     int state;  /* parsing-element state */
 } ElementCtx;
@@ -636,6 +643,7 @@ RdbStatus elementFunction(RdbParser *p);
 RdbStatus elementModule(RdbParser *p);
 RdbStatus elementStreamLP(RdbParser *p);
 RdbStatus elementArray(RdbParser *p);
+RdbStatus elementBitmap(RdbParser *p);
 RdbStatus elementHashTemplate(RdbParser *p);
 RdbStatus elementHashTmplLpRef(RdbParser *p);
 RdbStatus elementHashTmplArrayRef(RdbParser *p);
@@ -663,9 +671,17 @@ RdbStatus elementRawModule(RdbParser *p);
 RdbStatus elementRawStreamLP(RdbParser *p);
 RdbStatus elementRawKeyMeta(RdbParser *p);
 RdbStatus elementRawArray(RdbParser *p);
+RdbStatus elementRawBitmap(RdbParser *p);
 RdbStatus elementRawHashTmplLpRef(RdbParser *p);
 RdbStatus elementRawHashTmplArrayRef(RdbParser *p);
 RdbStatus elementRawHashTmplSelfContained(RdbParser *p);
+
+/* Validate the value of RDB_TYPE_BITMAP (v16): 'roaring' is a well-formed
+ * serialized Roaring bitmap and none of its set bits lies beyond 'byteLen'.
+ * Reports RDB_ERR_BITMAP_INTEG_CHECK otherwise. If 'numContainers' is given,
+ * record into it the number of containers. */
+RdbStatus bitmapValidateIntegrity(RdbParser *p, const unsigned char *roaring, size_t len,
+                                  uint64_t byteLen, uint64_t *numContainers);
 
 /* Resolve a saved hash-template id to its registry entry (v15). Reports
  * RDB_ERR_HASH_TMPL_UNKNOWN_ID and returns NULL if unknown. */

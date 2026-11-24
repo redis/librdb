@@ -75,6 +75,23 @@ static int getOptArgVal(int argc, char* argv[], int *at, char *abbrvOpt, char *o
     return 0;
 }
 
+/* Same as getOptArgVal() for a size in bytes, which may exceed the range of int */
+static int getOptArgSize(int argc, char* argv[], int *at, char *abbrvOpt, char *opt, uint64_t *val) {
+    const char *valStr;
+    if (getOptArg(argc, argv, at, abbrvOpt, opt, NULL, &valStr)) {
+        char *end;
+        errno = 0;
+        unsigned long long res = strtoull(valStr, &end, 10);
+        if (errno || end == valStr || *end != '\0' || valStr[0] == '-' || res == 0) {
+            loggerWrap(RDB_LOG_ERR, "Value of %s must be a positive number of bytes", opt);
+            exit(1);
+        }
+        *val = res;
+        return 1;
+    }
+    return 0;
+}
+
 static void logger(RdbLogLevel l, const char *msg) {
     static char *logLevelStr[] = {
             [RDB_LOG_ERR]  = "ERROR :",
@@ -115,8 +132,8 @@ static void printUsage(int shortUsage) {
     printf("\t-s, --show-progress <MBytes>  Show progress to STDOUT after every <MBytes> processed\n");
     printf("\t-k, --key <REGEX>             Include only keys that match REGEX\n");
     printf("\t-K  --no-key <REGEX>          Exclude all keys that match REGEX\n");
-    printf("\t-t, --type <TYPE>             Include only selected TYPE {str|list|set|zset|hash|array|stream|module|func}\n");
-    printf("\t-T, --no-type <TYPE>          Exclude TYPE {str|list|set|zset|hash|array|stream|module|func}\n");
+    printf("\t-t, --type <TYPE>             Include only selected TYPE {str|list|set|zset|hash|array|bitmap|stream|module|func}\n");
+    printf("\t-T, --no-type <TYPE>          Exclude TYPE {str|list|set|zset|hash|array|bitmap|stream|module|func}\n");
     printf("\t-d, --dbnum <DBNUM>           Include only selected db number\n");
     printf("\t-D, --no-dbnum <DBNUM>        Exclude DB number\n");
     printf("\t-e, --expired                 Include only expired keys\n");
@@ -177,6 +194,8 @@ static void printUsage(int shortUsage) {
     printf("\t-e, --enum-commands           Command enumeration and tracing by preceding each generated RESP command\n");
     printf("\t                              with debug command of type: `SET _RDB_CLI_CMD_ID_ <CMD-ID>`\n");
     printf("\t    --scripts-in-aux          For auxiliary field \"lua\", Apply `SCRIPT LOAD <aux-val>` (For RedisEnt.)\n");
+    printf("\t    --max-bitmap-size <BYTES> A target older than 8.12 gets a Roaring bitmap as a plain string. Fail on\n");
+    printf("\t                              a bitmap whose length as a string exceeds this value (default: 512MB)\n");
 }
 
 static RdbRes formatJson(RdbParser *parser, int argc, char **argv) {
@@ -292,6 +311,7 @@ static RdbRes formatRedis(RdbParser *parser, int argc, char **argv) {
         if (getOptArg(argc, argv, &at, "-P", "--password", NULL, &auth.pwd)) continue;
         if (getOptArg(argc, argv, &at, "-e", "--enum-commands", &commandEnum, NULL)) continue;
         if (getOptArg(argc, argv, &at, NULL, "--scripts-in-aux", &(conf.scriptsInAux), NULL)) continue;
+        if (getOptArgSize(argc, argv, &at, NULL, "--max-bitmap-size", &(conf.maxBitmapSize))) continue;
 #ifdef USE_OPENSSL
         if (getOptArg(argc, argv, &at, NULL, "--tls", &useTls, NULL)) continue;
         if (getOptArg(argc, argv, &at, NULL, "--cacert", NULL, &tlsCacert)) continue;
@@ -428,6 +448,7 @@ static RdbRes formatResp(RdbParser *parser, int argc, char **argv) {
         if (getOptArg(argc, argv, &at, "-e", "--enum-commands", &commandEnum, NULL)) continue;
         if (getOptArgVal(argc, argv, &at, "-s", "--start-cmd-num", NULL, &startCmdNum, 1, INT_MAX)) continue;
         if (getOptArg(argc, argv, &at, NULL, "--scripts-in-aux", &(conf.scriptsInAux), NULL)) continue;
+        if (getOptArgSize(argc, argv, &at, NULL, "--max-bitmap-size", &(conf.maxBitmapSize))) continue;
 
         loggerWrap(RDB_LOG_ERR, "Invalid 'resp' [FORMAT_OPTIONS] argument: %s\n", opt);
         printUsage(1);
@@ -459,9 +480,10 @@ int matchRdbDataType(const char *dataTypeStr) {
     if (!strcmp(dataTypeStr, "stream")) return RDB_DATA_TYPE_STREAM;
     if (!strcmp(dataTypeStr, "func")) return RDB_DATA_TYPE_FUNCTION;
     if (!strcmp(dataTypeStr, "array")) return RDB_DATA_TYPE_ARRAY;
+    if (!strcmp(dataTypeStr, "bitmap")) return RDB_DATA_TYPE_BITMAP;
 
     loggerWrap(RDB_LOG_ERR,
-        "Invalid TYPE argument (%s). Valid values: str, list, set, zset, hash, array, module, stream, func",
+        "Invalid TYPE argument (%s). Valid values: str, list, set, zset, hash, array, bitmap, module, stream, func",
         dataTypeStr);
     exit(1);
 }
